@@ -57,6 +57,13 @@ def config [] {
     oclhpp_src: ($lane_dir | path join "OpenCL-CLHPP")
     build_dir: ($lane_dir | path join "build")
     prefix: $env.PREFIX
+    # STABLE symlink indirection: the persistent CMake tree must never see
+    # the per-invocation ephemeral prefixes (host $PREFIX, $BUILD_PREFIX,
+    # per-run flags) or every package build would invalidate the cache.
+    # These links are retargeted to the current run's dirs each invocation;
+    # all paths given to cmake go through them.
+    pfx_link: ($lane_dir | path join "pfx")
+    bld_link: ($lane_dir | path join "bldpfx")
   }
 }
 
@@ -148,7 +155,9 @@ def configure [] {
   print $"configure: ($jobs) parallel link jobs"
   (^cmake ($c.llvm_src | path join "llvm") -G Ninja
     $"-DCMAKE_BUILD_TYPE=Release"
-    $"-DCMAKE_INSTALL_PREFIX=($c.prefix)"
+    $"-DCMAKE_INSTALL_PREFIX=($c.pfx_link)"
+    $"-DCMAKE_C_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-cc"
+    $"-DCMAKE_CXX_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-c++"
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     # scope: full standalone LLVM toolchain (design §3); AMDGPU absent
@@ -176,12 +185,12 @@ def configure [] {
     "-DWITH_ROCM_BACKEND=OFF"
     "-DACPP_COMPILER_FEATURE_PROFILE=full"
     # CUDA: precise conda-forge pieces (cudart/driver stubs + libdevice)
-    $"-DCUDAToolkit_ROOT=($c.prefix)"
-    $"-DCUDA_TOOLKIT_ROOT_DIR=($c.prefix)"
-    $"-DCUDA_DEVICE_LIBS_PATH=($c.prefix)/nvvm/libdevice"
+    $"-DCUDAToolkit_ROOT=($c.pfx_link)"
+    $"-DCUDA_TOOLKIT_ROOT_DIR=($c.pfx_link)"
+    $"-DCUDA_DEVICE_LIBS_PATH=($c.pfx_link)/nvvm/libdevice"
     # OpenCL: ICD loader from conda-forge; kernel headers from pinned checkouts
-    $"-DOpenCL_LIBRARY=($c.prefix)/lib/libOpenCL.so"
-    $"-DOpenCL_INCLUDE_DIR=($c.prefix)/include"
+    $"-DOpenCL_LIBRARY=($c.pfx_link)/lib/libOpenCL.so"
+    $"-DOpenCL_INCLUDE_DIR=($c.pfx_link)/include"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($c.oclh_src)"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-CXX-HEADERS=($c.oclhpp_src)"
     "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
@@ -234,7 +243,7 @@ def build [] {
 
 def install [] {
   let c = (config)
-  ^cmake --install $c.build_dir
+  ^cmake --install $c.build_dir --prefix $c.prefix
   # unversioned lib symlinks conflict with other conda packages' dev files
   for f in [libLLVM.so libLTO.so libRemarks.so libclang.so libclang-cpp.so] {
     let p = ($c.prefix | path join "lib" $f)
@@ -270,6 +279,29 @@ def "main toolchain" [] {
   # which run during the NINJA phase, not configure) need the build dir on
   # CMAKE_PREFIX_PATH to find the freshly generated LLVMConfig.cmake.
   let c = (config)
+  mkdir $c.cache
+  # retarget stable prefix links to this run's ephemeral dirs
+  for pair in [[$c.pfx_link $env.PREFIX] [$c.bld_link $env.BUILD_PREFIX]] {
+    if ($pair.0 | path exists) { rm $pair.0 }
+    ^ln -s $pair.1 $pair.0
+  }
+  # sanitize compiler/link flags: replace real prefixes with the stable
+  # links and drop per-run -fdebug-prefix-map entries, so the flags baked
+  # into the CMake cache are IDENTICAL across invocations.
+  for v in [CFLAGS CXXFLAGS CPPFLAGS LDFLAGS] {
+    let val = ($env | get -o $v | default "")
+    if $val != "" {
+      let cleaned = ($val
+        | str replace --all $env.PREFIX ($c.pfx_link | into string)
+        | str replace --all $env.BUILD_PREFIX ($c.bld_link | into string)
+        | split row " "
+        | where {|t| not ($t | str starts-with "-fdebug-prefix-map") }
+        | str join " ")
+      load-env { $v: $cleaned }
+    }
+  }
+  # ccache: key on compiler CONTENT (env recreation changes mtimes)
+  $env.CCACHE_COMPILERCHECK = "content"
   $env.CMAKE_PREFIX_PATH = ($c.build_dir + (if (is-windows) { ";" } else { ":" }) + ($env.CMAKE_PREFIX_PATH? | default ""))
   fetch-sources
   configure

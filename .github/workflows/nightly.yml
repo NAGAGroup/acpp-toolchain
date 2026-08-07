@@ -1,70 +1,63 @@
-# Nightly lane: rebuild the acpp-*-nightly suite from AdaptiveCpp develop
-# HEAD daily, gate on the test suite, publish to code-accelerate.
-#
-# Caching: ccache only (GH cache limits rule out persisting the LLVM build
-# tree). A cold build is ~2.5h on a hosted runner; warm ~45-60 min.
+# Nightly lane (v3): daily rebuild from AdaptiveCpp develop HEAD, skipped when
+# develop hasn't moved. Same staging-recipe build path as release, with the
+# date-injected version (ACPP_NIGHTLY_DATE).
 name: nightly
 on:
   schedule:
     - cron: "17 9 * * *" # daily; 24h cadence per design
   workflow_dispatch:
 
+env:
+  CCACHE_DIR: /home/runner-ccache
+
 jobs:
-  nightly-linux:
+  upstream-check:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.upstream.outputs.changed }}
+      sha: ${{ steps.upstream.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Skip if develop unchanged
+      - name: Check AdaptiveCpp develop HEAD
         id: upstream
         run: |
           SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp develop | cut -f1)
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          LAST=$(gh variable get NIGHTLY_LAST_SHA 2>/dev/null || echo none)
+          LAST=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
           echo "changed=$([ "$SHA" != "$LAST" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
+
+  build-linux:
+    needs: upstream-check
+    if: needs.upstream-check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: "cirun-linux-builder--${{ github.run_id }}"
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
-        if: steps.upstream.outputs.changed == 'true'
         with:
           cache: true
-      - uses: hendrikmuhs/ccache-action@v1.2
-        if: steps.upstream.outputs.changed == 'true'
+      - name: ccache cache
+        uses: actions/cache@v4
         with:
-          key: nightly-llvm21
-          max-size: 6G
-      - name: Build + package nightly suite
-        if: steps.upstream.outputs.changed == 'true'
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-nightly-${{ github.sha }}
+          restore-keys: |
+            ccache-nightly-
+            ccache-release-
+      - name: Build nightly suite
         run: |
-          export ACPP_NIGHTLY_DATE=$(date +%Y.%m.%d)
-          export ACPP_BUILD_CACHE=$PWD/.build-cache
-          export NAGA_ACPP_CCACHE_DIR=$HOME/.cache/ccache
-          for p in acpp-runtime-nightly acpp-nightly acpp-llvm-dev-nightly acpp-tools-nightly acpp-lldb-nightly acpp-clang-activation-nightly acpp-clangxx-activation-nightly; do
-            pixi publish --path nightly/$p --target-dir output
-          done
-          mkdir -p output/linux-64 && mv output/*.conda output/linux-64/ || true
-          pixi exec rattler-index fs $PWD/output
-      - name: Test gate (SYCL smoke, generic/omp)
-        if: steps.upstream.outputs.changed == 'true'
-        run: |
-          mkdir smoke && cd smoke
-          printf '[workspace]\nname="s"\nchannels=["file://%s/output","conda-forge"]\nplatforms=["linux-64"]\n[dependencies]\nacpp-nightly="*"\n' "$PWD/.." > pixi.toml
-          cp ../shared/tests/hello.cpp .
-          pixi run bash -c 'acpp -O2 -o hello hello.cpp && ACPP_VISIBILITY_MASK=omp ./hello'
-      - name: Publish (trusted publishing)
-        if: steps.upstream.outputs.changed == 'true'
-        run: |
-          export ACPP_NIGHTLY_DATE=$(date +%Y.%m.%d)
-          export ACPP_BUILD_CACHE=$PWD/.build-cache
-          pixi publish --target-channel https://prefix.dev/code-accelerate \
-            --path nightly/acpp-runtime-nightly || true
-          for p in acpp-nightly acpp-llvm-dev-nightly acpp-tools-nightly acpp-lldb-nightly acpp-clang-activation-nightly acpp-clangxx-activation-nightly; do
-            pixi publish --target-channel https://prefix.dev/code-accelerate --path nightly/$p || true
-          done
-      - name: Record built SHA
-        if: steps.upstream.outputs.changed == 'true'
-        run: gh variable set NIGHTLY_LAST_SHA --body "${{ steps.upstream.outputs.sha }}"
+          sudo mkdir -p "$CCACHE_DIR" && sudo chown "$(id -u)" "$CCACHE_DIR"
+          export ACPP_NIGHTLY_DATE=$(date -u +%Y.%m.%d)
+          pixi run build-nightly
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-linux-64
+          path: output/**/*.conda
+          retention-days: 14
+      - name: Record built develop SHA
+        run: gh variable set NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream-check.outputs.sha }}"
         env:
           GH_TOKEN: ${{ github.token }}
-    permissions:
-      id-token: write # trusted publishing (configure on prefix.dev: Trusted Publishers)
-      contents: read
+      # - name: Publish (OIDC trusted publishing)  # enable after channel setup

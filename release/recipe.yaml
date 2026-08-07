@@ -45,6 +45,9 @@ outputs:
       script:
         interpreter: nu
         file: ../shared/build-stage.nu
+        env:
+          # CI forwards its cache dir; empty means "use ccache defaults"
+          CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
     requirements:
       build:
         - ${{ compiler('c') }}

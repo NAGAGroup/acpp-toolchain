@@ -1,60 +1,51 @@
-# Release lane: build + gate + publish the release suite. Manual dispatch
-# (or repo tag) with an approval-gated environment before publish.
+# Release lane (v3): render-gate on a free runner, build+test the full
+# multi-output staging recipe on the Cirun/Azure builder, upload artifacts.
+# Publish to prefix.dev goes through OIDC trusted publishing once the channel
+# trusted publisher is registered (design v3 §D4) — gated stub below.
 name: release
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
 
+env:
+  CCACHE_DIR: /home/runner-ccache # forwarded into the rattler-build script env
+
 jobs:
-  build-linux:
+  render-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-      - uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: release-llvm20
-          max-size: 6G
-      - name: Build + package release suite
-        run: |
-          export ACPP_BUILD_CACHE=$PWD/.build-cache
-          export NAGA_ACPP_CCACHE_DIR=$HOME/.cache/ccache
-          for p in acpp-runtime acpp acpp-llvm-dev acpp-tools acpp-lldb acpp-clang-activation acpp-clangxx-activation acpp-runtime-cuda acpp-runtime-intel; do
-            pixi publish --path release/$p --target-dir output
-          done
-          mkdir -p output/linux-64 && mv output/*.conda output/linux-64/ || true
-          pixi exec rattler-index fs $PWD/output
-      - name: Test gate (smoke + upstream suite, generic/omp)
-        run: |
-          mkdir smoke && cd smoke
-          printf '[workspace]\nname="s"\nchannels=["file://%s/output","conda-forge"]\nplatforms=["linux-64"]\n[dependencies]\nacpp="*"\nacpp-clang_linux-64="*"\nacpp-clangxx_linux-64="*"\ncmake=">=3.24"\nninja="*"\nlibboost-devel="*"\n' "$PWD/.." > pixi.toml
-          cp ../shared/tests/hello.cpp .
-          pixi run bash -c 'acpp -O2 -o hello hello.cpp && ACPP_VISIBILITY_MASK=omp ./hello'
-          pixi run bash -c 'cmake -B tests-build -GNinja $CMAKE_ARGS -DACPP_TARGETS=generic ../.build-cache/release/AdaptiveCpp/tests && cmake --build tests-build --parallel 4 && ACPP_VISIBILITY_MASK=omp ./tests-build/sycl_tests'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-packages
-          path: output/linux-64/*.conda
+      - run: pixi run render-release > /dev/null
 
-  publish:
-    needs: build-linux
-    runs-on: ubuntu-latest
-    environment: publish # approval gate: configure reviewers in repo settings
-    permissions:
-      id-token: write
-      contents: read
+  build-linux:
+    needs: render-check
+    runs-on: "cirun-linux-builder--${{ github.run_id }}"
+    timeout-minutes: 480
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
-      - uses: actions/download-artifact@v4
         with:
-          name: release-packages
-          path: output/linux-64
-      - name: Upload to code-accelerate
+          cache: true
+      - name: ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-release-${{ github.sha }}
+          restore-keys: |
+            ccache-release-
+      - name: Build release suite (staging + 9 outputs, tests included)
         run: |
-          for f in output/linux-64/*.conda; do
-            pixi upload prefix --channel code-accelerate "$f" || true
-          done
+          sudo mkdir -p "$CCACHE_DIR" && sudo chown "$(id -u)" "$CCACHE_DIR"
+          pixi run build-release
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-64
+          path: output/**/*.conda
+          retention-days: 14
+      # - name: Publish (OIDC trusted publishing)  # enable after channel
+      #   run: pixi run -e dev rattler-build upload prefix -c code-accelerate output/**/*.conda

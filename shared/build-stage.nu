@@ -6,6 +6,8 @@
 def cpu-count [] { $env.CPU_COUNT? | default (sys cpu | length | into string) | into int }
 
 def main [] {
+  # empty CCACHE_DIR forwarded from recipe env => fall back to ccache defaults
+  if ($env.CCACHE_DIR? | default "") == "" { hide-env --ignore-errors CCACHE_DIR }
   let src = $env.SRC_DIR
   let prefix = $env.PREFIX
   let build = ($src | path join "build")

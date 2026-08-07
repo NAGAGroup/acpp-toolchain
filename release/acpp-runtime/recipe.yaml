@@ -45,6 +45,12 @@ build:
       ACPP_BUILD_CACHE: ${{ env.get("ACPP_BUILD_CACHE", default="") }}
   files:
     include:
+      # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
+      # opt+llc+lld (verified in llvm-to-backend/{ptx,host}/*.cpp)
+      - bin/opt
+      - bin/llc
+      - bin/lld
+      - bin/ld.lld
       # LLVM/Clang/acpp shared libraries (versioned sonames only)
       - lib/*.so*
       # JIT backend plugins, SSCP bitcode, pinned llvm-spirv

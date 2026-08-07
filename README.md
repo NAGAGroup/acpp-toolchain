@@ -1,0 +1,132 @@
+# acpp-toolchain
+
+Conda packages for [AdaptiveCpp](https://github.com/AdaptiveCpp/AdaptiveCpp) — the independent, community-driven SYCL implementation for CPUs and GPUs from every vendor — built as a **complete, standalone LLVM toolchain**: compiler, linker, debugger, and the full clang tool suite from a single conda channel, maintained from the HPC/SYCL space.
+
+AdaptiveCpp is compiled **linked into LLVM** (the upstream-recommended flow) with the **generic single-pass (SSCP) compiler** as the only compilation mode: kernels compile once to portable IR and JIT to whatever hardware is present at runtime — NVIDIA GPUs, Intel GPUs, CPUs — no recompilation, no per-vendor binaries.
+
+Packages live on the [`code-accelerate`](https://prefix.dev/code-accelerate) channel.
+
+## The suites
+
+| | Release | Nightly |
+|---|---|---|
+| Tracks | AdaptiveCpp release tags | head of AdaptiveCpp `develop`, daily |
+| LLVM | newest the release supports (currently **20.1.8**) | newest `develop` supports (currently **21.1.8**) |
+| Version | `25.10.0_llvm20.1.8` | `2026.08.06_llvm21.1.8` |
+| Packages | `acpp`, `acpp-runtime`, … | `acpp-nightly`, `acpp-runtime-nightly`, … |
+
+The two suites ship the same file paths and are **mutually exclusive** in one environment (enforced via `run_constraints`) — pick a lane per environment.
+
+## Packages
+
+| Package | What | Install into |
+|---|---|---|
+| `acpp-runtime` | runtime shared libs, JIT backend plugins + bitcode | consumer envs (arrives automatically via run-exports) |
+| `acpp` | the SYCL compiler: `acpp`, clang, lld, llvm binutils, SYCL headers, CMake config | build envs |
+| `acpp-clang_linux-64` / `acpp-clangxx_linux-64` | compiler **activation** (CC-side / CXX-side): sysroot wiring for redistributable, glibc≥2.28 builds; strong run-exports | build envs — or via `cxx_compiler = ["acpp-clangxx"]` build-variants |
+| `acpp-tools` | clang-format / clang-tidy / clangd / clang-tools-extra / BOLT, same LLVM as the compiler | dev envs |
+| `acpp-lldb` | LLDB (python scripting enabled), same LLVM | dev envs |
+| `acpp-llvm-dev` | LLVM/Clang C++ API headers, static libs, `LLVMConfig.cmake` | building against the LLVM API |
+| `acpp-runtime-cuda` | opt-in CUDA runtime pieces (cudart + libdevice — precisely those, nothing more) | consumer envs |
+| `acpp-runtime-intel` | opt-in Intel GPU pieces (Level Zero loader + OpenCL ICD loader) | consumer envs |
+
+## Install
+
+```toml
+# pixi.toml
+[workspace]
+channels = ["https://prefix.dev/code-accelerate", "conda-forge"]
+platforms = ["linux-64"]
+```
+
+```sh
+pixi add acpp            # the compiler (runtime arrives via run-exports)
+pixi add acpp-tools      # formatter/LSP/tidy matching your compiler
+```
+
+## Backends
+
+CPU (OpenMP) works out of the box. GPU backends are **opt-in** — add the runtime metapackage; the JIT discovers what's present at runtime:
+
+```sh
+pixi add acpp-runtime-cuda    # NVIDIA: needs a CUDA 12 driver on the host
+pixi add acpp-runtime-intel   # Intel GPUs: needs Intel compute drivers on the host
+```
+
+Check what the runtime sees with `acpp-info`.
+
+### AMD / ROCm status — honest version
+
+Currently **not shipped**. The generic JIT requires acpp's LLVM ≤ ROCm's LLVM
+(the JIT hands LLVM bitcode to ROCm's compiler), and conda-forge's HIP runtime
+is still ROCm 6.3 (LLVM 18) — there is no installable configuration in which
+AMD dispatch works with this toolchain's LLVM. The moment conda-forge lands
+`hip-runtime-amd >= 7.2` (built on LLVM 22), the ROCm backend and an
+`acpp-runtime-rocm` metapackage ship in a rebuild. Track:
+[conda-forge ROCm migration](https://github.com/conda-forge/rocm-device-libs-feedstock).
+
+## Compiling
+
+```sh
+acpp -O2 -o prog prog.cpp        # direct
+```
+
+```cmake
+find_package(AdaptiveCpp REQUIRED)
+add_executable(prog prog.cpp)
+add_sycl_to_target(TARGET prog)
+```
+
+For **redistributable** builds (conda packages, glibc-2.28 floor), install the
+activation pair — it sets `CC`/`CXX`, sysroot, hardened flags, and stamps
+correct runtime dependencies onto whatever you build:
+
+```sh
+pixi add acpp-clang_linux-64 acpp-clangxx_linux-64
+```
+
+Or select it as a compiler in pixi build-variants: `cxx_compiler = ["acpp-clangxx"]`.
+A CMake toolchain file ships at `$CONDA_PREFIX/share/acpp/toolchain/acpp-toolchain.cmake` for IDE/direct-cmake use.
+
+## Coexistence with conda-forge clang/llvm
+
+Deliberate and precise: the suite forbids only the **same-major** conda-forge
+LLVM ABI packages (`libllvm20`, `libclang-cpp20.1`) plus the unversioned
+bin-name owners (`clang`, `llvm-tools`, `lld`, …). Different-major conda-forge
+tooling (a newer `clang-tools`, `lldb`, numba's `libllvm`) co-installs cleanly.
+Same-version conda-forge dev tools can't coexist by construction (they link
+`libclang-cpp`) — that's what `acpp-tools`/`acpp-lldb` are for.
+
+## Consuming from source (pixi)
+
+Every package here is a pixi source package; external projects can build the
+toolchain from source instead of the channel:
+
+```toml
+[package.build-dependencies]
+acpp = { git = "https://github.com/NAGAGroup/acpp-toolchain", subdirectory = "release/acpp" }
+```
+
+Fair warning: the first resolve compiles LLVM on your machine (hours). The
+channel binaries are the happy path; source consumption exists for pinning
+purists and CI reproducibility.
+
+## Windows
+
+In progress (phase 2): the linked-into-LLVM flow is exactly what enables
+Windows; upstream CI already proves it. Follow the issues.
+
+## Building this repo
+
+```sh
+pixi run build-release     # populates .build-cache/<lane>/ (LLVM: hours, once)
+pixi run publish-local     # all packages → ./local-channel
+```
+
+`shared/build.nu` (nushell, cross-platform) owns pinned source acquisition and
+the persistent per-lane CMake build cache; recipes are thin per-package carves.
+
+## License
+
+Toolchain packages: Apache-2.0 WITH LLVM-exception (LLVM, AdaptiveCpp).
+Packaging: BSD-3-Clause.

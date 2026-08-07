@@ -63,7 +63,7 @@ jobs:
           restore-keys: rattler-release-
 
       - name: Build release lane -> indexed local channel
-        run: pixi run build-release
+        run: pixi run -e dev build-release
 
       # Keep only the newest staging entry, else the cached archive grows
       # without bound across runs.

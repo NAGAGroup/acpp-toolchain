@@ -35,18 +35,11 @@ c_stdlib_version = ["2.28"]
 # channel (unlike --target-dir, which only copies packages). --path selects
 # one lane; a bare publish would walk the workspace and build both.
 
-[tasks.build-release]
-cmd = "pixi publish --path release --to ./local-channel"
-description = "Build the release lane into the indexed local channel"
-
-[tasks.build-nightly]
-cmd = "pixi publish --path nightly --to ./local-channel"
-description = "Build the nightly lane into the indexed local channel"
 
 # ---- Dev environment (recipe/script iteration) -----------------------------
 [environments.dev]
 no-default-feature = true
-dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", git = "*" }
+dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", rattler-index = "*", git = "*" }
 
 [environments.dev.tasks.gen-nightly]
 cmd = "nu shared/gen-nightly.nu"
@@ -71,3 +64,11 @@ description = "Solver-level constraint audits against ./local-channel"
 [environments.dev.tasks.publish-channel]
 cmd = "rattler-build upload prefix -c jackm97/naga-labs local-channel/**/*.conda"
 description = "Upload the built local channel to prefix.dev (OIDC in CI)"
+
+[environments.dev.tasks.build-release]
+cmd = "nu shared/build-lane.nu release"
+description = "Build the release lane into the indexed local channel"
+
+[environments.dev.tasks.build-nightly]
+cmd = "nu shared/build-lane.nu nightly"
+description = "Build the nightly lane into the indexed local channel"

@@ -78,7 +78,7 @@ jobs:
           restore-keys: rattler-nightly-
 
       - name: Build nightly lane -> indexed local channel
-        run: pixi run build-nightly
+        run: pixi run -e dev build-nightly
 
       - name: Prune stale staging caches
         if: always()

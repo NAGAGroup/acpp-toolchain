@@ -243,6 +243,9 @@ def build [] {
 
 def install [] {
   let c = (config)
+  # MUST run from inside the build dir: acpp's install(CODE) hook for the
+  # SPIRV translator invokes `cmake --build .` relative to the cwd.
+  cd $c.build_dir
   ^cmake --install $c.build_dir --prefix $c.prefix
   # unversioned lib symlinks conflict with other conda packages' dev files
   for f in [libLLVM.so libLTO.so libRemarks.so libclang.so libclang-cpp.so] {

@@ -19,7 +19,22 @@ requires-pixi = ">=0.76.1"
 [workspace.dependencies]
 # release suite
 acpp-runtime = { path = "release/acpp-runtime" }
-# (pool grows as packages land; nightly suite added with the nightly lane)
+acpp = { path = "release/acpp" }
+acpp-llvm-dev = { path = "release/acpp-llvm-dev" }
+acpp-tools = { path = "release/acpp-tools" }
+acpp-lldb = { path = "release/acpp-lldb" }
+acpp-clang-activation = { path = "release/acpp-clang-activation" }
+acpp-clangxx-activation = { path = "release/acpp-clangxx-activation" }
+acpp-runtime-cuda = { path = "release/acpp-runtime-cuda" }
+acpp-runtime-intel = { path = "release/acpp-runtime-intel" }
+# nightly suite
+acpp-runtime-nightly = { path = "nightly/acpp-runtime-nightly" }
+acpp-nightly = { path = "nightly/acpp-nightly" }
+acpp-llvm-dev-nightly = { path = "nightly/acpp-llvm-dev-nightly" }
+acpp-tools-nightly = { path = "nightly/acpp-tools-nightly" }
+acpp-lldb-nightly = { path = "nightly/acpp-lldb-nightly" }
+acpp-clang-activation-nightly = { path = "nightly/acpp-clang-activation-nightly" }
+acpp-clangxx-activation-nightly = { path = "nightly/acpp-clangxx-activation-nightly" }
 
 # ---- Compiler pin for the toolchain build itself ---------------------------
 # conda-forge's current default GCC builds our LLVM on linux; single-valued

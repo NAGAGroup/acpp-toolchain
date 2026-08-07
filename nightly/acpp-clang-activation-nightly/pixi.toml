@@ -1,0 +1,10 @@
+# acpp-clang-nightly_linux-64: CC-side compiler activation for the acpp
+# toolchain (conda-forge {compiler}_{platform} convention — resolved by
+# compiler()/pixi build-variants via c_compiler = ["acpp-clang"]).
+[package]
+name = "acpp-clang-activation-nightly"
+version = "0.dev0_llvm21.1.8"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

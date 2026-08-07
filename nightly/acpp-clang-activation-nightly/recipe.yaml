@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-clang-nightly_linux-64 (nightly lane) — CC-side activation package.
+# Pure scripts; only touches CC-family variables so mixed-compiler
+# environments stay coherent (design §2).
+
+context:
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") ~ "_llvm21.1.8" }}
+
+package:
+  name: acpp-clang-nightly_linux-64
+  version: ${{ version }}
+
+source:
+  - path: ../../shared
+    target_directory: shared
+
+build:
+  number: 0
+  skip:
+    - target_platform != "linux-64"
+  script:
+    interpreter: nu
+    content: nu shared/activation/install-activation.nu clang
+
+requirements:
+  build:
+    - nushell
+  run:
+    - acpp-nightly ==${{ version }}
+    - sysroot_linux-64 >=2.28
+  run_exports:
+    strong:
+      - __glibc >=2.28
+      - acpp-runtime-nightly ==${{ version }}
+  run_constraints:
+    - clang_linux-64 <0.0a0
+    - acpp-clang_linux-64 <0.0a0
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - etc/conda/activate.d/activate-acpp-clang.sh
+          - etc/conda/deactivate.d/deactivate-acpp-clang.sh
+  - script:
+      - |
+        export CONDA_PREFIX="${PREFIX}"
+        source "${PREFIX}/etc/conda/activate.d/activate-acpp-clang.sh"
+        test -n "${CC}" || (echo "CC not set" && exit 1)
+        echo "${CC}" | grep -q "x86_64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
+        source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clang.sh"
+        test -z "${CC:-}" || (echo "CC not restored" && exit 1)
+        echo "activation round-trip OK"
+
+about:
+  homepage: https://github.com/NAGAGroup/acpp-toolchain
+  license: BSD-3-Clause
+  summary: CC-side compiler activation for the acpp SYCL toolchain (linux-64)
+  repository: https://github.com/NAGAGroup/acpp-toolchain

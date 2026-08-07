@@ -1,0 +1,11 @@
+# acpp: the AdaptiveCpp SYCL compiler — drivers, clang, lld, llvm binutils,
+# SYCL headers, clang resource dir, AdaptiveCpp CMake config. Everything a
+# build environment needs to compile SYCL code (activation packages supply
+# CC/CXX/sysroot wiring).
+[package]
+name = "acpp-nightly"
+version = "0.dev0_llvm21.1.8" # date stamped at build (ACPP_NIGHTLY_DATE)
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

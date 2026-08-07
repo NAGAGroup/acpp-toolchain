@@ -1,0 +1,10 @@
+# acpp-llvm-dev: LLVM/Clang C++ API headers, static libraries, and CMake
+# configs from the acpp toolchain build — for developing against the LLVM
+# API (passes, tools). NOT needed to compile SYCL code.
+[package]
+name = "acpp-llvm-dev-nightly"
+version = "0.dev0_llvm21.1.8" # date stamped at build (ACPP_NIGHTLY_DATE)
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

@@ -1,0 +1,60 @@
+# Release lane: build + gate + publish the release suite. Manual dispatch
+# (or repo tag) with an approval-gated environment before publish.
+name: release
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: release-llvm20
+          max-size: 6G
+      - name: Build + package release suite
+        run: |
+          export ACPP_BUILD_CACHE=$PWD/.build-cache
+          export NAGA_ACPP_CCACHE_DIR=$HOME/.cache/ccache
+          for p in acpp-runtime acpp acpp-llvm-dev acpp-tools acpp-lldb acpp-clang-activation acpp-clangxx-activation acpp-runtime-cuda acpp-runtime-intel; do
+            pixi publish --path release/$p --target-dir output
+          done
+          mkdir -p output/linux-64 && mv output/*.conda output/linux-64/ || true
+          pixi exec rattler-index fs $PWD/output
+      - name: Test gate (smoke + upstream suite, generic/omp)
+        run: |
+          mkdir smoke && cd smoke
+          printf '[workspace]\nname="s"\nchannels=["file://%s/output","conda-forge"]\nplatforms=["linux-64"]\n[dependencies]\nacpp="*"\nacpp-clang_linux-64="*"\nacpp-clangxx_linux-64="*"\ncmake=">=3.24"\nninja="*"\nlibboost-devel="*"\n' "$PWD/.." > pixi.toml
+          cp ../shared/tests/hello.cpp .
+          pixi run bash -c 'acpp -O2 -o hello hello.cpp && ACPP_VISIBILITY_MASK=omp ./hello'
+          pixi run bash -c 'cmake -B tests-build -GNinja $CMAKE_ARGS -DACPP_TARGETS=generic ../.build-cache/release/AdaptiveCpp/tests && cmake --build tests-build --parallel 4 && ACPP_VISIBILITY_MASK=omp ./tests-build/sycl_tests'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: output/linux-64/*.conda
+
+  publish:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    environment: publish # approval gate: configure reviewers in repo settings
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-packages
+          path: output/linux-64
+      - name: Upload to code-accelerate
+        run: |
+          for f in output/linux-64/*.conda; do
+            pixi upload prefix --channel code-accelerate "$f" || true
+          done

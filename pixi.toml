@@ -2,39 +2,19 @@
 #
 # acpp-toolchain: the AdaptiveCpp SYCL compiler toolchain package suites
 # (release + nightly) for the code-accelerate channel on prefix.dev.
-# Design doc: naga-labs/SYCLBUILDKIT-DESIGN.md (ratified 2026-08-06).
+# Design doc: naga-labs/SYCLBUILDKIT-DESIGN.md (v3 delta, 2026-08-07).
 #
-# Member manifests are PACKAGE-ONLY specs; all environments and tasks live
-# here. Each package's recipe calls shared/build.nu, which maintains a
-# persistent source+build cache so the expensive LLVM+AdaptiveCpp build
-# happens once per lane and every package build after that is carve-only.
+# v3 architecture: ONE multi-output recipe per lane (release/recipe.yaml,
+# nightly/recipe.yaml) with a rattler-build STAGING output that runs the
+# expensive LLVM+AdaptiveCpp build once; every package output carves that
+# build via `files:` globs. Staging is experimental → all build tasks pass
+# --experimental. CI (Azure via Cirun) runs these same tasks (design §D3).
 [workspace]
 name = "acpp-toolchain"
 channels = ["conda-forge"]
 platforms = ["linux-64", "win-64"]
 preview = ["pixi-build"]
 requires-pixi = ">=0.76.1"
-
-# ---- Dependency pool -------------------------------------------------------
-[workspace.dependencies]
-# release suite
-acpp-runtime = { path = "release/acpp-runtime" }
-acpp = { path = "release/acpp" }
-acpp-llvm-dev = { path = "release/acpp-llvm-dev" }
-acpp-tools = { path = "release/acpp-tools" }
-acpp-lldb = { path = "release/acpp-lldb" }
-acpp-clang-activation = { path = "release/acpp-clang-activation" }
-acpp-clangxx-activation = { path = "release/acpp-clangxx-activation" }
-acpp-runtime-cuda = { path = "release/acpp-runtime-cuda" }
-acpp-runtime-intel = { path = "release/acpp-runtime-intel" }
-# nightly suite
-acpp-runtime-nightly = { path = "nightly/acpp-runtime-nightly" }
-acpp-nightly = { path = "nightly/acpp-nightly" }
-acpp-llvm-dev-nightly = { path = "nightly/acpp-llvm-dev-nightly" }
-acpp-tools-nightly = { path = "nightly/acpp-tools-nightly" }
-acpp-lldb-nightly = { path = "nightly/acpp-lldb-nightly" }
-acpp-clang-activation-nightly = { path = "nightly/acpp-clang-activation-nightly" }
-acpp-clangxx-activation-nightly = { path = "nightly/acpp-clangxx-activation-nightly" }
 
 # ---- Compiler pin for the toolchain build itself ---------------------------
 # conda-forge's current default GCC builds our LLVM on linux; single-valued
@@ -45,17 +25,34 @@ cxx_compiler_version = ["14"]
 c_stdlib_version = ["2.28"]
 
 # ---- Tasks -----------------------------------------------------------------
-# ACPP_BUILD_CACHE anchors build.nu's persistent cache in the repo (the
-# recipes forward it into the isolated build env; without it, builds fall
-# back to a work-dir-adjacent cache and lose cross-package reuse).
+# All builds go through rattler-build directly (staging outputs need
+# --experimental; the pixi-build backend path would need
+# [package.build.config] experimental=true instead). --no-build-id keeps
+# work-dir paths stable for ccache/sccache.
 
-[tasks.build-release]
-cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi publish --path release/acpp-runtime --target-dir output"
-description = "Build the release-lane toolchain (populates the shared build cache via acpp-runtime)"
+[environments.dev.tasks.build-release]
+cmd = "rattler-build build --recipe release/recipe.yaml --experimental --no-build-id --output-dir output"
+description = "Build the full release-lane suite (staging + 10 outputs)"
 
-[tasks.publish-local]
-cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi publish --to ./local-channel"
-description = "Build + publish every opted-in package into an indexed local channel"
+[environments.dev.tasks.build-nightly]
+cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --no-build-id --output-dir output"
+description = "Build the full nightly-lane suite"
+
+[environments.dev.tasks.render-release]
+cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only"
+description = "Render-check the release recipe (fast; no build)"
+
+[environments.dev.tasks.render-nightly]
+cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --render-only"
+description = "Render-check the nightly recipe (fast; no build)"
+
+[environments.dev.tasks.test-release]
+cmd = "rattler-build test --package-file"
+description = "Run rattler-build tests for a built package (append path)"
+
+[environments.dev.tasks.index-local]
+cmd = "rm -f output/**/repodata* ; rattler-index fs ./output"
+description = "(Re)index the local output channel (delete stale repodata first)"
 
 # ---- Dev environment (recipe/script iteration) -----------------------------
 [environments.dev]

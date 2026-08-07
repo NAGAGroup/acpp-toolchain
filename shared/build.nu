@@ -151,6 +151,11 @@ def configure [] {
     return
   }
   $c.prefix | save --force $stamp
+  # purge any cached entries still pointing at previous ephemeral prefixes
+  let cache_file = ($c.build_dir | path join "CMakeCache.txt")
+  if ($cache_file | path exists) {
+    open --raw $cache_file | lines | where {|l| not ($l | str contains ".pixi/bld") } | str join "\n" | save --force --raw $cache_file
+  }
   # the SPIRV translator ExternalProject does not survive reconfigures
   # cleanly (stale sub-build state vs relinked LLVM) — rebuild it fresh
   let spirv_sub = ($c.build_dir | path join "tools" "AdaptiveCpp" "src" "compiler" "llvm-to-backend")
@@ -170,6 +175,9 @@ def configure [] {
     $"-DCMAKE_INSTALL_PREFIX=($c.prefix)"  # REAL prefix: acpp bakes it into JIT tool paths + JSON configs — must be the relocatable conda placeholder
     $"-DCMAKE_C_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-cc"
     $"-DCMAKE_CXX_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-c++"
+    $"-DPython3_EXECUTABLE=($c.bld_link)/bin/python3"
+    $"-DPython3_ROOT_DIR=($c.pfx_link)"
+    $"-DSWIG_EXECUTABLE=($c.bld_link)/bin/swig"
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     # scope: full standalone LLVM toolchain (design §3); AMDGPU absent
@@ -317,7 +325,11 @@ def "main toolchain" [] {
   }
   # ccache: key on compiler CONTENT (env recreation changes mtimes)
   $env.CCACHE_COMPILERCHECK = "content"
-  $env.CMAKE_PREFIX_PATH = ($c.build_dir + (if (is-windows) { ";" } else { ":" }) + ($env.CMAKE_PREFIX_PATH? | default ""))
+  # find_* results are CACHED with whatever path they resolve through —
+  # search exclusively via the stable links so cached find results stay
+  # valid across per-invocation prefixes.
+  let sep = (if (is-windows) { ";" } else { ":" })
+  $env.CMAKE_PREFIX_PATH = ([$c.build_dir $c.pfx_link $c.bld_link] | str join $sep)
   fetch-sources
   configure
   build

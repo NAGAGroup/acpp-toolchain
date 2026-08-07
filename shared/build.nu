@@ -141,11 +141,17 @@ def link-jobs [] {
 
 def configure [] {
   let c = (config)
-  if (($c.build_dir | path join "build.ninja") | path exists) {
-    print "configure: build.ninja present — skipping (incremental)"
+  # Reconfigure whenever the ephemeral $PREFIX changed: acpp bakes the
+  # (placeholder) prefix into JIT tool paths and runtime JSON configs, and
+  # rattler can only relocate strings matching THIS run's placeholder.
+  let stamp = ($c.cache | path join "last-prefix.txt")
+  let last = (if ($stamp | path exists) { open $stamp | str trim } else { "" })
+  if ((($c.build_dir | path join "build.ninja") | path exists) and $last == $c.prefix) {
+    print "configure: up to date for this prefix — skipping (incremental)"
     return
   }
-  if (($c.build_dir | path join "CMakeCache.txt") | path exists) {
+  $c.prefix | save --force $stamp
+  if ((($c.build_dir | path join "CMakeCache.txt") | path exists) and not (($c.build_dir | path join "build.ninja") | path exists)) {
     # a previous configure failed partway; start clean
     print "configure: stale CMakeCache without build.ninja — wiping build dir"
     rm -rf $c.build_dir
@@ -155,7 +161,7 @@ def configure [] {
   print $"configure: ($jobs) parallel link jobs"
   (^cmake ($c.llvm_src | path join "llvm") -G Ninja
     $"-DCMAKE_BUILD_TYPE=Release"
-    $"-DCMAKE_INSTALL_PREFIX=($c.pfx_link)"
+    $"-DCMAKE_INSTALL_PREFIX=($c.prefix)"  # REAL prefix: acpp bakes it into JIT tool paths + JSON configs — must be the relocatable conda placeholder
     $"-DCMAKE_C_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-cc"
     $"-DCMAKE_CXX_COMPILER=($c.bld_link)/bin/x86_64-conda-linux-gnu-c++"
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
@@ -185,9 +191,9 @@ def configure [] {
     "-DWITH_ROCM_BACKEND=OFF"
     "-DACPP_COMPILER_FEATURE_PROFILE=full"
     # CUDA: precise conda-forge pieces (cudart/driver stubs + libdevice)
-    $"-DCUDAToolkit_ROOT=($c.pfx_link)"
-    $"-DCUDA_TOOLKIT_ROOT_DIR=($c.pfx_link)"
-    $"-DCUDA_DEVICE_LIBS_PATH=($c.pfx_link)/nvvm/libdevice"
+    $"-DCUDAToolkit_ROOT=($c.pfx_link)"  # build-time find only (not baked)
+    $"-DCUDA_TOOLKIT_ROOT_DIR=($c.prefix)"  # baked into acpp-cuda.json — relocatable
+    $"-DCUDA_DEVICE_LIBS_PATH=($c.prefix)/nvvm/libdevice"  # baked — relocatable
     # OpenCL: ICD loader from conda-forge; kernel headers from pinned checkouts
     $"-DOpenCL_LIBRARY=($c.pfx_link)/lib/libOpenCL.so"
     $"-DOpenCL_INCLUDE_DIR=($c.pfx_link)/include"

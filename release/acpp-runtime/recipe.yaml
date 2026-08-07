@@ -102,6 +102,10 @@ requirements:
     - libstdcxx >=13
   ignore_run_exports:
     by_name:
+      # CUDA build-env pieces are NOT runtime deps (GPU opt-in via metapackages)
+      - cuda-cudart
+      - cuda-nvvm
+      - cuda-cccl
       # Intel pieces stay OPT-IN via acpp-runtime-intel (plugins fail-soft)
       - level-zero
       - ocl-icd
@@ -130,6 +134,10 @@ tests:
         - clang-cpp
         - acpp-rt
         - acpp-common
+      bin:
+        - opt
+        - llc
+        - lld
       files:
         exists:
           - lib/hipSYCL/librt-backend-omp.so

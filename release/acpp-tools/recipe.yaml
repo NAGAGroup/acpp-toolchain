@@ -120,6 +120,10 @@ requirements:
     - python >=3.9
   ignore_run_exports:
     by_name:
+      # CUDA build-env pieces are NOT runtime deps (GPU opt-in via metapackages)
+      - cuda-cudart
+      - cuda-nvvm
+      - cuda-cccl
       - level-zero
       - ocl-icd
   run_constraints:

@@ -126,6 +126,11 @@ build:
       - bin/merge-fdata
       # claimed by acpp-lldb
       - bin/lldb*
+      # claimed by acpp-runtime (SSCP JIT tools)
+      - bin/opt
+      - bin/llc
+      - bin/lld
+      - bin/ld.lld
 
 requirements:
   build:
@@ -157,6 +162,10 @@ requirements:
     - acpp-runtime ==${{ version }}
   ignore_run_exports:
     by_name:
+      # CUDA build-env pieces are NOT runtime deps (GPU opt-in via metapackages)
+      - cuda-cudart
+      - cuda-nvvm
+      - cuda-cccl
       - level-zero
       - ocl-icd
       - python
@@ -171,8 +180,7 @@ tests:
   - package_contents:
       bin:
         - llvm-config
-        - llc
-        - opt
+        - llvm-as
       files:
         exists:
           - lib/cmake/llvm/LLVMConfig.cmake

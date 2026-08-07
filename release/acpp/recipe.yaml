@@ -45,8 +45,6 @@ build:
       - bin/clang-cl
       - bin/clang-cpp
       - bin/clang-${{ llvm_major }}
-      - bin/lld
-      - bin/ld.lld
       - bin/ld64.lld
       - bin/lld-link
       - bin/wasm-ld
@@ -114,6 +112,10 @@ requirements:
     - libstdcxx-devel_linux-64 >=13
   ignore_run_exports:
     by_name:
+      # CUDA build-env pieces are NOT runtime deps (GPU opt-in via metapackages)
+      - cuda-cudart
+      - cuda-nvvm
+      - cuda-cccl
       - level-zero
       - ocl-icd
   run_exports:
@@ -141,7 +143,6 @@ tests:
         - clang
         - acpp
         - acpp-info
-        - lld
         - llvm-ar
       files:
         exists:

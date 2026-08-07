@@ -151,6 +151,12 @@ def configure [] {
     return
   }
   $c.prefix | save --force $stamp
+  # the SPIRV translator ExternalProject does not survive reconfigures
+  # cleanly (stale sub-build state vs relinked LLVM) — rebuild it fresh
+  let spirv_sub = ($c.build_dir | path join "tools" "AdaptiveCpp" "src" "compiler" "llvm-to-backend")
+  for d in [($spirv_sub | path join "ext" "llvm-spirv") ($spirv_sub | path join "LLVMSpirvTranslator-prefix")] {
+    if ($d | path exists) { rm -rf $d }
+  }
   if ((($c.build_dir | path join "CMakeCache.txt") | path exists) and not (($c.build_dir | path join "build.ninja") | path exists)) {
     # a previous configure failed partway; start clean
     print "configure: stale CMakeCache without build.ninja — wiping build dir"

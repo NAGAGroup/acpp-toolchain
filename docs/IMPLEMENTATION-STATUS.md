@@ -29,11 +29,36 @@ completes.
   re-read same-name rebuilt files; pixi package cache must be purged when
   rebuilding same version+build
 
-## In progress / next batch
-- python_abi run-export leak: ignore in runtime/acpp/llvm-dev/tools (keep in lldb)
-- Activation-path smoke (CXX + CMAKE_ARGS), partition co-install check,
-  solver audits, acpp test suite gate
-- Nightly lane build (LLVM 21.1.8 + develop) — launch after release iteration settles
+## COMPLETE (2026-08-07): both lanes built, tested, publish-ready
+- Release (25.10.0_llvm20.1.8): 9 pkgs. Nightly (2026.08.07_llvm21.1.8,
+  develop @ HEAD): 7 pkgs. All in output/linux-64 (tested artifacts).
+- Gates ALL PASS:
+  * package contents (16/16)
+  * partition co-install: 9 pkgs, zero clobbers
+  * solver audits: same-major cf clang/llvm REJECTED; different-major
+    clang-tools ALLOWED; gcc+acpp-clangxx mixed SOLVED; cf lldb REJECTED;
+    lane mixing REJECTED (both pairs); nightly suite coherent
+  * SYCL smoke: acpp driver + CMake add_sycl_to_target + plain $CXX —
+    CPU AND NVIDIA RTX 4090 (CUDA JIT), BOTH lanes
+  * upstream acpp test suite: 335 cases, no errors (release lane)
+  * python_abi + cudart leaks fixed; bare env exactly: acpp family +
+    llvm-openmp + numactl
+
+## BLOCKED on Jack: publish auth
+Stored prefix.dev token returns 401. With a fresh API key:
+    export PREFIX_API_KEY=<key>
+    cd ~/projects/acpp-toolchain
+    for f in output/linux-64/*.conda; do pixi upload prefix --channel code-accelerate "$f"; done
+Then channel cleanup (web UI or API): yank naga-* (9 pkgs) and the old
+acpp-{libs,toolchain,clang-tools} trio; then archive
+CodeAccelerate-SYCLBuildKit with a pointer README.
+
+## Remaining phases (per design §11)
+- win-64 (phase 2): build.nu win branches + win recipes; CI-driven
+  (upstream windows-acppllvm.yml is the reference); Jack validates on WSL host
+- CI lanes are WRITTEN (.github/workflows/) but unexercised — first
+  dispatch will need iteration (esp. GH runner disk/ccache sizing)
+- #1981 update post: draft at docs/1981-update-draft.md for Jack
 
 ## Next
 - Carve verification across all 5 toolchain slices (partition = no

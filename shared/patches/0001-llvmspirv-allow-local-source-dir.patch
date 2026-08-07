@@ -1,0 +1,16 @@
+diff --git a/src/compiler/llvm-to-backend/CMakeLists.txt b/src/compiler/llvm-to-backend/CMakeLists.txt
+index 98066dd..fb0f2aa 100644
+--- a/src/compiler/llvm-to-backend/CMakeLists.txt
++++ b/src/compiler/llvm-to-backend/CMakeLists.txt
+@@ -182,10 +182,7 @@ if(WITH_SSCP_COMPILER)
+     set(LLVMSPIRV_RELATIVE_PATH ${LLVMSPIRV_RELATIVE_INSTALLDIR}/bin/llvm-spirv)
+ 
+     ExternalProject_Add(LLVMSpirvTranslator
+-      GIT_REPOSITORY https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator
+-      GIT_TAG origin/${LLVMSPIRV_BRANCH}
+-      GIT_SHALLOW ON
+-      GIT_REMOTE_UPDATE_STRATEGY CHECKOUT
++      SOURCE_DIR ${LLVMSPIRV_SOURCE_DIR}
+       BUILD_ALWAYS OFF
+       BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/ext/llvm-spirv
+       CMAKE_ARGS

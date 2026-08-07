@@ -1,8 +1,27 @@
 # Implementation status
 
-Working notes for the E2E productionization pass (2026-08-06/07).
-Design: naga-labs/SYCLBUILDKIT-DESIGN.md (ratified). Delete when rollout
-completes.
+Working notes. Design: naga-labs/SYCLBUILDKIT-DESIGN.md (v3 delta ratified
+2026-08-07 by executive decision). Delete when rollout completes.
+
+## v3 (2026-08-07, branch v3) — staging recipes + canonical activation + CI
+- release/recipe.yaml + nightly/recipe.yaml: ONE multi-output staging recipe
+  per lane (staging output builds LLVM+acpp once; outputs carve via files:
+  globs; --experimental). Per-package dirs + shared/build.nu REMOVED.
+- Tasks: pixi run {render,build}-{release,nightly} (dev env, direct
+  rattler-build, --no-build-id).
+- Canonical activation: vendored ctng-compiler-activation-feedstock @
+  52080ff3 (VERIFIED provenance of clang{,xx}_linux-64 — gcc templates +
+  clang transforms); shared/activation/render-install.sh = verbatim port,
+  ACPP delta = 3 _tc_activation entries (CXX side). Round-trip tested.
+  TODO: CI render-diff gate vs shipped clangxx_linux-64 artifact.
+- CI: .cirun.yml (Azure D8ads_v7 eastus; bump on quota), smoke.yml,
+  release.yml (render gate -> cirun build -> artifacts), nightly.yml
+  (develop-HEAD skip, ACPP_NIGHTLY_DATE versioning). Publish = OIDC
+  trusted publishing, stubbed until channel registration.
+- GPU gate policy: CI = CPU gates only; RTX-4090 CUDA smoke local before
+  channel promotion.
+
+# ---- pre-v3 notes below (historical) ----
 
 ## Done
 - Workspace skeleton (single root manifest, package-only members)

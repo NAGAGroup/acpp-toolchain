@@ -498,11 +498,11 @@ outputs:
       skip:
         - target_platform != "linux-64"
       script:
-        interpreter: nu
-        content: nu shared/activation/install-activation.nu clang
+        content: bash shared/activation/render-install.sh clang
     requirements:
       build:
-        - nushell
+        - sed
+        - shellcheck
       run:
         - ${{ pin_subpackage('acpp-nightly', exact=True) }}
         - sysroot_linux-64 >=2.28
@@ -517,15 +517,15 @@ outputs:
       - package_contents:
           files:
             exists:
-              - etc/conda/activate.d/activate-acpp-clang.sh
-              - etc/conda/deactivate.d/deactivate-acpp-clang.sh
+              - etc/conda/activate.d/activate-acpp-clang-nightly_linux-64.sh
+              - etc/conda/deactivate.d/deactivate-acpp-clang-nightly_linux-64.sh
       - script:
           - |
             export CONDA_PREFIX="${PREFIX}"
-            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clang.sh"
+            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clang-nightly_linux-64.sh"
             test -n "${CC}" || (echo "CC not set" && exit 1)
             echo "${CC}" | grep -q "x86_64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
-            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clang.sh"
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clang-nightly_linux-64.sh"
             test -z "${CC:-}" || (echo "CC not restored" && exit 1)
             echo "activation round-trip OK"
 
@@ -537,11 +537,11 @@ outputs:
       skip:
         - target_platform != "linux-64"
       script:
-        interpreter: nu
-        content: nu shared/activation/install-activation.nu clangxx
+        content: bash shared/activation/render-install.sh clangxx
     requirements:
       build:
-        - nushell
+        - sed
+        - shellcheck
       run:
         - ${{ pin_subpackage('acpp-clang-nightly_linux-64', exact=True) }}
       run_exports:
@@ -555,15 +555,15 @@ outputs:
       - package_contents:
           files:
             exists:
-              - etc/conda/activate.d/activate-acpp-clangxx.sh
-              - etc/conda/deactivate.d/deactivate-acpp-clangxx.sh
+              - etc/conda/activate.d/activate-acpp-clangxx-nightly_linux-64.sh
+              - etc/conda/deactivate.d/deactivate-acpp-clangxx-nightly_linux-64.sh
       - script:
           - |
             export CONDA_PREFIX="${PREFIX}"
-            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clangxx.sh"
+            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clangxx-nightly_linux-64.sh"
             test -n "${CXX}" || (echo "CXX not set" && exit 1)
             echo "${CXX}" | grep -q "x86_64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
-            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clangxx.sh"
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clangxx-nightly_linux-64.sh"
             test -z "${CXX:-}" || (echo "CXX not restored" && exit 1)
             echo "activation round-trip OK"
 

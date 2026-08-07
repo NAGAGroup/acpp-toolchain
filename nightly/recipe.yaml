@@ -1,0 +1,577 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# Nightly lane — tracks AdaptiveCpp develop against the next LLVM (design v3
+# §D1). GENERATED as a transformation of release/recipe.yaml — keep the two in
+# sync structurally. Build with --experimental. Version is date-injected via
+# ACPP_NIGHTLY_DATE (CI sets it; local default 0.dev0).
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_major_next: "22"
+  llvm_maj_min: "21.1"
+  acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}
+
+recipe:
+  name: acpp-toolchain-nightly
+  version: ${{ version }}
+
+source:
+  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+    sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+    target_directory: llvm-project
+  - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
+    branch: develop
+    target_directory: AdaptiveCpp
+    patches:
+      - patches/0001-llvmspirv-allow-local-source-dir.patch
+  - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
+    sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
+    target_directory: SPIRV-LLVM-Translator
+  - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+    sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+    target_directory: OpenCL-Headers
+  - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+    sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+    target_directory: OpenCL-CLHPP
+  - path: ../shared
+    target_directory: shared
+
+outputs:
+  # ── Staging: ONE LLVM+AdaptiveCpp build shared by all outputs ──────────
+  - staging:
+      name: llvm-acpp-stage
+    build:
+      script:
+        interpreter: nu
+        file: ../shared/build-stage.nu
+    requirements:
+      build:
+        - ${{ compiler('c') }}
+        - ${{ compiler('cxx') }}
+        - ${{ stdlib('c') }}
+        - nushell
+        - cmake >=3.24
+        - ninja
+        - ccache
+        - python >=3.9
+        - swig
+      host:
+        - zlib
+        - zstd
+        - libxml2-devel
+        - python
+        - cuda-cudart-dev >=12,<13
+        - cuda-driver-dev >=12,<13
+        - cuda-nvvm >=12,<13
+        - cuda-nvcc-tools >=12,<13
+        - cuda-crt-dev_linux-64 >=12,<13
+        - level-zero-devel
+        - ocl-icd
+        - opencl-headers
+        - numactl
+
+  - package:
+      name: acpp-runtime-nightly
+      version: ${{ version }}
+    inherit: llvm-acpp-stage
+    build:
+      number: 0
+      files:
+        include:
+          # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
+          # opt+llc+lld (verified in llvm-to-backend/{ptx,host}/*.cpp)
+          - bin/opt
+          - bin/llc
+          - bin/lld
+          - bin/ld.lld
+          # LLVM/Clang/acpp shared libraries (versioned sonames only)
+          - lib/*.so*
+          # JIT backend plugins, SSCP bitcode, pinned llvm-spirv
+          - lib/hipSYCL/**
+          # runtime JSON configs
+          - etc/AdaptiveCpp/**
+          # OMP debugger extension
+          - share/gdb/**
+          # backend bitcode wiring on activation (opt-in, fail-soft)
+          - etc/conda/activate.d/acpp-runtime-activate.sh
+        exclude:
+          # libomp comes from conda-forge llvm-openmp (design §5)
+          - lib/libomp*
+          - lib/libarcher*
+          - lib/libompd*
+          # lldb's library belongs to acpp-lldb-nightly
+          - lib/liblldb*
+    requirements:
+      run:
+        - llvm-openmp >=${{ llvm_major }}
+        - numactl
+        - libstdcxx >=13
+      run_exports:
+        - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+      run_constraints:
+        - libllvm${{ llvm_major }} <0.0a0
+        - libclang-cpp${{ llvm_maj_min }} <0.0a0
+        - cuda-cudart >=12,<13
+        - cuda-nvvm >=12,<13
+        - __cuda >=12,<13
+        - acpp-runtime <0.0a0
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvvm
+          - cuda-cccl
+          - level-zero
+          - ocl-icd
+          - python_abi
+          - python
+    tests:
+      - package_contents:
+          lib:
+            - LLVM
+            - clang
+            - clang-cpp
+            - acpp-rt
+            - acpp-common
+          bin:
+            - opt
+            - llc
+            - lld
+          files:
+            exists:
+              - lib/hipSYCL/librt-backend-omp.so
+              - lib/hipSYCL/librt-backend-cuda.so
+              - lib/hipSYCL/librt-backend-ze.so
+              - lib/hipSYCL/librt-backend-ocl.so
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
+              - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
+              - etc/AdaptiveCpp/acpp-core.json
+              - etc/conda/activate.d/acpp-runtime-activate.sh
+            not_exists:
+              - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
+              - lib/libomp.so
+              - lib/liblldb.so
+  - package:
+      name: acpp-nightly
+      version: ${{ version }}
+    inherit: llvm-acpp-stage
+    build:
+      number: 0
+      files:
+        include:
+          - bin/acpp*
+          - bin/clang
+          - bin/clang++
+          - bin/clang-cl
+          - bin/clang-cpp
+          - bin/clang-${{ llvm_major }}
+          - bin/ld64.lld
+          - bin/lld-link
+          - bin/wasm-ld
+          - bin/llvm-ar
+          - bin/llvm-nm
+          - bin/llvm-ranlib
+          - bin/llvm-strip
+          - bin/llvm-objcopy
+          - bin/llvm-objdump
+          - bin/llvm-readelf
+          - bin/llvm-readobj
+          - bin/llvm-size
+          - bin/llvm-strings
+          - bin/llvm-symbolizer
+          - bin/llvm-cxxfilt
+          - bin/llvm-addr2line
+          - bin/llvm-dwarfdump
+          - bin/llvm-dlltool
+          - bin/llvm-lib
+          - bin/llvm-rc
+          - bin/llvm-mt
+          - bin/llvm-windres
+          - bin/llvm-cov
+          - bin/llvm-profdata
+          - bin/llvm-profgen
+          - bin/x86_64-conda-linux-gnu-clang
+          - bin/x86_64-conda-linux-gnu-clang++
+          - bin/x86_64-conda-linux-gnu-clang-cpp
+          - include/AdaptiveCpp/**
+          - lib/clang/**
+          - lib/cmake/AdaptiveCpp/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+        - python >=3.9
+        - libgcc-devel_linux-64 >=13
+        - libstdcxx-devel_linux-64 >=13
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+      run_constraints:
+        - clang <0.0a0
+        - clangxx <0.0a0
+        - llvm <0.0a0
+        - llvm-tools <0.0a0
+        - lld <0.0a0
+        - llvmdev <0.0a0
+        - clangdev <0.0a0
+        - clang-${{ llvm_major }} <0.0a0
+        - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - acpp <0.0a0
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvvm
+          - cuda-cccl
+          - level-zero
+          - ocl-icd
+          - python_abi
+          - python
+    tests:
+      - package_contents:
+          bin:
+            - clang
+            - acpp
+            - acpp-info
+            - llvm-ar
+          files:
+            exists:
+              - include/AdaptiveCpp/sycl/sycl.hpp
+              - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+              - lib/clang/${{ llvm_major }}/include/omp.h
+            not_exists:
+              - bin/clang-tidy
+              - bin/lldb
+              - bin/llvm-config
+  - package:
+      name: acpp-llvm-dev-nightly
+      version: ${{ version }}
+    inherit: llvm-acpp-stage
+    build:
+      number: 0
+      files:
+        include:
+          - bin/**
+          - include/**
+          - lib/**/*.a
+          - lib/cmake/**
+          - share/man/**
+        exclude:
+          # claimed by acpp
+          - bin/acpp*
+          - bin/clang
+          - bin/clang++
+          - bin/clang-cl
+          - bin/clang-cpp
+          - bin/clang-${{ llvm_major }}
+          - bin/lld
+          - bin/ld.lld
+          - bin/ld64.lld
+          - bin/lld-link
+          - bin/wasm-ld
+          - bin/llvm-ar
+          - bin/llvm-nm
+          - bin/llvm-ranlib
+          - bin/llvm-strip
+          - bin/llvm-objcopy
+          - bin/llvm-objdump
+          - bin/llvm-readelf
+          - bin/llvm-readobj
+          - bin/llvm-size
+          - bin/llvm-strings
+          - bin/llvm-symbolizer
+          - bin/llvm-cxxfilt
+          - bin/llvm-addr2line
+          - bin/llvm-dwarfdump
+          - bin/llvm-dlltool
+          - bin/llvm-lib
+          - bin/llvm-rc
+          - bin/llvm-mt
+          - bin/llvm-windres
+          - bin/llvm-cov
+          - bin/llvm-profdata
+          - bin/llvm-profgen
+          - bin/x86_64-conda-linux-gnu-clang
+          - bin/x86_64-conda-linux-gnu-clang++
+          - bin/x86_64-conda-linux-gnu-clang-cpp
+          - include/AdaptiveCpp/**
+          - lib/cmake/AdaptiveCpp/**
+          # claimed by acpp-tools-nightly
+          - bin/amdgpu-arch
+          - bin/clang-apply-replacements
+          - bin/clang-change-namespace
+          - bin/clang-check
+          - bin/clang-doc
+          - bin/clang-extdef-mapping
+          - bin/clang-format
+          - bin/clang-include-cleaner
+          - bin/clang-include-fixer
+          - bin/clang-installapi
+          - bin/clang-linker-wrapper
+          - bin/clang-move
+          - bin/clang-nvlink-wrapper
+          - bin/clang-offload-bundler
+          - bin/clang-offload-packager
+          - bin/clang-query
+          - bin/clang-refactor
+          - bin/clang-reorder-fields
+          - bin/clang-repl
+          - bin/clang-scan-deps
+          - bin/clang-sycl-linker
+          - bin/clang-tidy
+          - bin/clangd
+          - bin/diagtool
+          - bin/find-all-symbols
+          - bin/git-clang-format
+          - bin/hmaptool
+          - bin/modularize
+          - bin/nvptx-arch
+          - bin/offload-arch
+          - bin/pp-trace
+          - bin/run-clang-tidy
+          - bin/scan-build
+          - bin/scan-build-py
+          - bin/scan-view
+          - bin/llvm-bolt
+          - bin/llvm-bolt-heatmap
+          - bin/perf2bolt
+          - bin/merge-fdata
+          # claimed by acpp-lldb-nightly
+          - bin/lldb*
+          # claimed by acpp-runtime-nightly (SSCP JIT tools)
+          - bin/opt
+          - bin/llc
+          - bin/lld
+          - bin/ld.lld
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+      run_constraints:
+        - llvmdev <0.0a0
+        - clangdev <0.0a0
+        - llvm-tools <0.0a0
+        - acpp-llvm-dev <0.0a0
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvvm
+          - cuda-cccl
+          - level-zero
+          - ocl-icd
+          - python_abi
+          - python
+    tests:
+      - package_contents:
+          bin:
+            - llvm-config
+            - llvm-as
+          files:
+            exists:
+              - lib/cmake/llvm/LLVMConfig.cmake
+              - lib/cmake/clang/ClangConfig.cmake
+            not_exists:
+              - bin/clang
+              - bin/acpp
+              - bin/clangd
+              - bin/lldb
+  - package:
+      name: acpp-tools-nightly
+      version: ${{ version }}
+    inherit: llvm-acpp-stage
+    build:
+      number: 0
+      files:
+        include:
+          - bin/amdgpu-arch
+          - bin/clang-apply-replacements
+          - bin/clang-change-namespace
+          - bin/clang-check
+          - bin/clang-doc
+          - bin/clang-extdef-mapping
+          - bin/clang-format
+          - bin/clang-include-cleaner
+          - bin/clang-include-fixer
+          - bin/clang-installapi
+          - bin/clang-linker-wrapper
+          - bin/clang-move
+          - bin/clang-nvlink-wrapper
+          - bin/clang-offload-bundler
+          - bin/clang-offload-packager
+          - bin/clang-query
+          - bin/clang-refactor
+          - bin/clang-reorder-fields
+          - bin/clang-repl
+          - bin/clang-scan-deps
+          - bin/clang-sycl-linker
+          - bin/clang-tidy
+          - bin/clangd
+          - bin/diagtool
+          - bin/find-all-symbols
+          - bin/git-clang-format
+          - bin/hmaptool
+          - bin/modularize
+          - bin/nvptx-arch
+          - bin/offload-arch
+          - bin/pp-trace
+          - bin/run-clang-tidy
+          - bin/scan-build
+          - bin/scan-build-py
+          - bin/scan-view
+          - bin/llvm-bolt
+          - bin/llvm-bolt-heatmap
+          - bin/perf2bolt
+          - bin/merge-fdata
+          - share/clang/**
+          - share/scan-build/**
+          - share/scan-view/**
+          - share/opt-viewer/**
+          - lib/libear/**
+          - lib/libscanbuild/**
+          - libexec/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+        - python >=3.9
+      run_constraints:
+        - clang-tools <0.0a0
+        - clang-format <0.0a0
+        - clang-format-${{ llvm_major }} <0.0a0
+        - clang-scan-deps <0.0a0
+        - acpp-tools <0.0a0
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvvm
+          - cuda-cccl
+          - level-zero
+          - ocl-icd
+          - python_abi
+          - python
+    tests:
+      - package_contents:
+          bin:
+            - clang-format
+            - clang-tidy
+            - clangd
+            - run-clang-tidy
+            - scan-build
+            - llvm-bolt
+  - package:
+      name: acpp-lldb-nightly
+      version: ${{ version }}
+    inherit: llvm-acpp-stage
+    build:
+      number: 0
+      files:
+        include:
+          - bin/lldb*
+          - lib/liblldb*
+          # python bindings (lldb module)
+          - lib/python*/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
+      run_constraints:
+        - lldb <0.0a0
+        - acpp-lldb <0.0a0
+      ignore_run_exports:
+        by_name:
+          - cuda-cudart
+          - cuda-nvvm
+          - cuda-cccl
+          - level-zero
+          - ocl-icd
+    tests:
+      - package_contents:
+          bin:
+            - lldb
+            - lldb-server
+
+  # ── Compiler activation packages (canonical family split, design §D2) ──
+  - package:
+      name: acpp-clang-nightly_linux-64
+      version: ${{ version }}
+    build:
+      number: 0
+      skip:
+        - target_platform != "linux-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/install-activation.nu clang
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('acpp-nightly', exact=True) }}
+        - sysroot_linux-64 >=2.28
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - acpp-runtime-nightly ==${{ version }}
+      run_constraints:
+        - clang_linux-64 <0.0a0
+        - acpp-clang_linux-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-acpp-clang.sh
+              - etc/conda/deactivate.d/deactivate-acpp-clang.sh
+      - script:
+          - |
+            export CONDA_PREFIX="${PREFIX}"
+            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clang.sh"
+            test -n "${CC}" || (echo "CC not set" && exit 1)
+            echo "${CC}" | grep -q "x86_64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clang.sh"
+            test -z "${CC:-}" || (echo "CC not restored" && exit 1)
+            echo "activation round-trip OK"
+
+  - package:
+      name: acpp-clangxx-nightly_linux-64
+      version: ${{ version }}
+    build:
+      number: 0
+      skip:
+        - target_platform != "linux-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/install-activation.nu clangxx
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('acpp-clang-nightly_linux-64', exact=True) }}
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - acpp-runtime-nightly ==${{ version }}
+      run_constraints:
+        - clangxx_linux-64 <0.0a0
+        - acpp-clangxx_linux-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-acpp-clangxx.sh
+              - etc/conda/deactivate.d/deactivate-acpp-clangxx.sh
+      - script:
+          - |
+            export CONDA_PREFIX="${PREFIX}"
+            source "${PREFIX}/etc/conda/activate.d/activate-acpp-clangxx.sh"
+            test -n "${CXX}" || (echo "CXX not set" && exit 1)
+            echo "${CXX}" | grep -q "x86_64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clangxx.sh"
+            test -z "${CXX:-}" || (echo "CXX not restored" && exit 1)
+            echo "activation round-trip OK"
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: Apache-2.0 WITH LLVM-exception
+  license_file:
+    - llvm-project/LICENSE.TXT
+    - AdaptiveCpp/LICENSE
+  summary: AdaptiveCpp SYCL toolchain nightly (develop @ LLVM ${{ llvm_major }}, generic SSCP)
+  repository: https://github.com/NAGAGroup/acpp-toolchain

@@ -144,9 +144,6 @@ def configure [] {
     rm -rf $c.build_dir
   }
   mkdir $c.build_dir
-  # conda gxx makes CMake treat this as pseudo-cross; LLVM's runtime
-  # sub-configures need the build dir on CMAKE_PREFIX_PATH.
-  $env.CMAKE_PREFIX_PATH = ($c.build_dir + (if (is-windows) { ";" } else { ":" }) + ($env.CMAKE_PREFIX_PATH? | default ""))
   let jobs = (link-jobs)
   print $"configure: ($jobs) parallel link jobs"
   (^cmake ($c.llvm_src | path join "llvm") -G Ninja
@@ -268,6 +265,12 @@ def main [] {
 }
 
 def "main toolchain" [] {
+  # conda gxx makes CMake treat this as pseudo-cross; LLVM's runtime and
+  # ExternalProject sub-configures (compiler-rt, openmp, SPIRV translator —
+  # which run during the NINJA phase, not configure) need the build dir on
+  # CMAKE_PREFIX_PATH to find the freshly generated LLVMConfig.cmake.
+  let c = (config)
+  $env.CMAKE_PREFIX_PATH = ($c.build_dir + (if (is-windows) { ";" } else { ":" }) + ($env.CMAKE_PREFIX_PATH? | default ""))
   fetch-sources
   configure
   build

@@ -35,7 +35,7 @@ c_stdlib_version = ["2.28"]
 # back to a work-dir-adjacent cache and lose cross-package reuse).
 
 [tasks.build-release]
-cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi build --path release/acpp-runtime --output-dir output"
+cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi publish --path release/acpp-runtime --target-dir output"
 description = "Build the release-lane toolchain (populates the shared build cache via acpp-runtime)"
 
 [tasks.publish-local]

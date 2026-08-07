@@ -129,7 +129,7 @@ tests:
         - acpp-rt
         - acpp-common
       files:
-        include:
+        exists:
           - lib/hipSYCL/librt-backend-omp.so
           - lib/hipSYCL/librt-backend-cuda.so
           - lib/hipSYCL/librt-backend-ze.so
@@ -141,10 +141,10 @@ tests:
           - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
           - etc/AdaptiveCpp/acpp-core.json
           - etc/conda/activate.d/acpp-runtime-activate.sh
-        exclude:
+        not_exists:
           - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
-          - lib/libomp*
-          - lib/liblldb*
+          - lib/libomp.so
+          - lib/liblldb.so
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

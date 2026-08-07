@@ -1,0 +1,158 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp (release lane) — compiler slice of the LLVM+AdaptiveCpp build.
+# Build mechanics: see release/acpp-runtime/recipe.yaml + shared/build.nu.
+
+context:
+  llvm_version: "20.1.8"
+  llvm_major: "20"
+  llvm_maj_min: "20.1"
+  acpp_version: "25.10.0"
+  version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}
+  acpp_ref: "v25.10.0"
+  acpp_commit: "9f842c701a599107cc6d117d3539f971036363a1"
+  spirv_commit: "f0ae76f12c62ede090e57ece8c986f4c3c971a71" # llvm_release_200
+  oclh_commit: "265df85aec478d14a5c5880d7bb92d7dd52714ef"
+  oclhpp_commit: "67d100e70612341707725b6648ccca4c10b0dc31"
+
+package:
+  name: acpp
+  version: ${{ version }}
+
+source:
+  - path: ../../shared
+    target_directory: shared
+
+build:
+  number: 0
+  script:
+    interpreter: nu
+    content: nu shared/build.nu toolchain
+    env:
+      ACPP_LANE: release
+      ACPP_LLVM_VERSION: ${{ llvm_version }}
+      ACPP_ACPP_REF: ${{ acpp_ref }}
+      ACPP_ACPP_COMMIT: ${{ acpp_commit }}
+      ACPP_SPIRV_COMMIT: ${{ spirv_commit }}
+      ACPP_OCLH_COMMIT: ${{ oclh_commit }}
+      ACPP_OCLHPP_COMMIT: ${{ oclhpp_commit }}
+      ACPP_BUILD_CACHE: ${{ env.get("ACPP_BUILD_CACHE", default="") }}
+  files:
+    include:
+      - bin/acpp*
+      - bin/clang
+      - bin/clang++
+      - bin/clang-cl
+      - bin/clang-cpp
+      - bin/clang-${{ llvm_major }}
+      - bin/lld
+      - bin/ld.lld
+      - bin/ld64.lld
+      - bin/lld-link
+      - bin/wasm-ld
+      - bin/llvm-ar
+      - bin/llvm-nm
+      - bin/llvm-ranlib
+      - bin/llvm-strip
+      - bin/llvm-objcopy
+      - bin/llvm-objdump
+      - bin/llvm-readelf
+      - bin/llvm-readobj
+      - bin/llvm-size
+      - bin/llvm-strings
+      - bin/llvm-symbolizer
+      - bin/llvm-cxxfilt
+      - bin/llvm-addr2line
+      - bin/llvm-dwarfdump
+      - bin/llvm-dlltool
+      - bin/llvm-lib
+      - bin/llvm-rc
+      - bin/llvm-mt
+      - bin/llvm-windres
+      - bin/llvm-cov
+      - bin/llvm-profdata
+      - bin/llvm-profgen
+      - include/AdaptiveCpp/**
+      - lib/clang/**
+      - lib/cmake/AdaptiveCpp/**
+
+requirements:
+  build:
+    - ${{ compiler('c') }}
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
+    - nushell
+    - git
+    - cmake >=3.24
+    - ninja
+    - ccache
+    - python >=3.9
+    - swig # lldb python bindings
+  host:
+    - zlib
+    - zstd
+    - libxml2
+    - python
+    - cuda-cudart-dev >=12,<13
+    - cuda-driver-dev >=12,<13
+    - cuda-nvvm >=12,<13
+    - level-zero-devel
+    - ocl-icd
+    - opencl-headers
+    - numactl
+  run:
+    - acpp-runtime ==${{ version }}
+    # acpp driver is a python script
+    - python >=3.9
+    # crt objects + C++ stdlib headers for bare (non-activation) use
+    - libgcc-devel_linux-64 >=13
+    - libstdcxx-devel_linux-64 >=13
+  ignore_run_exports:
+    by_name:
+      - level-zero
+      - ocl-icd
+  run_exports:
+    strong:
+      - acpp-runtime ==${{ version }}
+  run_constraints:
+    # Owners of unversioned tool/driver filenames — any version clobbers.
+    - clang <0.0a0
+    - clangxx <0.0a0
+    - llvm <0.0a0
+    - llvm-tools <0.0a0
+    - lld <0.0a0
+    - llvmdev <0.0a0
+    - clangdev <0.0a0
+    # Same-major versioned packages sharing real paths (bin/clang-20,
+    # lib/clang/20/**). Different majors co-install fine.
+    - clang-${{ llvm_major }} <0.0a0
+    - compiler-rt <${{ llvm_major }}.0a0|>=21.0a0
+    # Lane exclusion
+    - acpp-nightly <0.0a0
+
+tests:
+  - package_contents:
+      bin:
+        - clang
+        - acpp
+        - acpp-info
+        - lld
+        - llvm-ar
+      files:
+        exists:
+          - include/AdaptiveCpp/sycl/sycl.hpp
+          - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+          - lib/clang/${{ llvm_major }}/include/omp.h
+        not_exists:
+          - bin/clang-tidy
+          - bin/lldb
+          - bin/llvm-config
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: Apache-2.0 WITH LLVM-exception
+  license_file:
+    - licenses/LLVM-LICENSE.txt
+    - licenses/AdaptiveCpp-LICENSE.txt
+  summary: AdaptiveCpp SYCL compiler (LLVM ${{ llvm_major }} linked-in, generic SSCP)
+  repository: https://github.com/NAGAGroup/acpp-toolchain

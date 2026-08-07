@@ -40,7 +40,7 @@ clang/llvm of a *different* major stays co-installable; same-major is
 cleanly rejected instead of clobbering).
 
 Install story is unchanged: install pixi, add
-`https://prefix.dev/code-accelerate`, `pixi add acpp`. Windows support
+`https://prefix.dev/jackm97/naga-labs`, `pixi add acpp`. Windows support
 via the linked-into-LLVM flow is next on the roadmap.
 
 Feedback welcome — especially from anyone who wants the AMD path

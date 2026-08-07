@@ -4,7 +4,7 @@ Conda packages for [AdaptiveCpp](https://github.com/AdaptiveCpp/AdaptiveCpp) —
 
 AdaptiveCpp is compiled **linked into LLVM** (the upstream-recommended flow) with the **generic single-pass (SSCP) compiler** as the only compilation mode: kernels compile once to portable IR and JIT to whatever hardware is present at runtime — NVIDIA GPUs, Intel GPUs, CPUs — no recompilation, no per-vendor binaries.
 
-Packages live on the [`code-accelerate`](https://prefix.dev/code-accelerate) channel.
+Packages live on the [`jackm97/naga-labs`](https://prefix.dev/jackm97/naga-labs) channel.
 
 ## The suites
 
@@ -35,7 +35,7 @@ The two suites ship the same file paths and are **mutually exclusive** in one en
 ```toml
 # pixi.toml
 [workspace]
-channels = ["https://prefix.dev/code-accelerate", "conda-forge"]
+channels = ["https://prefix.dev/jackm97/naga-labs", "conda-forge"]
 platforms = ["linux-64"]
 ```
 

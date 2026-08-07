@@ -46,8 +46,13 @@ outputs:
         interpreter: nu
         file: ../shared/build-stage.nu
         env:
-          # CI forwards its cache dir; empty means "use ccache defaults"
+          # rattler-build builds with a sanitized env, so anything ccache needs
+          # must be forwarded explicitly. Empty => ccache defaults.
           CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
+          CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
+          CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
+          CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
+          ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
     requirements:
       build:
         - ${{ compiler('c') }}
@@ -569,33 +574,42 @@ outputs:
             test -z "${CXX:-}" || (echo "CXX not restored" && exit 1)
             echo "activation round-trip OK"
 
-  # ── Lane-agnostic backend metapackages (precise runtime deps, design §5) ──
+  # ── Backend metapackages (precise runtime deps, design §5) ────────────────
+  # One-package install path: `acpp-runtime-cuda` PULLS IN the lane runtime,
+  # so a CUDA user installs exactly one thing (and still gets the omp backend,
+  # which ships in the runtime). Lane-bound + exactly pinned so the pair can
+  # never drift; the nightly lane carries `-nightly` twins.
   - package:
       name: acpp-runtime-cuda
-      version: "1.0.0"
+      version: ${{ version }}
     build:
       number: 0
     requirements:
       run:
+        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
         - cuda-cudart >=12,<13
         - cuda-nvvm >=12,<13
       run_constraints:
         - __cuda >=12,<13
+        - acpp-runtime-cuda-nightly <0.0a0
     about:
-      summary: Opt-in CUDA runtime dependencies for the acpp SYCL runtime (generic SSCP JIT)
+      summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
       license: BSD-3-Clause
 
   - package:
       name: acpp-runtime-intel
-      version: "1.0.0"
+      version: ${{ version }}
     build:
       number: 0
     requirements:
       run:
+        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
         - level-zero
         - ocl-icd
+      run_constraints:
+        - acpp-runtime-intel-nightly <0.0a0
     about:
-      summary: Opt-in Intel GPU (Level Zero / OpenCL) runtime dependencies for the acpp SYCL runtime
+      summary: acpp SYCL runtime with Intel GPU (Level Zero / OpenCL) backend dependencies
       license: BSD-3-Clause
 
 about:

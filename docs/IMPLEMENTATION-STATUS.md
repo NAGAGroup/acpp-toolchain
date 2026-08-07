@@ -67,7 +67,7 @@ Working notes. Design: naga-labs/SYCLBUILDKIT-DESIGN.md (v3 delta ratified
 Stored prefix.dev token returns 401. With a fresh API key:
     export PREFIX_API_KEY=<key>
     cd ~/projects/acpp-toolchain
-    for f in output/linux-64/*.conda; do pixi upload prefix --channel code-accelerate "$f"; done
+    for f in output/linux-64/*.conda; do pixi upload prefix --channel jackm97/naga-labs "$f"; done
 Then channel cleanup (web UI or API): yank naga-* (9 pkgs) and the old
 acpp-{libs,toolchain,clang-tools} trio; then archive
 CodeAccelerate-SYCLBuildKit with a pointer README.

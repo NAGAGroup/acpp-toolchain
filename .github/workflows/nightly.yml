@@ -1,63 +1,144 @@
-# Nightly lane (v3): daily rebuild from AdaptiveCpp develop HEAD, skipped when
-# develop hasn't moved. Same staging-recipe build path as release, with the
-# date-injected version (ACPP_NIGHTLY_DATE).
+# Nightly lane. Resolves AdaptiveCpp develop HEAD first and skips the whole
+# build when it hasn't moved. The resolved SHA is passed into the recipe
+# (ACPP_NIGHTLY_SHA) so the source is pinned per-commit — that also makes the
+# staging cache key rotate deterministically instead of relying on a floating
+# branch.
 name: nightly
+
 on:
   schedule:
     - cron: "17 9 * * *" # daily; 24h cadence per design
   workflow_dispatch:
 
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
 env:
-  CCACHE_DIR: /home/runner-ccache
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 20G
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "1"
 
 jobs:
-  upstream-check:
+  upstream:
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.upstream.outputs.changed }}
-      sha: ${{ steps.upstream.outputs.sha }}
-    steps:
-      - name: Check AdaptiveCpp develop HEAD
-        id: upstream
-        run: |
-          SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp develop | cut -f1)
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          LAST=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
-          echo "changed=$([ "$SHA" != "$LAST" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  build-linux:
-    needs: upstream-check
-    if: needs.upstream-check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: "cirun-linux-builder--${{ github.run_id }}"
-    timeout-minutes: 480
+      sha: ${{ steps.check.outputs.sha }}
+      changed: ${{ steps.check.outputs.changed }}
+      date: ${{ steps.check.outputs.date }}
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-      - name: ccache cache
+      - name: nightly recipe is in sync with release
+        run: pixi run -e dev check-nightly
+      - name: Resolve AdaptiveCpp develop HEAD
+        id: check
+        run: |
+          SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp develop | cut -f1)
+          LAST=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
+          {
+            echo "sha=$SHA"
+            echo "date=$(date -u +%Y.%m.%d)"
+            echo "changed=$([ "$SHA" != "$LAST" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    needs: upstream
+    if: needs.upstream.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: Linux-x64-64
+    timeout-minutes: 240
+    env:
+      ACPP_NIGHTLY_SHA: ${{ needs.upstream.outputs.sha }}
+      ACPP_NIGHTLY_DATE: ${{ needs.upstream.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+
+      - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-nightly-${{ github.sha }}
+          key: ccache-nightly-${{ github.run_id }}
           restore-keys: |
             ccache-nightly-
             ccache-release-
-      - name: Build nightly suite
-        run: |
-          sudo mkdir -p "$CCACHE_DIR" && sudo chown "$(id -u)" "$CCACHE_DIR"
-          export ACPP_NIGHTLY_DATE=$(date -u +%Y.%m.%d)
-          pixi run build-nightly
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
+
+      - name: Restore rattler cache
+        uses: actions/cache@v4
         with:
-          name: nightly-linux-64
-          path: output/**/*.conda
+          path: ~/.cache/rattler/cache
+          key: rattler-nightly-${{ github.run_id }}
+          restore-keys: rattler-nightly-
+
+      - name: Build nightly lane -> indexed local channel
+        run: pixi run build-nightly
+
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd ~/.cache/rattler/cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
+          du -sh . || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-nightly
+          path: local-channel/
           retention-days: 14
+
+  gpu-gate:
+    needs: [upstream, build]
+    runs-on: Linux-x64-GPU
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-nightly
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          manifest-path: shared/tests/gpu-smoke/pixi.toml
+      - run: nvidia-smi
+      # The smoke manifest names release-lane packages; nightly ships the
+      # -nightly twins, so point the same tasks at those.
+      - name: Retarget smoke manifest at the nightly suite
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /' pixi.toml
+      - name: SYCL smoke on CPU backend
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on CUDA backend
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+
+  publish:
+    needs: [upstream, build, gpu-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-nightly
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+      - name: Upload to prefix.dev
+        run: pixi run -e dev publish-channel
       - name: Record built develop SHA
-        run: gh variable set NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream-check.outputs.sha }}"
+        run: gh variable set NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream.outputs.sha }}"
         env:
           GH_TOKEN: ${{ github.token }}
-      # - name: Publish (OIDC trusted publishing)  # enable after channel setup

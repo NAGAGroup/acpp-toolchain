@@ -1,42 +1,60 @@
 # THE workspace manifest — the ONLY [workspace] in this repository.
 #
 # acpp-toolchain: the AdaptiveCpp SYCL compiler toolchain package suites
-# (release + nightly) for the code-accelerate channel on prefix.dev.
+# (release + nightly) for the naga-labs channel on prefix.dev.
 # Design doc: naga-labs/SYCLBUILDKIT-DESIGN.md (v3 delta, 2026-08-07).
 #
 # v3 architecture: ONE multi-output recipe per lane (release/recipe.yaml,
 # nightly/recipe.yaml) with a rattler-build STAGING output that runs the
 # expensive LLVM+AdaptiveCpp build once; every package output carves that
-# build via `files:` globs. Staging is experimental → all build tasks pass
-# --experimental. CI (Azure via Cirun) runs these same tasks (design §D3).
+# build via `files:` globs. `pixi publish --to ./local-channel` produces an
+# INDEXED local channel, which CI ships between jobs as an artifact so the
+# GPU gate installs the toolchain through a real solve. CI runs these same
+# tasks (design §D3).
 [workspace]
 name = "acpp-toolchain"
-channels = ["conda-forge"]
+# The naga-labs channel is layered on top of conda-forge upstream, so it is
+# the ONLY channel we declare anywhere: everything (including our own build
+# dependencies) resolves the way a consumer's environment will, and channel
+# problems surface while iterating instead of after a green build.
+channels = ["https://prefix.dev/jackm97/naga-labs"]
 platforms = ["linux-64", "win-64"]
 preview = ["pixi-build"]
 requires-pixi = ">=0.76.1"
 
 # ---- Compiler pin for the toolchain build itself ---------------------------
-# conda-forge's current default GCC builds our LLVM on linux; single-valued
-# (a pin, not a matrix axis).
+# The current default GCC builds our LLVM on linux; single-valued (a pin, not
+# a matrix axis).
 [workspace.target.linux-64.build-variants]
 c_compiler_version = ["14"]
 cxx_compiler_version = ["14"]
 c_stdlib_version = ["2.28"]
 
-# ---- Tasks -----------------------------------------------------------------
-# All builds go through rattler-build directly (staging outputs need
-# --experimental; the pixi-build backend path would need
-# [package.build.config] experimental=true instead). --no-build-id keeps
-# work-dir paths stable for ccache/sccache.
+# ---- Build tasks -----------------------------------------------------------
+# `pixi publish --to <dir>` builds the whole lane and writes an INDEXED conda
+# channel (unlike --target-dir, which only copies packages). --path selects
+# one lane; a bare publish would walk the workspace and build both.
 
-[environments.dev.tasks.build-release]
-cmd = "rattler-build build --recipe release/recipe.yaml --experimental --no-build-id --output-dir output"
-description = "Build the full release-lane suite (staging + 10 outputs)"
+[tasks.build-release]
+cmd = "pixi publish --path release --to ./local-channel"
+description = "Build the release lane into the indexed local channel"
 
-[environments.dev.tasks.build-nightly]
-cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --no-build-id --output-dir output"
-description = "Build the full nightly-lane suite"
+[tasks.build-nightly]
+cmd = "pixi publish --path nightly --to ./local-channel"
+description = "Build the nightly lane into the indexed local channel"
+
+# ---- Dev environment (recipe/script iteration) -----------------------------
+[environments.dev]
+no-default-feature = true
+dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", git = "*" }
+
+[environments.dev.tasks.gen-nightly]
+cmd = "nu shared/gen-nightly.nu"
+description = "Regenerate nightly/recipe.yaml from release/recipe.yaml"
+
+[environments.dev.tasks.check-nightly]
+cmd = "nu shared/gen-nightly.nu --check"
+description = "Fail if nightly/recipe.yaml is stale w.r.t. the release recipe"
 
 [environments.dev.tasks.render-release]
 cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only"
@@ -46,15 +64,10 @@ description = "Render-check the release recipe (fast; no build)"
 cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --render-only"
 description = "Render-check the nightly recipe (fast; no build)"
 
-[environments.dev.tasks.test-release]
-cmd = "rattler-build test --package-file"
-description = "Run rattler-build tests for a built package (append path)"
+[environments.dev.tasks.audit]
+cmd = "nu shared/tests/audit.nu"
+description = "Solver-level constraint audits against ./local-channel"
 
-[environments.dev.tasks.index-local]
-cmd = "rm -f output/**/repodata* ; rattler-index fs ./output"
-description = "(Re)index the local output channel (delete stale repodata first)"
-
-# ---- Dev environment (recipe/script iteration) -----------------------------
-[environments.dev]
-no-default-feature = true
-dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", git = "*" }
+[environments.dev.tasks.publish-channel]
+cmd = "rattler-build upload prefix -c jackm97/naga-labs local-channel/**/*.conda"
+description = "Upload the built local channel to prefix.dev (OIDC in CI)"

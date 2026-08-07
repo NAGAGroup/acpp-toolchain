@@ -1,0 +1,23 @@
+# Package manifest for the RELEASE lane (package-only; the sole [workspace]
+# is the repo root). Exists so `pixi publish` can build this lane through the
+# pixi-build-rattler-build backend and emit an indexed local channel or upload
+# straight to prefix.dev.
+#
+# recipe.yaml is the source of truth for name/version/dependencies of all 9
+# outputs — the fields below are identifiers for pixi only (verified: the
+# recipe's version wins over this manifest's).
+[package]
+name = "acpp"
+version = "25.10.0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*", channels = [
+  "https://prefix.dev/jackm97/naga-labs",
+] }
+
+[package.build.config]
+# REQUIRED for staging (`staging:`/`inherit:`) outputs. Root level only —
+# the backend rejects this in target-specific config.
+experimental = true
+recipe = "recipe.yaml"

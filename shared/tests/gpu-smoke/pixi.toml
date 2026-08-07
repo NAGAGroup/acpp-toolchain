@@ -1,0 +1,38 @@
+# GPU smoke workspace — installs the built toolchain THROUGH A REAL SOLVE
+# against the indexed local channel that the build job produced, so this gate
+# also exercises run_exports / run_constraints and the channel's repodata,
+# not just the files inside the packages.
+#
+# The local channel is a relative path: CI downloads the build artifact to
+# <repo>/local-channel, which is three levels up from this manifest. Works
+# identically locally after `pixi run build-release`.
+[workspace]
+name = "acpp-gpu-smoke"
+channels = [
+  "../../../local-channel",
+  "https://prefix.dev/jackm97/naga-labs",
+]
+platforms = ["linux-64"]
+
+# One-package install path: acpp-runtime-cuda pulls the lane runtime with it.
+[dependencies]
+acpp = "*"
+acpp-runtime-cuda = "*"
+
+[tasks.build-smoke]
+cmd = "acpp -O2 --acpp-targets=generic ../hello.cpp -o ./smoke"
+description = "Compile the SYCL smoke binary (generic SSCP: one binary, JIT per device)"
+
+[tasks.smoke-cpu]
+cmd = "ACPP_VISIBILITY_MASK=omp ./smoke"
+depends-on = ["build-smoke"]
+description = "Run the smoke binary on the CPU/OpenMP backend"
+
+[tasks.smoke-cuda]
+cmd = "ACPP_VISIBILITY_MASK=cuda ./smoke"
+depends-on = ["build-smoke"]
+description = "Run the smoke binary on the CUDA backend (PTX JIT on real hardware)"
+
+[tasks.acpp-info]
+cmd = "acpp-info -l"
+description = "List backends/devices the runtime can see"

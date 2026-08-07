@@ -7,7 +7,7 @@ def try-solve [name: string, deps: list<string>, should_solve: bool] {
   let dep_lines = ($deps | each {|d| $'($d) = "*"' } | str join "\n")
   $'[workspace]
 name = "audit"
-channels = ["file://(pwd)/local-channel", "conda-forge"]
+channels = ["file://(pwd)/local-channel", "https://prefix.dev/jackm97/naga-labs"]
 platforms = ["linux-64"]
 
 [dependencies]

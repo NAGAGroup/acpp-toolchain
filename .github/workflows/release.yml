@@ -1,51 +1,139 @@
-# Release lane (v3): render-gate on a free runner, build+test the full
-# multi-output staging recipe on the Cirun/Azure builder, upload artifacts.
-# Publish to prefix.dev goes through OIDC trusted publishing once the channel
-# trusted publisher is registered (design v3 §D4) — gated stub below.
+# Release lane. Cheap gates on free runners, the LLVM build on the 64-core
+# larger runner, a real-solve GPU gate on the T4 runner, then OIDC publish.
+#
+# The build job produces an INDEXED local conda channel (`pixi publish --to`)
+# and ships it between jobs as an artifact, so every downstream job consumes
+# the packages exactly the way a user would.
 name: release
+
 on:
   workflow_dispatch:
   push:
     tags: ["v*"]
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  CCACHE_DIR: /home/runner-ccache # forwarded into the rattler-build script env
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 20G
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_NOHASHDIR: "1"
 
 jobs:
-  render-check:
+  checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-      - run: pixi run render-release > /dev/null
+      - name: nightly recipe is in sync with release
+        run: pixi run -e dev check-nightly
+      - name: recipes render
+        run: |
+          pixi run -e dev render-release > /dev/null
+          pixi run -e dev render-nightly > /dev/null
 
-  build-linux:
-    needs: render-check
-    runs-on: "cirun-linux-builder--${{ github.run_id }}"
-    timeout-minutes: 480
+  build:
+    needs: checks
+    runs-on: Linux-x64-64
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-      - name: ccache cache
+
+      - name: Restore ccache
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-release-${{ github.sha }}
-          restore-keys: |
-            ccache-release-
-      - name: Build release suite (staging + 9 outputs, tests included)
-        run: |
-          sudo mkdir -p "$CCACHE_DIR" && sudo chown "$(id -u)" "$CCACHE_DIR"
-          pixi run build-release
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
+          restore-keys: ccache-release-
+
+      # Holds the staging cache (a full LLVM build) plus the package cache.
+      - name: Restore rattler cache
+        uses: actions/cache@v4
         with:
-          name: release-linux-64
-          path: output/**/*.conda
+          path: ~/.cache/rattler/cache
+          key: rattler-release-${{ github.sha }}
+          restore-keys: rattler-release-
+
+      - name: Build release lane -> indexed local channel
+        run: pixi run build-release
+
+      # Keep only the newest staging entry, else the cached archive grows
+      # without bound across runs.
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd ~/.cache/rattler/cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
+          du -sh . || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-release
+          path: local-channel/
           retention-days: 14
-      # - name: Publish (OIDC trusted publishing)  # enable after channel
-      #   run: pixi run -e dev rattler-build upload prefix -c code-accelerate output/**/*.conda
+
+  gpu-gate:
+    needs: build
+    runs-on: Linux-x64-GPU
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-release
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          manifest-path: shared/tests/gpu-smoke/pixi.toml
+      - name: GPU present
+        run: nvidia-smi
+      - name: Backends visible to the runtime
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on CPU backend
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on CUDA backend (PTX JIT on real hardware)
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+
+  solver-audit:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-release
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+      - name: run_exports / run_constraints audits
+        run: pixi run -e dev audit
+
+  publish:
+    needs: [build, gpu-gate, solver-audit]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing; no stored API key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-release
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+      - name: Upload to prefix.dev
+        run: pixi run -e dev publish-channel

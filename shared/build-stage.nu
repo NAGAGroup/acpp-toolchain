@@ -6,11 +6,18 @@
 def cpu-count [] { $env.CPU_COUNT? | default (sys cpu | length | into string) | into int }
 
 def main [] {
-  # empty CCACHE_DIR forwarded from recipe env => fall back to ccache defaults
-  if ($env.CCACHE_DIR? | default "") == "" { hide-env --ignore-errors CCACHE_DIR }
+  # Empty values forwarded from the recipe env mean "unset" — hide them so the
+  # tools fall back to their own defaults instead of seeing "".
+  for v in [CCACHE_DIR CCACHE_MAXSIZE CCACHE_BASEDIR CCACHE_NOHASHDIR ACPP_BUILD_DIR] {
+    if ($env | get -o $v | default "") == "" { hide-env --ignore-errors $v }
+  }
   let src = $env.SRC_DIR
   let prefix = $env.PREFIX
-  let build = ($src | path join "build")
+  # Build tree lives OUTSIDE the work dir: the pixi-build backend uses a clean
+  # root per build, and the staging cache only snapshots prefix+work_dir. A
+  # sibling path keeps compile-command paths stable (ccache) and gives true
+  # incremental rebuilds on a staging-cache miss.
+  let build = ($env.ACPP_BUILD_DIR? | default ($src | path join ".." "build_dir"))
   mkdir $build
   let mem_gb = ((open /proc/meminfo | lines | first | parse "MemTotal:{kb} kB" | get kb.0 | str trim | into int) / 1048576 | math round)
   let jobs = ([1 ([($mem_gb // 4) (cpu-count)] | math min)] | math max)

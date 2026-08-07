@@ -1,0 +1,10 @@
+# acpp-runtime-cuda: opt-in CUDA runtime pieces for the acpp generic-SSCP
+# JIT. Lane-agnostic metapackage (works with acpp-runtime AND
+# acpp-runtime-nightly).
+[package]
+name = "acpp-runtime-cuda"
+version = "1.0.0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

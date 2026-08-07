@@ -79,13 +79,14 @@ requirements:
     # LLVM optional deps (FORCE_ON)
     - zlib
     - zstd
-    - libxml2
+    - libxml2-devel
     # lldb python scripting
     - python
     # CUDA backend: precise pieces only (no nvcc, no `cuda` metapackage)
     - cuda-cudart-dev >=12,<13
     - cuda-driver-dev >=12,<13
     - cuda-nvvm >=12,<13
+    - cuda-nvcc-tools >=12,<13 # nvcc anchors FindCUDAToolkit (never invoked)
     # Level Zero backend: link -lze_loader
     - level-zero-devel
     # OpenCL backend: ICD loader + FindOpenCL headers
@@ -116,6 +117,7 @@ requirements:
     # acpp-runtime-cuda for the actual runtime pieces.
     - cuda-cudart >=12,<13
     - cuda-nvvm >=12,<13
+    - cuda-nvcc-tools >=12,<13 # nvcc anchors FindCUDAToolkit (never invoked)
     - __cuda >=12,<13
     # Lane exclusion: release and nightly suites ship the same paths.
     - acpp-runtime-nightly <0.0a0

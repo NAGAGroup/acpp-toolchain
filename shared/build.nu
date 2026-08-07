@@ -100,7 +100,7 @@ def patch-spirv-redirect [acpp_src: string] {
   if ($content | str contains "LLVMSPIRV_SOURCE_DIR") { return }
   let patched = ($content
     | str replace --regex '(?s)GIT_REPOSITORY https://github\.com/AdaptiveCpp/SPIRV-LLVM-Translator\s+GIT_TAG origin/\$\{LLVMSPIRV_BRANCH\}\s+GIT_SHALLOW ON\s+GIT_REMOTE_UPDATE_STRATEGY CHECKOUT'
-      'SOURCE_DIR ${LLVMSPIRV_SOURCE_DIR}')
+      'SOURCE_DIR $${LLVMSPIRV_SOURCE_DIR}')  # $$ = literal $ in regex replacement
   if $patched == $content {
     error make { msg: $"spirv-redirect: pattern not found in ($f) — upstream layout changed, update build.nu" }
   }
@@ -114,7 +114,7 @@ def fetch-sources [] {
   let llvm_sha = (ensure-repo $c.llvm_src "https://github.com/llvm/llvm-project" $"llvmorg-($c.llvm_version)" "")
   print $"llvm-project @ ($llvm_sha)"
   let acpp_sha = (ensure-repo $c.acpp_src "https://github.com/AdaptiveCpp/AdaptiveCpp" $c.acpp_ref $c.acpp_commit)
-  print $"AdaptiveCpp @ ($acpp_sha) (ref ($c.acpp_ref))"
+  print $"AdaptiveCpp @ ($acpp_sha) ref=($c.acpp_ref)"
   ensure-repo $c.spirv_src "https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator" "" $c.spirv_commit | ignore
   ensure-repo $c.oclh_src "https://github.com/KhronosGroup/OpenCL-Headers" "" $c.oclh_commit | ignore
   ensure-repo $c.oclhpp_src "https://github.com/KhronosGroup/OpenCL-CLHPP" "" $c.oclhpp_commit | ignore
@@ -134,9 +134,14 @@ def link-jobs [] {
 
 def configure [] {
   let c = (config)
-  if (($c.build_dir | path join "CMakeCache.txt") | path exists) {
-    print "configure: CMakeCache.txt present — skipping (incremental)"
+  if (($c.build_dir | path join "build.ninja") | path exists) {
+    print "configure: build.ninja present — skipping (incremental)"
     return
+  }
+  if (($c.build_dir | path join "CMakeCache.txt") | path exists) {
+    # a previous configure failed partway; start clean
+    print "configure: stale CMakeCache without build.ninja — wiping build dir"
+    rm -rf $c.build_dir
   }
   mkdir $c.build_dir
   # conda gxx makes CMake treat this as pseudo-cross; LLVM's runtime
@@ -243,6 +248,15 @@ def install [] {
   mkdir $lic
   cp ($c.llvm_src | path join "LICENSE.TXT") ($lic | path join "LLVM-LICENSE.txt")
   cp ($c.acpp_src | path join "LICENSE") ($lic | path join "AdaptiveCpp-LICENSE.txt")
+  # triple-prefixed compiler symlinks (conda-forge clang_impl convention;
+  # carved into the acpp package; referenced by the activation scripts)
+  if not (is-windows) {
+    let bin = ($c.prefix | path join "bin")
+    for pair in [[clang "x86_64-conda-linux-gnu-clang"] [clang++ "x86_64-conda-linux-gnu-clang++"] [clang-cpp "x86_64-conda-linux-gnu-clang-cpp"]] {
+      let link = ($bin | path join $pair.1)
+      if not ($link | path exists) { ^ln -s $pair.0 $link }
+    }
+  }
   # runtime activation script (packaged only by acpp-runtime's file carve)
   let act = ($c.prefix | path join "etc" "conda" "activate.d")
   mkdir $act

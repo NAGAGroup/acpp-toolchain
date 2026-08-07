@@ -72,6 +72,9 @@ build:
       - bin/llvm-cov
       - bin/llvm-profdata
       - bin/llvm-profgen
+      - bin/x86_64-conda-linux-gnu-clang
+      - bin/x86_64-conda-linux-gnu-clang++
+      - bin/x86_64-conda-linux-gnu-clang-cpp
       - include/AdaptiveCpp/**
       - lib/clang/**
       - lib/cmake/AdaptiveCpp/**
@@ -91,11 +94,12 @@ requirements:
   host:
     - zlib
     - zstd
-    - libxml2
+    - libxml2-devel
     - python
     - cuda-cudart-dev >=12,<13
     - cuda-driver-dev >=12,<13
     - cuda-nvvm >=12,<13
+    - cuda-nvcc-tools >=12,<13 # nvcc anchors FindCUDAToolkit (never invoked)
     - level-zero-devel
     - ocl-icd
     - opencl-headers

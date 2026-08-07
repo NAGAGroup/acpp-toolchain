@@ -1,0 +1,59 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-clangxx_linux-64 (release lane) — CXX-side activation package.
+# Pure scripts; only touches CXX-family variables so mixed-compiler
+# environments stay coherent (design §2).
+
+context:
+  version: "25.10.0_llvm20.1.8"
+
+package:
+  name: acpp-clangxx_linux-64
+  version: ${{ version }}
+
+source:
+  - path: ../../shared
+    target_directory: shared
+
+build:
+  number: 0
+  skip:
+    - target_platform != "linux-64"
+  script:
+    interpreter: nu
+    content: nu shared/activation/install-activation.nu clangxx
+
+requirements:
+  build:
+    - nushell
+  run:
+    - acpp-clang_linux-64 ==25.10.0_llvm20.1.8
+  run_exports:
+    strong:
+      - __glibc >=2.28
+      - acpp-runtime >=25.10.0_llvm20.1.8,<25.11
+  run_constraints:
+    - clangxx_linux-64 <0.0a0
+    - acpp-clangxx-nightly_linux-64 <0.0a0
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - etc/conda/activate.d/activate-acpp-clangxx.sh
+          - etc/conda/deactivate.d/deactivate-acpp-clangxx.sh
+  - script:
+      - |
+        export CONDA_PREFIX="${PREFIX}"
+        source "${PREFIX}/etc/conda/activate.d/activate-acpp-clangxx.sh"
+        test -n "${CXX}" || (echo "CXX not set" && exit 1)
+        echo "${CXX}" | grep -q "x86_64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
+        source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clangxx.sh"
+        test -z "${CXX:-}" || (echo "CXX not restored" && exit 1)
+        echo "activation round-trip OK"
+
+about:
+  homepage: https://github.com/NAGAGroup/acpp-toolchain
+  license: BSD-3-Clause
+  summary: CXX-side compiler activation for the acpp SYCL toolchain (linux-64)
+  repository: https://github.com/NAGAGroup/acpp-toolchain

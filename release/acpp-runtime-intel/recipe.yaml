@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime-intel — PRECISE Intel GPU runtime deps: the Level Zero
+# loader (linked by rt-backend-ze) and the OpenCL ICD loader (linked by
+# rt-backend-ocl). GPU drivers/compute runtime come from the host system.
+
+package:
+  name: acpp-runtime-intel
+  version: "1.0.0"
+
+build:
+  number: 0
+
+requirements:
+  run:
+    - level-zero
+    - ocl-icd
+
+about:
+  homepage: https://github.com/NAGAGroup/acpp-toolchain
+  license: BSD-3-Clause
+  summary: Opt-in Intel GPU (Level Zero / OpenCL) runtime dependencies for the acpp SYCL runtime
+  repository: https://github.com/NAGAGroup/acpp-toolchain

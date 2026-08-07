@@ -36,3 +36,10 @@ completes.
   (0.dev0 placeholder locally)
 - Boost drop CONFIRMED (configure passed without it)
 - lldb python scripting ON => swig+python build deps
+
+## Follow-up (Jack, 2026-08-07 check-in)
+- Refactor external projects to pixi source packages (template external/
+  pattern) instead of build.nu-fetched sources: SPIRV translator becomes
+  `acpp-llvm-spirv` (built against acpp-llvm-dev; acpp-runtime run-dep;
+  removes the ExternalProject patch + last in-build fetch); OpenCL
+  headers as env-provided find. Isolated, non-breaking swap post-E2E.

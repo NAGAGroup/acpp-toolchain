@@ -23,6 +23,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: dev
       - name: nightly recipe is in sync with release
         run: pixi run -e dev check-nightly
       - name: recipes render
@@ -44,6 +45,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: dev
 
       - name: Restore ccache
         uses: actions/cache@v4
@@ -90,7 +92,7 @@ jobs:
           path: local-channel
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
-          cache: true
+          run-install: false
       - name: GPU present
         run: nvidia-smi
       - name: Backends visible to the runtime
@@ -115,6 +117,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: dev
       - name: run_exports / run_constraints audits
         run: pixi run -e dev audit
 
@@ -133,5 +136,6 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: dev
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel

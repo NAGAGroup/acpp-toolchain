@@ -112,6 +112,8 @@ requirements:
       - cuda-cudart
       - cuda-nvvm
       - cuda-cccl
+      # build-env python (driver scripts) must not pin consumer envs' python
+      - python_abi
       # Intel pieces stay OPT-IN via acpp-runtime-intel (plugins fail-soft)
       - level-zero
       - ocl-icd

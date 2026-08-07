@@ -117,6 +117,8 @@ requirements:
       - cuda-cudart
       - cuda-nvvm
       - cuda-cccl
+      # build-env python (driver scripts) must not pin consumer envs' python
+      - python_abi
       - level-zero
       - ocl-icd
   run_exports:

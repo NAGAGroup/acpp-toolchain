@@ -92,7 +92,6 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-          manifest-path: shared/tests/gpu-smoke/pixi.toml
       - name: GPU present
         run: nvidia-smi
       - name: Backends visible to the runtime

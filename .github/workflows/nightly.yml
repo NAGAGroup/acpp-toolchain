@@ -106,7 +106,6 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-          manifest-path: shared/tests/gpu-smoke/pixi.toml
       - run: nvidia-smi
       # The smoke manifest names release-lane packages; nightly ships the
       # -nightly twins, so point the same tasks at those.

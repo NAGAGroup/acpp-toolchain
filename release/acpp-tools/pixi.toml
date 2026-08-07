@@ -1,9 +1,0 @@
-# acpp-tools: clang developer tooling (format/tidy/clangd/clang-tools-extra
-# + BOLT) built against the same LLVM as the acpp compiler.
-[package]
-name = "acpp-tools"
-version = "25.10.0_llvm20.1.8"
-publish = true
-
-[package.build]
-backend = { name = "pixi-build-rattler-build", version = "*" }

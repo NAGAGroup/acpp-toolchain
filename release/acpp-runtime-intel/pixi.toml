@@ -1,9 +1,0 @@
-# acpp-runtime-intel: opt-in Intel GPU runtime pieces (Level Zero loader +
-# OpenCL ICD loader) for the acpp SYCL runtime. Lane-agnostic.
-[package]
-name = "acpp-runtime-intel"
-version = "1.0.0"
-publish = true
-
-[package.build]
-backend = { name = "pixi-build-rattler-build", version = "*" }

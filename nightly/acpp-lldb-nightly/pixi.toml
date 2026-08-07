@@ -1,9 +1,0 @@
-# acpp-lldb: the LLDB debugger built against the acpp toolchain LLVM
-# (python scripting enabled).
-[package]
-name = "acpp-lldb-nightly"
-version = "0.dev0_llvm21.1.8" # date stamped at build (ACPP_NIGHTLY_DATE)
-publish = true
-
-[package.build]
-backend = { name = "pixi-build-rattler-build", version = "*" }

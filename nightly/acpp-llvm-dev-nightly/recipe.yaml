@@ -149,6 +149,7 @@ requirements:
     - cuda-driver-dev >=12,<13
     - cuda-nvvm >=12,<13
     - cuda-nvcc-tools >=12,<13 # nvcc anchors FindCUDAToolkit (never invoked)
+    - cuda-crt-dev_linux-64 >=12,<13 # crt/host_defines.h etc. for cudart headers
     - level-zero-devel
     - ocl-icd
     - opencl-headers

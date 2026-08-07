@@ -1,0 +1,10 @@
+# acpp-runtime: AdaptiveCpp SYCL runtime — shared libraries, JIT backend
+# plugins + bitcode, and the pinned llvm-spirv translator. The ONLY package
+# consumer environments need (the family's run-export target).
+[package]
+name = "acpp-runtime"
+version = "25.10.0_llvm20.1.8"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

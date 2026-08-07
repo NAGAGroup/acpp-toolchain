@@ -1,0 +1,17 @@
+# pixi
+.pixi/
+
+# persistent source + cmake build cache (build.nu owns this)
+.build-cache/
+
+# rattler-build / pixi publish outputs
+output/
+local-channel/
+
+# ccache (when pointed into the repo)
+.ccache/
+
+# editors
+.vscode/
+.idea/
+.cache/

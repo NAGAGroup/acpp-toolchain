@@ -1,0 +1,48 @@
+# THE workspace manifest — the ONLY [workspace] in this repository.
+#
+# acpp-toolchain: the AdaptiveCpp SYCL compiler toolchain package suites
+# (release + nightly) for the code-accelerate channel on prefix.dev.
+# Design doc: naga-labs/SYCLBUILDKIT-DESIGN.md (ratified 2026-08-06).
+#
+# Member manifests are PACKAGE-ONLY specs; all environments and tasks live
+# here. Each package's recipe calls shared/build.nu, which maintains a
+# persistent source+build cache so the expensive LLVM+AdaptiveCpp build
+# happens once per lane and every package build after that is carve-only.
+[workspace]
+name = "acpp-toolchain"
+channels = ["conda-forge"]
+platforms = ["linux-64", "win-64"]
+preview = ["pixi-build"]
+requires-pixi = ">=0.76.1"
+
+# ---- Dependency pool -------------------------------------------------------
+[workspace.dependencies]
+# release suite
+acpp-runtime = { path = "release/acpp-runtime" }
+# (pool grows as packages land; nightly suite added with the nightly lane)
+
+# ---- Compiler pin for the toolchain build itself ---------------------------
+# conda-forge's current default GCC builds our LLVM on linux; single-valued
+# (a pin, not a matrix axis).
+[workspace.target.linux-64.build-variants]
+c_compiler_version = ["14"]
+cxx_compiler_version = ["14"]
+c_stdlib_version = ["2.28"]
+
+# ---- Tasks -----------------------------------------------------------------
+# ACPP_BUILD_CACHE anchors build.nu's persistent cache in the repo (the
+# recipes forward it into the isolated build env; without it, builds fall
+# back to a work-dir-adjacent cache and lose cross-package reuse).
+
+[tasks.build-release]
+cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi build --path release/acpp-runtime --output-dir output"
+description = "Build the release-lane toolchain (populates the shared build cache via acpp-runtime)"
+
+[tasks.publish-local]
+cmd = "ACPP_BUILD_CACHE=$PIXI_PROJECT_ROOT/.build-cache pixi publish --to ./local-channel"
+description = "Build + publish every opted-in package into an indexed local channel"
+
+# ---- Dev environment (recipe/script iteration) -----------------------------
+[environments.dev]
+no-default-feature = true
+dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", git = "*" }

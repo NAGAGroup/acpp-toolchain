@@ -25,6 +25,8 @@ source:
     target_directory: AdaptiveCpp
     patches:
       - ../shared/patches/0001-llvmspirv-allow-local-source-dir.patch
+      # Level Zero backend includes a glibc-internal header; breaks on win
+      - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
   - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
     sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
     target_directory: SPIRV-LLVM-Translator

@@ -1,0 +1,26 @@
+Use <cstdint> instead of glibc's internal <bits/stdint-uintn.h> in the Level
+Zero backend.
+
+<bits/stdint-uintn.h> is a glibc implementation detail that merely typedefs
+uintN_t; it does not exist outside glibc, so the Level Zero backend fails to
+compile on Windows with:
+
+    src/runtime/ze/ze_code_object.cpp(19,10):
+        fatal error: 'bits/stdint-uintn.h' file not found
+
+Including it is incorrect even on Linux (programs should never include
+bits/*.h directly); it just happens to work there. <cstdint> is the portable
+spelling and provides exactly the same typedefs.
+
+diff --git a/src/runtime/ze/ze_code_object.cpp b/src/runtime/ze/ze_code_object.cpp
+--- a/src/runtime/ze/ze_code_object.cpp
++++ b/src/runtime/ze/ze_code_object.cpp
+@@ -16,7 +16,7 @@
+ #include "hipSYCL/runtime/ze/ze_queue.hpp"
+ #include "hipSYCL/runtime/error.hpp"
+ #include <algorithm>
+-#include <bits/stdint-uintn.h>
++#include <cstdint>
+ #include <level_zero/ze_api.h>
+ #include <cassert>
+ #include <string>

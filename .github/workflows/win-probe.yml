@@ -70,3 +70,22 @@ jobs:
             Write-Host ("ReFS VHDX: write 4000x4KB = {0:N1}s ({1:N0} files/s)" -f $sw.Elapsed.TotalSeconds, (4000/$sw.Elapsed.TotalSeconds))
             Dismount-VHD -Path $vhd
           } catch { Write-Host "Dev Drive probe failed: $_" }
+
+  probe-gpu:
+    runs-on: Win-x64-GPU
+    timeout-minutes: 15
+    steps:
+      - name: GPU present
+        run: nvidia-smi
+      - name: Visual Studio installations
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -all -products '*' -format json | ConvertFrom-Json | ForEach-Object { Write-Host "$($_.displayName) | $($_.installationVersion) | $($_.installationPath)" }
+          } else { Write-Host "vswhere NOT PRESENT" }
+          Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+          Get-ChildItem "C:\Program Files (x86)\Microsoft Visual Studio" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
+      - name: Drives and CUDA
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, Root
+          if (Test-Path "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA") { Get-ChildItem "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA" | Select-Object -ExpandProperty Name } else { Write-Host "no system CUDA toolkit (fine - conda provides)" }

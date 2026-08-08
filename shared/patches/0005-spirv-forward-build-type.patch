@@ -1,0 +1,17 @@
+Forward CMAKE_BUILD_TYPE into the SPIRV translator sub-build.
+
+The ExternalProject forwards compilers and LLVM_DIR but not the build
+type, so the sub-build configures with an EMPTY build type; with
+single-config Ninja its `--config Release` is ignored and on MSVC the
+translator links against a different runtime than LLVM
+(_ITERATOR_DEBUG_LEVEL mismatch). Fixed upstream on develop
+(CMAKE_BUILD_TYPE now forwarded via CMAKE_ARGS), so this is a
+release-pin backport only.
+
+diff --git a/src/compiler/llvm-to-backend/CMakeLists.txt b/src/compiler/llvm-to-backend/CMakeLists.txt
+--- a/src/compiler/llvm-to-backend/CMakeLists.txt
++++ b/src/compiler/llvm-to-backend/CMakeLists.txt
+@@ -207,2 +207,3 @@
+       CMAKE_CACHE_ARGS
++        -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
+         -DLLVM_SPIRV_BUILD_EXTERNAL:BOOL=YES

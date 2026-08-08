@@ -29,6 +29,9 @@ source:
       - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
       # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
       - ../shared/patches/0003-ze-find-loader-library-portably.patch
+      # [release-only] ze/ocl backends lack a RUNTIME install rule, so their
+      # [release-only] DLLs never reach the prefix on win (fixed on develop)
+      - ../shared/patches/0004-ze-ocl-install-runtime-artifacts.patch # [release-only]
   - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
     sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
     target_directory: SPIRV-LLVM-Translator
@@ -122,34 +125,75 @@ outputs:
       number: 0
       files:
         include:
-          # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
-          # opt+llc+lld (verified in llvm-to-backend/{ptx,host}/*.cpp)
-          - bin/opt
-          - bin/llc
-          - bin/lld
-          - bin/ld.lld
-          # LLVM/Clang/acpp shared libraries (versioned sonames only)
-          - lib/*.so*
-          # JIT backend plugins, SSCP bitcode, pinned llvm-spirv
-          - lib/hipSYCL/**
-          # runtime JSON configs
-          - etc/AdaptiveCpp/**
-          # OMP debugger extension
-          - share/gdb/**
-          # backend bitcode wiring on activation (opt-in, fail-soft)
-          - etc/conda/activate.d/acpp-runtime-activate.sh
+          - if: linux
+            then:
+              # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
+              # opt+llc+lld (verified in llvm-to-backend/{ptx,host}/*.cpp)
+              - bin/opt
+              - bin/llc
+              - bin/lld
+              - bin/ld.lld
+              # LLVM/Clang/acpp shared libraries (versioned sonames only)
+              - lib/*.so*
+              # JIT backend plugins, SSCP bitcode, pinned llvm-spirv
+              - lib/hipSYCL/**
+              # runtime JSON configs
+              - etc/AdaptiveCpp/**
+              # OMP debugger extension
+              - share/gdb/**
+            else:
+              # SSCP JIT tools: ptx JIT execs opt+llc; the host JIT drives the
+              # native COFF linker, so lld-link (and the lld driver) live here
+              # (the cross-flavors ld.lld/ld64.lld/wasm-ld belong to acpp)
+              - Library/bin/opt.exe
+              - Library/bin/llc.exe
+              - Library/bin/lld.exe
+              - Library/bin/lld-link.exe
+              # No LLVM dylib on Windows (tools link static): the shipped
+              # DLLs are the C-API/LTO/Remarks surface, libclang, and acpp's
+              # own runtime. Import .lib files travel with their DLL.
+              - Library/bin/LLVM-C.dll
+              - Library/bin/LTO.dll
+              - Library/bin/Remarks.dll
+              - Library/bin/libclang.dll
+              - Library/bin/acpp-rt.dll
+              - Library/bin/acpp-common.dll
+              - Library/lib/LLVM-C.lib
+              - Library/lib/LTO.lib
+              - Library/lib/Remarks.lib
+              - Library/lib/libclang.lib
+              - Library/lib/acpp-rt.lib
+              - Library/lib/acpp-common.lib
+              # JIT backend plugin DLLs + llvm-to-backend tools (DLLs are
+              # RUNTIME artifacts on win, so they land under bin)
+              - Library/bin/hipSYCL/**
+              # SSCP bitcode, backend import libs, pinned llvm-spirv
+              - Library/lib/hipSYCL/**
+              # runtime JSON configs
+              - Library/etc/AdaptiveCpp/**
+          # backend bitcode wiring on activation (opt-in, fail-soft;
+          # .sh on linux, .bat/.ps1/.sh triple on win)
+          - etc/conda/activate.d/acpp-runtime-activate.*
         exclude:
-          # libomp comes from conda-forge llvm-openmp (design §5)
-          - lib/libomp*
-          - lib/libarcher*
-          - lib/libompd*
-          # lldb's library belongs to acpp-lldb
-          - lib/liblldb*
+          - if: linux
+            then:
+              # libomp comes from conda-forge llvm-openmp (design §5)
+              - lib/libomp*
+              - lib/libarcher*
+              - lib/libompd*
+              # lldb's library belongs to acpp-lldb
+              - lib/liblldb*
+            else:
+              # libomp comes from conda-forge llvm-openmp here too
+              - Library/bin/libomp.dll
+              - Library/lib/libomp.lib
     requirements:
       run:
         - llvm-openmp >=${{ llvm_major }}
-        - numactl
-        - libstdcxx >=13
+        - if: linux
+          then:
+            - numactl
+            - libstdcxx >=13
       run_exports:
         - ${{ pin_subpackage('acpp-runtime', exact=True) }}
       run_constraints:
@@ -171,9 +215,13 @@ outputs:
     tests:
       - package_contents:
           lib:
-            - LLVM
-            - clang
-            - clang-cpp
+            # win has no LLVM/clang dylibs (tools link static); the acpp
+            # runtime pair exists on both platforms
+            - if: linux
+              then:
+                - LLVM
+                - clang
+                - clang-cpp
             - acpp-rt
             - acpp-common
           bin:
@@ -182,21 +230,44 @@ outputs:
             - lld
           files:
             exists:
-              - lib/hipSYCL/librt-backend-omp.so
-              - lib/hipSYCL/librt-backend-cuda.so
-              - lib/hipSYCL/librt-backend-ze.so
-              - lib/hipSYCL/librt-backend-ocl.so
-              - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
-              - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
-              - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
-              - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
-              - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
-              - etc/AdaptiveCpp/acpp-core.json
-              - etc/conda/activate.d/acpp-runtime-activate.sh
+              - if: linux
+                then:
+                  - lib/hipSYCL/librt-backend-omp.so
+                  - lib/hipSYCL/librt-backend-cuda.so
+                  - lib/hipSYCL/librt-backend-ze.so
+                  - lib/hipSYCL/librt-backend-ocl.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
+                  - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
+                  - etc/AdaptiveCpp/acpp-core.json
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
+                else:
+                  # backend plugins are RUNTIME artifacts -> bin on win;
+                  # llvm-to-backend is linked statically into per-target
+                  # tools (no llvm-to-*.dll exists)
+                  - Library/bin/hipSYCL/rt-backend-omp.dll
+                  - Library/bin/hipSYCL/rt-backend-cuda.dll
+                  - Library/bin/hipSYCL/rt-backend-ze.dll
+                  - Library/bin/hipSYCL/rt-backend-ocl.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
+                  - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
+                  - Library/etc/AdaptiveCpp/acpp-core.json
+                  - etc/conda/activate.d/acpp-runtime-activate.bat
+                  - etc/conda/activate.d/acpp-runtime-activate.ps1
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
             not_exists:
-              - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
-              - lib/libomp.so
-              - lib/liblldb.so
+              - if: linux
+                then:
+                  - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
+                  - lib/libomp.so
+                  - lib/liblldb.so
+                else:
+                  - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off (design §4)
+                  - Library/bin/libomp.dll
   - package:
       name: acpp
       version: ${{ version }}
@@ -205,49 +276,97 @@ outputs:
       number: 0
       files:
         include:
-          - bin/acpp*
-          - bin/clang
-          - bin/clang++
-          - bin/clang-cl
-          - bin/clang-cpp
-          - bin/clang-${{ llvm_major }}
-          - bin/ld64.lld
-          - bin/lld-link
-          - bin/wasm-ld
-          - bin/llvm-ar
-          - bin/llvm-nm
-          - bin/llvm-ranlib
-          - bin/llvm-strip
-          - bin/llvm-objcopy
-          - bin/llvm-objdump
-          - bin/llvm-readelf
-          - bin/llvm-readobj
-          - bin/llvm-size
-          - bin/llvm-strings
-          - bin/llvm-symbolizer
-          - bin/llvm-cxxfilt
-          - bin/llvm-addr2line
-          - bin/llvm-dwarfdump
-          - bin/llvm-dlltool
-          - bin/llvm-lib
-          - bin/llvm-rc
-          - bin/llvm-mt
-          - bin/llvm-windres
-          - bin/llvm-cov
-          - bin/llvm-profdata
-          - bin/llvm-profgen
-          - bin/x86_64-conda-linux-gnu-clang
-          - bin/x86_64-conda-linux-gnu-clang++
-          - bin/x86_64-conda-linux-gnu-clang-cpp
-          - include/AdaptiveCpp/**
-          - lib/clang/**
-          - lib/cmake/AdaptiveCpp/**
+          - if: linux
+            then:
+              - bin/acpp*
+              - bin/clang
+              - bin/clang++
+              - bin/clang-cl
+              - bin/clang-cpp
+              - bin/clang-${{ llvm_major }}
+              - bin/ld64.lld
+              - bin/lld-link
+              - bin/wasm-ld
+              - bin/llvm-ar
+              - bin/llvm-nm
+              - bin/llvm-ranlib
+              - bin/llvm-strip
+              - bin/llvm-objcopy
+              - bin/llvm-objdump
+              - bin/llvm-readelf
+              - bin/llvm-readobj
+              - bin/llvm-size
+              - bin/llvm-strings
+              - bin/llvm-symbolizer
+              - bin/llvm-cxxfilt
+              - bin/llvm-addr2line
+              - bin/llvm-dwarfdump
+              - bin/llvm-dlltool
+              - bin/llvm-lib
+              - bin/llvm-rc
+              - bin/llvm-mt
+              - bin/llvm-windres
+              - bin/llvm-cov
+              - bin/llvm-profdata
+              - bin/llvm-profgen
+              - bin/x86_64-conda-linux-gnu-clang
+              - bin/x86_64-conda-linux-gnu-clang++
+              - bin/x86_64-conda-linux-gnu-clang-cpp
+              - include/AdaptiveCpp/**
+              - lib/clang/**
+              - lib/cmake/AdaptiveCpp/**
+            else:
+              # clang.exe is the real binary on win (no clang-NN.exe); the
+              # others are install-time alias copies. NB: a bare acpp* glob
+              # would also swallow runtime's acpp-rt.dll/acpp-common.dll
+              - Library/bin/acpp
+              - Library/bin/acpp*.exe
+              - Library/bin/clang.exe
+              - Library/bin/clang++.exe
+              - Library/bin/clang-cl.exe
+              - Library/bin/clang-cpp.exe
+              # cross-flavor linkers (native COFF lld-link is runtime's)
+              - Library/bin/ld.lld.exe
+              - Library/bin/ld64.lld.exe
+              - Library/bin/wasm-ld.exe
+              - Library/bin/llvm-ar.exe
+              - Library/bin/llvm-nm.exe
+              - Library/bin/llvm-ranlib.exe
+              - Library/bin/llvm-strip.exe
+              - Library/bin/llvm-objcopy.exe
+              - Library/bin/llvm-objdump.exe
+              - Library/bin/llvm-readelf.exe
+              - Library/bin/llvm-readobj.exe
+              - Library/bin/llvm-size.exe
+              - Library/bin/llvm-strings.exe
+              - Library/bin/llvm-symbolizer.exe
+              - Library/bin/llvm-cxxfilt.exe
+              - Library/bin/llvm-addr2line.exe
+              - Library/bin/llvm-dwarfdump.exe
+              - Library/bin/llvm-dlltool.exe
+              - Library/bin/llvm-lib.exe
+              - Library/bin/llvm-rc.exe
+              - Library/bin/llvm-mt.exe
+              - Library/bin/llvm-windres.exe
+              - Library/bin/llvm-cov.exe
+              - Library/bin/llvm-profdata.exe
+              - Library/bin/llvm-profgen.exe
+              - Library/include/AdaptiveCpp/**
+              - Library/lib/clang/**
+              - Library/lib/cmake/AdaptiveCpp/**
+              # compile/link-time acpp components (static libs; the runtime
+              # DLL import libs acpp-rt/acpp-common live with the runtime)
+              - Library/lib/AdaptiveCpp.lib
+              - Library/lib/acpp-frontend.lib
+              - Library/lib/acpp-clang-cbs.lib
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime', exact=True) }}
         - python >=3.9
-        - libgcc-devel_linux-64 >=13
-        - libstdcxx-devel_linux-64 >=13
+        - if: linux
+          then:
+            - libgcc-devel_linux-64 >=13
+            - libstdcxx-devel_linux-64 >=13
       run_exports:
         strong:
           - ${{ pin_subpackage('acpp-runtime', exact=True) }}
@@ -274,19 +393,33 @@ outputs:
     tests:
       - package_contents:
           bin:
+            # bin: expansion includes the bare name on win, so the
+            # extensionless acpp python driver matches on both platforms
             - clang
             - acpp
             - acpp-info
             - llvm-ar
           files:
             exists:
-              - include/AdaptiveCpp/sycl/sycl.hpp
-              - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
-              - lib/clang/${{ llvm_major }}/include/omp.h
+              - if: linux
+                then:
+                  - include/AdaptiveCpp/sycl/sycl.hpp
+                  - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+                  - lib/clang/${{ llvm_major }}/include/omp.h
+                else:
+                  - Library/include/AdaptiveCpp/sycl/sycl.hpp
+                  - Library/lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+                  - Library/lib/clang/${{ llvm_major }}/include/omp.h
             not_exists:
-              - bin/clang-tidy
-              - bin/lldb
-              - bin/llvm-config
+              - if: linux
+                then:
+                  - bin/clang-tidy
+                  - bin/lldb
+                  - bin/llvm-config
+                else:
+                  - Library/bin/clang-tidy.exe
+                  - Library/bin/lldb.exe
+                  - Library/bin/llvm-config.exe
   - package:
       name: acpp-llvm-dev
       version: ${{ version }}
@@ -295,98 +428,213 @@ outputs:
       number: 0
       files:
         include:
-          - bin/**
-          - include/**
-          - lib/**/*.a
-          - lib/cmake/**
-          - share/man/**
+          - if: linux
+            then:
+              - bin/**
+              - include/**
+              - lib/**/*.a
+              - lib/cmake/**
+              - share/man/**
+            else:
+              # win analogue of lib/**/*.a: LLVM/clang ship as static .lib
+              # (plus tablegen/testing import libs); everything claimed by
+              # siblings is excluded below
+              - Library/bin/**
+              - Library/include/**
+              - Library/lib/**/*.lib
+              - Library/lib/cmake/**
+              - Library/share/man/**
         exclude:
-          # claimed by acpp
-          - bin/acpp*
-          - bin/clang
-          - bin/clang++
-          - bin/clang-cl
-          - bin/clang-cpp
-          - bin/clang-${{ llvm_major }}
-          - bin/lld
-          - bin/ld.lld
-          - bin/ld64.lld
-          - bin/lld-link
-          - bin/wasm-ld
-          - bin/llvm-ar
-          - bin/llvm-nm
-          - bin/llvm-ranlib
-          - bin/llvm-strip
-          - bin/llvm-objcopy
-          - bin/llvm-objdump
-          - bin/llvm-readelf
-          - bin/llvm-readobj
-          - bin/llvm-size
-          - bin/llvm-strings
-          - bin/llvm-symbolizer
-          - bin/llvm-cxxfilt
-          - bin/llvm-addr2line
-          - bin/llvm-dwarfdump
-          - bin/llvm-dlltool
-          - bin/llvm-lib
-          - bin/llvm-rc
-          - bin/llvm-mt
-          - bin/llvm-windres
-          - bin/llvm-cov
-          - bin/llvm-profdata
-          - bin/llvm-profgen
-          - bin/x86_64-conda-linux-gnu-clang
-          - bin/x86_64-conda-linux-gnu-clang++
-          - bin/x86_64-conda-linux-gnu-clang-cpp
-          - include/AdaptiveCpp/**
-          - lib/cmake/AdaptiveCpp/**
-          # claimed by acpp-tools
-          - bin/amdgpu-arch
-          - bin/clang-apply-replacements
-          - bin/clang-change-namespace
-          - bin/clang-check
-          - bin/clang-doc
-          - bin/clang-extdef-mapping
-          - bin/clang-format
-          - bin/clang-include-cleaner
-          - bin/clang-include-fixer
-          - bin/clang-installapi
-          - bin/clang-linker-wrapper
-          - bin/clang-move
-          - bin/clang-nvlink-wrapper
-          - bin/clang-offload-bundler
-          - bin/clang-offload-packager
-          - bin/clang-query
-          - bin/clang-refactor
-          - bin/clang-reorder-fields
-          - bin/clang-repl
-          - bin/clang-scan-deps
-          - bin/clang-sycl-linker
-          - bin/clang-tidy
-          - bin/clangd
-          - bin/diagtool
-          - bin/find-all-symbols
-          - bin/git-clang-format
-          - bin/hmaptool
-          - bin/modularize
-          - bin/nvptx-arch
-          - bin/offload-arch
-          - bin/pp-trace
-          - bin/run-clang-tidy
-          - bin/scan-build
-          - bin/scan-build-py
-          - bin/scan-view
-          - bin/llvm-bolt
-          - bin/llvm-bolt-heatmap
-          - bin/perf2bolt
-          - bin/merge-fdata
-          # claimed by acpp-lldb
-          - bin/lldb*
-          # claimed by acpp-runtime (SSCP JIT tools)
-          - bin/opt
-          - bin/llc
-          - bin/lld
-          - bin/ld.lld
+          - if: linux
+            then:
+              # claimed by acpp
+              - bin/acpp*
+              - bin/clang
+              - bin/clang++
+              - bin/clang-cl
+              - bin/clang-cpp
+              - bin/clang-${{ llvm_major }}
+              - bin/lld
+              - bin/ld.lld
+              - bin/ld64.lld
+              - bin/lld-link
+              - bin/wasm-ld
+              - bin/llvm-ar
+              - bin/llvm-nm
+              - bin/llvm-ranlib
+              - bin/llvm-strip
+              - bin/llvm-objcopy
+              - bin/llvm-objdump
+              - bin/llvm-readelf
+              - bin/llvm-readobj
+              - bin/llvm-size
+              - bin/llvm-strings
+              - bin/llvm-symbolizer
+              - bin/llvm-cxxfilt
+              - bin/llvm-addr2line
+              - bin/llvm-dwarfdump
+              - bin/llvm-dlltool
+              - bin/llvm-lib
+              - bin/llvm-rc
+              - bin/llvm-mt
+              - bin/llvm-windres
+              - bin/llvm-cov
+              - bin/llvm-profdata
+              - bin/llvm-profgen
+              - bin/x86_64-conda-linux-gnu-clang
+              - bin/x86_64-conda-linux-gnu-clang++
+              - bin/x86_64-conda-linux-gnu-clang-cpp
+              - include/AdaptiveCpp/**
+              - lib/cmake/AdaptiveCpp/**
+              # claimed by acpp-tools
+              - bin/amdgpu-arch
+              - bin/clang-apply-replacements
+              - bin/clang-change-namespace
+              - bin/clang-check
+              - bin/clang-doc
+              - bin/clang-extdef-mapping
+              - bin/clang-format
+              - bin/clang-include-cleaner
+              - bin/clang-include-fixer
+              - bin/clang-installapi
+              - bin/clang-linker-wrapper
+              - bin/clang-move
+              - bin/clang-nvlink-wrapper
+              - bin/clang-offload-bundler
+              - bin/clang-offload-packager
+              - bin/clang-query
+              - bin/clang-refactor
+              - bin/clang-reorder-fields
+              - bin/clang-repl
+              - bin/clang-scan-deps
+              - bin/clang-sycl-linker
+              - bin/clang-tidy
+              - bin/clangd
+              - bin/diagtool
+              - bin/find-all-symbols
+              - bin/git-clang-format
+              - bin/hmaptool
+              - bin/modularize
+              - bin/nvptx-arch
+              - bin/offload-arch
+              - bin/pp-trace
+              - bin/run-clang-tidy
+              - bin/scan-build
+              - bin/scan-build-py
+              - bin/scan-view
+              - bin/llvm-bolt
+              - bin/llvm-bolt-heatmap
+              - bin/perf2bolt
+              - bin/merge-fdata
+              # claimed by acpp-lldb
+              - bin/lldb*
+              # claimed by acpp-runtime (SSCP JIT tools)
+              - bin/opt
+              - bin/llc
+              - bin/lld
+              - bin/ld.lld
+            else:
+              # claimed by acpp
+              - Library/bin/acpp
+              - Library/bin/acpp*.exe
+              - Library/bin/clang.exe
+              - Library/bin/clang++.exe
+              - Library/bin/clang-cl.exe
+              - Library/bin/clang-cpp.exe
+              - Library/bin/ld.lld.exe
+              - Library/bin/ld64.lld.exe
+              - Library/bin/wasm-ld.exe
+              - Library/bin/llvm-ar.exe
+              - Library/bin/llvm-nm.exe
+              - Library/bin/llvm-ranlib.exe
+              - Library/bin/llvm-strip.exe
+              - Library/bin/llvm-objcopy.exe
+              - Library/bin/llvm-objdump.exe
+              - Library/bin/llvm-readelf.exe
+              - Library/bin/llvm-readobj.exe
+              - Library/bin/llvm-size.exe
+              - Library/bin/llvm-strings.exe
+              - Library/bin/llvm-symbolizer.exe
+              - Library/bin/llvm-cxxfilt.exe
+              - Library/bin/llvm-addr2line.exe
+              - Library/bin/llvm-dwarfdump.exe
+              - Library/bin/llvm-dlltool.exe
+              - Library/bin/llvm-lib.exe
+              - Library/bin/llvm-rc.exe
+              - Library/bin/llvm-mt.exe
+              - Library/bin/llvm-windres.exe
+              - Library/bin/llvm-cov.exe
+              - Library/bin/llvm-profdata.exe
+              - Library/bin/llvm-profgen.exe
+              - Library/include/AdaptiveCpp/**
+              - Library/lib/cmake/AdaptiveCpp/**
+              - Library/lib/clang/**
+              - Library/lib/AdaptiveCpp.lib
+              - Library/lib/acpp-frontend.lib
+              - Library/lib/acpp-clang-cbs.lib
+              # claimed by acpp-tools
+              - Library/bin/amdgpu-arch.exe
+              - Library/bin/analyze-build
+              - Library/bin/clang-apply-replacements.exe
+              - Library/bin/clang-change-namespace.exe
+              - Library/bin/clang-check.exe
+              - Library/bin/clang-doc.exe
+              - Library/bin/clang-extdef-mapping.exe
+              - Library/bin/clang-format.exe
+              - Library/bin/clang-include-cleaner.exe
+              - Library/bin/clang-include-fixer.exe
+              - Library/bin/clang-installapi.exe
+              - Library/bin/clang-linker-wrapper.exe
+              - Library/bin/clang-move.exe
+              - Library/bin/clang-nvlink-wrapper.exe
+              - Library/bin/clang-offload-bundler.exe
+              - Library/bin/clang-offload-packager.exe
+              - Library/bin/clang-query.exe
+              - Library/bin/clang-refactor.exe
+              - Library/bin/clang-reorder-fields.exe
+              - Library/bin/clang-repl.exe
+              - Library/bin/clang-scan-deps.exe
+              - Library/bin/clang-sycl-linker.exe
+              - Library/bin/clang-tidy.exe
+              - Library/bin/clangd.exe
+              - Library/bin/diagtool.exe
+              - Library/bin/find-all-symbols.exe
+              - Library/bin/git-clang-format
+              - Library/bin/git-clang-format.bat
+              - Library/bin/hmaptool
+              - Library/bin/intercept-build
+              - Library/bin/modularize.exe
+              - Library/bin/nvptx-arch.exe
+              - Library/bin/pp-trace.exe
+              - Library/bin/run-clang-tidy
+              - Library/bin/scan-build
+              - Library/bin/scan-build.bat
+              - Library/bin/scan-build-py
+              - Library/bin/scan-view
+              - Library/lib/libear/**
+              - Library/lib/libscanbuild/**
+              # claimed by acpp-runtime (SSCP JIT tools + DLL surface)
+              - Library/bin/opt.exe
+              - Library/bin/llc.exe
+              - Library/bin/lld.exe
+              - Library/bin/lld-link.exe
+              - Library/bin/LLVM-C.dll
+              - Library/bin/LTO.dll
+              - Library/bin/Remarks.dll
+              - Library/bin/libclang.dll
+              - Library/bin/acpp-rt.dll
+              - Library/bin/acpp-common.dll
+              - Library/lib/LLVM-C.lib
+              - Library/lib/LTO.lib
+              - Library/lib/Remarks.lib
+              - Library/lib/libclang.lib
+              - Library/lib/acpp-rt.lib
+              - Library/lib/acpp-common.lib
+              - Library/bin/hipSYCL/**
+              - Library/lib/hipSYCL/**
+              # unpackaged: libomp comes from conda-forge llvm-openmp
+              - Library/bin/libomp.dll
+              - Library/lib/libomp.lib
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime', exact=True) }}
@@ -411,13 +659,25 @@ outputs:
             - llvm-as
           files:
             exists:
-              - lib/cmake/llvm/LLVMConfig.cmake
-              - lib/cmake/clang/ClangConfig.cmake
+              - if: linux
+                then:
+                  - lib/cmake/llvm/LLVMConfig.cmake
+                  - lib/cmake/clang/ClangConfig.cmake
+                else:
+                  - Library/lib/cmake/llvm/LLVMConfig.cmake
+                  - Library/lib/cmake/clang/ClangConfig.cmake
             not_exists:
-              - bin/clang
-              - bin/acpp
-              - bin/clangd
-              - bin/lldb
+              - if: linux
+                then:
+                  - bin/clang
+                  - bin/acpp
+                  - bin/clangd
+                  - bin/lldb
+                else:
+                  - Library/bin/clang.exe
+                  - Library/bin/acpp
+                  - Library/bin/clangd.exe
+                  - Library/bin/lldb.exe
   - package:
       name: acpp-tools
       version: ${{ version }}
@@ -426,52 +686,102 @@ outputs:
       number: 0
       files:
         include:
-          - bin/amdgpu-arch
-          - bin/clang-apply-replacements
-          - bin/clang-change-namespace
-          - bin/clang-check
-          - bin/clang-doc
-          - bin/clang-extdef-mapping
-          - bin/clang-format
-          - bin/clang-include-cleaner
-          - bin/clang-include-fixer
-          - bin/clang-installapi
-          - bin/clang-linker-wrapper
-          - bin/clang-move
-          - bin/clang-nvlink-wrapper
-          - bin/clang-offload-bundler
-          - bin/clang-offload-packager
-          - bin/clang-query
-          - bin/clang-refactor
-          - bin/clang-reorder-fields
-          - bin/clang-repl
-          - bin/clang-scan-deps
-          - bin/clang-sycl-linker
-          - bin/clang-tidy
-          - bin/clangd
-          - bin/diagtool
-          - bin/find-all-symbols
-          - bin/git-clang-format
-          - bin/hmaptool
-          - bin/modularize
-          - bin/nvptx-arch
-          - bin/offload-arch
-          - bin/pp-trace
-          - bin/run-clang-tidy
-          - bin/scan-build
-          - bin/scan-build-py
-          - bin/scan-view
-          - bin/llvm-bolt
-          - bin/llvm-bolt-heatmap
-          - bin/perf2bolt
-          - bin/merge-fdata
-          - share/clang/**
-          - share/scan-build/**
-          - share/scan-view/**
-          - share/opt-viewer/**
-          - lib/libear/**
-          - lib/libscanbuild/**
-          - libexec/**
+          - if: linux
+            then:
+              - bin/amdgpu-arch
+              - bin/clang-apply-replacements
+              - bin/clang-change-namespace
+              - bin/clang-check
+              - bin/clang-doc
+              - bin/clang-extdef-mapping
+              - bin/clang-format
+              - bin/clang-include-cleaner
+              - bin/clang-include-fixer
+              - bin/clang-installapi
+              - bin/clang-linker-wrapper
+              - bin/clang-move
+              - bin/clang-nvlink-wrapper
+              - bin/clang-offload-bundler
+              - bin/clang-offload-packager
+              - bin/clang-query
+              - bin/clang-refactor
+              - bin/clang-reorder-fields
+              - bin/clang-repl
+              - bin/clang-scan-deps
+              - bin/clang-sycl-linker
+              - bin/clang-tidy
+              - bin/clangd
+              - bin/diagtool
+              - bin/find-all-symbols
+              - bin/git-clang-format
+              - bin/hmaptool
+              - bin/modularize
+              - bin/nvptx-arch
+              - bin/offload-arch
+              - bin/pp-trace
+              - bin/run-clang-tidy
+              - bin/scan-build
+              - bin/scan-build-py
+              - bin/scan-view
+              - bin/llvm-bolt
+              - bin/llvm-bolt-heatmap
+              - bin/perf2bolt
+              - bin/merge-fdata
+              - share/clang/**
+              - share/scan-build/**
+              - share/scan-view/**
+              - share/opt-viewer/**
+              - lib/libear/**
+              - lib/libscanbuild/**
+              - libexec/**
+            else:
+              # no bolt on win (ELF-only); scan-build ships extra .bat
+              # drivers and the python analyzers land in bin
+              - Library/bin/amdgpu-arch.exe
+              - Library/bin/analyze-build
+              - Library/bin/clang-apply-replacements.exe
+              - Library/bin/clang-change-namespace.exe
+              - Library/bin/clang-check.exe
+              - Library/bin/clang-doc.exe
+              - Library/bin/clang-extdef-mapping.exe
+              - Library/bin/clang-format.exe
+              - Library/bin/clang-include-cleaner.exe
+              - Library/bin/clang-include-fixer.exe
+              - Library/bin/clang-installapi.exe
+              - Library/bin/clang-linker-wrapper.exe
+              - Library/bin/clang-move.exe
+              - Library/bin/clang-nvlink-wrapper.exe
+              - Library/bin/clang-offload-bundler.exe
+              - Library/bin/clang-offload-packager.exe
+              - Library/bin/clang-query.exe
+              - Library/bin/clang-refactor.exe
+              - Library/bin/clang-reorder-fields.exe
+              - Library/bin/clang-repl.exe
+              - Library/bin/clang-scan-deps.exe
+              - Library/bin/clang-sycl-linker.exe
+              - Library/bin/clang-tidy.exe
+              - Library/bin/clangd.exe
+              - Library/bin/diagtool.exe
+              - Library/bin/find-all-symbols.exe
+              - Library/bin/git-clang-format
+              - Library/bin/git-clang-format.bat
+              - Library/bin/hmaptool
+              - Library/bin/intercept-build
+              - Library/bin/modularize.exe
+              - Library/bin/nvptx-arch.exe
+              - Library/bin/pp-trace.exe
+              - Library/bin/run-clang-tidy
+              - Library/bin/scan-build
+              - Library/bin/scan-build.bat
+              - Library/bin/scan-build-py
+              - Library/bin/scan-view
+              - Library/share/clang/**
+              - Library/share/scan-build/**
+              - Library/share/scan-view/**
+              - Library/share/opt-viewer/**
+              - Library/lib/libear/**
+              - Library/lib/libscanbuild/**
+              - Library/libexec/**
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime', exact=True) }}
@@ -499,7 +809,10 @@ outputs:
             - clangd
             - run-clang-tidy
             - scan-build
-            - llvm-bolt
+            # bolt is ELF-only; it does not build on win
+            - if: linux
+              then:
+                - llvm-bolt
   - package:
       name: acpp-lldb
       version: ${{ version }}

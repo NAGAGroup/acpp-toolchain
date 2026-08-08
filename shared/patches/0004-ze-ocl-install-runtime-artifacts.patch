@@ -1,0 +1,26 @@
+Install the ze/ocl backend DLLs on Windows (missing RUNTIME install rule).
+
+The rt-backend-cuda/hip/omp install rules declare RUNTIME, LIBRARY and
+ARCHIVE destinations, but rt-backend-ze and rt-backend-ocl declare only
+LIBRARY and ARCHIVE. On Windows a shared library's .dll is a RUNTIME
+artifact, and CMake silently skips artifact kinds that have no install
+rule — so both backends build fine but only their import .lib files are
+installed; the .dll files never reach the install tree and the backends
+cannot load at runtime. Add the same RUNTIME destination the other three
+backends already use. No effect on Linux (a .so is a LIBRARY artifact).
+
+diff --git a/src/runtime/CMakeLists.txt b/src/runtime/CMakeLists.txt
+--- a/src/runtime/CMakeLists.txt
++++ b/src/runtime/CMakeLists.txt
+@@ -234,4 +234,5 @@
+   install(TARGETS rt-backend-ze
++        RUNTIME DESTINATION bin/hipSYCL
+         LIBRARY DESTINATION lib/hipSYCL
+         ARCHIVE DESTINATION lib/hipSYCL)
+ endif()
+@@ -289,4 +290,5 @@
+   install(TARGETS rt-backend-ocl
++        RUNTIME DESTINATION bin/hipSYCL
+         LIBRARY DESTINATION lib/hipSYCL
+         ARCHIVE DESTINATION lib/hipSYCL)
+ endif()

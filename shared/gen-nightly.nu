@@ -147,6 +147,9 @@ def apply-pairs [text: string, pairs: table] {
 
 def generate [src: path] {
   mut s = (open --raw $src)
+  # Lines marked [release-only] are dropped from the nightly lane (e.g.
+  # backport patches for bugs upstream has already fixed on develop).
+  $s = (($s | lines | where {|l| not ($l | str contains "[release-only]") } | str join "\n") + "\n")
   $s = ($s | str replace --all $HEADER_RELEASE $HEADER_NIGHTLY)
   $s = ($s | str replace --all $CONTEXT_RELEASE $CONTEXT_NIGHTLY)
   $s = ($s | str replace --all $ACPP_SRC_RELEASE $ACPP_SRC_NIGHTLY)

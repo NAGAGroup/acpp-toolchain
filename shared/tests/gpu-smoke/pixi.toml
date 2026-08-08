@@ -38,21 +38,21 @@ cmd = "acpp-info -l"
 description = "List backends/devices the runtime can see"
 
 # ── Windows variants ──────────────────────────────────────────────────────
-# The acpp driver ships as an extensionless python script (no .exe shim), and
-# compiling needs the MSVC headers/libs env: the Win-x64-GPU runner image
-# carries VS 2019 Community, so vcvars64 comes from there. clang 20 targets
-# the 14.29 headers fine.
+# build-once / run-on-GPU split (same design as the linux nightly test
+# suite): build-win compiles the smoke with its VS2026 toolchain (vcvars
+# path via ACPP_SMOKE_VCVARS) against the just-built channel; the GPU box
+# (Win-x64-GPUv2, base Windows 11 image) has no VS at all and only RUNS
+# the device-agnostic SSCP binary. The acpp driver ships as an
+# extensionless python script on win, hence the explicit python call.
 [target.win-64.tasks.build-smoke]
-cmd = 'cmd /d /c "\"C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat\" && python \"%CONDA_PREFIX%\Library\bin\acpp\" -O2 --acpp-targets=generic ..\hello.cpp -o smoke.exe"'
-description = "Compile the SYCL smoke binary on win (VS2019 env + python acpp driver)"
+cmd = 'cmd /d /c "\"%ACPP_SMOKE_VCVARS%\" && python \"%CONDA_PREFIX%\Library\bin\acpp\" -O2 --acpp-targets=generic ..\hello.cpp -o smoke.exe"'
+description = "Compile the SYCL smoke binary on win (MSVC env from ACPP_SMOKE_VCVARS + python acpp driver)"
 
 [target.win-64.tasks.smoke-cpu]
 cmd = "ACPP_VISIBILITY_MASK=omp ./smoke.exe"
-depends-on = ["build-smoke"]
 
 [target.win-64.tasks.smoke-cuda]
 cmd = "ACPP_VISIBILITY_MASK=cuda ./smoke.exe"
-depends-on = ["build-smoke"]
 
 [target.win-64.tasks.acpp-info]
 cmd = "acpp-info -l"

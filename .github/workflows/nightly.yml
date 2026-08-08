@@ -342,7 +342,7 @@ jobs:
 
   win-gpu-gate:
     needs: [upstream, build-win]
-    runs-on: Win-x64-GPUv2
+    runs-on: Win-x64-GPU
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -351,10 +351,11 @@ jobs:
           name: local-channel-win-nightly
           path: local-channel
       # See release.yml win-gpu-gate for the driver rationale.
-      - name: Install NVIDIA datacenter driver
+      - name: Update NVIDIA datacenter driver
         run: |
+          nvidia-smi
           $ver = "553.62"
-          $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-win10-win11-64bit-dch-international.exe"
+          $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-winserver-2022-dch-international.exe"
           Write-Host "Fetching $url"
           curl.exe -sL -o driver.exe $url
           Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait

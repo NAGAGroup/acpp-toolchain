@@ -184,15 +184,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-win-${{ github.run_id }}
-          restore-keys: ccache-win-
+          key: ccache-win-release-${{ github.run_id }}
+          restore-keys: ccache-win-release-
 
       - name: Restore rattler cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
-          key: rattler-win-${{ github.run_id }}
-          restore-keys: rattler-win-
+          key: rattler-win-release-${{ github.run_id }}
+          restore-keys: rattler-win-release-
 
       # Staging cache lives under the OUTPUT dir, not RATTLER_CACHE_DIR —
       # see the linux job note.
@@ -200,8 +200,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-${{ github.run_id }}
-          restore-keys: staging-win-
+          key: staging-win-release-${{ github.run_id }}
+          restore-keys: staging-win-release-
 
       # GitHub's Windows runners ship a very long PATH; conda's vs activation
       # then calls vcvars64.bat, which appends more and blows cmd.exe's 8191
@@ -251,21 +251,21 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-${{ github.run_id }}
+          key: staging-win-release-${{ github.run_id }}
 
       - name: Save ccache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-win-${{ github.run_id }}
+          key: ccache-win-release-${{ github.run_id }}
 
       - name: Save rattler cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
-          key: rattler-win-${{ github.run_id }}
+          key: rattler-win-release-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -288,6 +288,14 @@ jobs:
           run-install: false
       - name: GPU present
         run: nvidia-smi
+      # pixi solves EVERY platform in the manifest; pin to this gate's own
+      # platform so a linux gate never tries to solve win-64 (and vice versa)
+      - name: Pin smoke manifest to this platform
+        working-directory: shared/tests/gpu-smoke
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then P=win-64; else P=linux-64; fi
+          sed -i "s/^platforms = .*/platforms = [\"$P\"]/" pixi.toml
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
@@ -358,6 +366,14 @@ jobs:
       - name: Stage prebuilt smoke binary
         shell: bash
         run: cp local-channel/smoke.exe shared/tests/gpu-smoke/smoke.exe
+      # pixi solves EVERY platform in the manifest; pin to this gate's own
+      # platform so a linux gate never tries to solve win-64 (and vice versa)
+      - name: Pin smoke manifest to this platform
+        working-directory: shared/tests/gpu-smoke
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then P=win-64; else P=linux-64; fi
+          sed -i "s/^platforms = .*/platforms = [\"$P\"]/" pixi.toml
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info

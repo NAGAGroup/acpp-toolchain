@@ -11,7 +11,7 @@ release-pin backport only.
 diff --git a/src/compiler/llvm-to-backend/CMakeLists.txt b/src/compiler/llvm-to-backend/CMakeLists.txt
 --- a/src/compiler/llvm-to-backend/CMakeLists.txt
 +++ b/src/compiler/llvm-to-backend/CMakeLists.txt
-@@ -207,2 +207,3 @@
+@@ -191,2 +191,3 @@
        CMAKE_CACHE_ARGS
 +        -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
          -DLLVM_SPIRV_BUILD_EXTERNAL:BOOL=YES

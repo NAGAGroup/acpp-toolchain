@@ -298,11 +298,13 @@ jobs:
           run-install: false
       - run: nvidia-smi
       # The smoke manifest names release-lane packages; nightly ships the
-      # -nightly twins, so point the same tasks at those.
+      # -nightly twins, so point the same tasks at those. Also pin to this
+      # platform: pixi solves every platform in the manifest, and this
+      # artifact channel only carries linux-64.
       - name: Retarget smoke manifest at the nightly suite
         working-directory: shared/tests/gpu-smoke
         run: |
-          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /' pixi.toml
+          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
       - name: SYCL smoke on CPU backend
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu
@@ -364,6 +366,14 @@ jobs:
       - name: Stage prebuilt smoke binary
         shell: bash
         run: cp local-channel/smoke.exe shared/tests/gpu-smoke/smoke.exe
+      # pixi solves EVERY platform in the manifest; pin to this gate's own
+      # platform so a linux gate never tries to solve win-64 (and vice versa)
+      - name: Pin smoke manifest to this platform
+        working-directory: shared/tests/gpu-smoke
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then P=win-64; else P=linux-64; fi
+          sed -i "s/^platforms = .*/platforms = [\"$P\"]/" pixi.toml
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info

@@ -119,3 +119,35 @@ key). All 9 packages live on https://prefix.dev/jackm97/naga-labs.
 - Interim: build shells out to rattler-build (see shared/build-lane.nu) because
   pixi-build-rattler-build drops channels for staging outputs. Revert to
   `pixi publish --to ./local-channel` when fixed upstream.
+
+## win-64 port (in progress, 2026-08-08)
+Build support landed (see shared/build-stage.nu windows-args + shared/variants/win-64.yaml).
+Renders 6 outputs on win-64 vs 9 on linux-64.
+
+Decisions and their evidence:
+- **Build compiler = clang_win-64/clangxx_win-64, not vs2022.** conda-forge's
+  llvmdev overrides the compiler only for osx and builds Windows with MSVC,
+  but AdaptiveCpp is only ever built with clang-cl upstream
+  (.github/workflows/windows-acppllvm.yml) and its sources have never been
+  exercised under MSVC. clang_win-64 is itself a conda-forge toolchain, so we
+  stay in-ecosystem; `c_stdlib: vs` stays canonical (note: c_stdlib_version is
+  unix-only in conda-forge pinning — do not set it on win).
+- **Level Zero + OpenCL are ON for win.** Upstream's CI disables OpenCL on
+  Windows, but the install docs never say it cannot work, and level-zero,
+  level-zero-devel and opencl-headers ALL ship for win-64. Only the ICD loader
+  differs by name: ocl-icd (linux) vs khronos-opencl-icd-loader (win).
+- **No lldb on win** (not in the win LLVM_ENABLE_PROJECTS set) => acpp-lldb is
+  skipped there. clang-tools-extra IS added on top of upstream's project list
+  so acpp-tools stays at parity.
+- **No LLVM dylib on Windows** => tools link static libs, so the win file
+  partition differs from linux by construction (still to be written; needs a
+  real install tree to inspect).
+- Install prefix on win is %PREFIX%\Library per conda layout.
+
+Next: (1) dispatch .github/workflows/windows.yml to discover the real install
+layout, (2) write the win file partition from it, (3) port the win activation
+packages from shared/activation/vendor/clang-win-activation (pinned d9ca09e6)
+— note that lineage is DIFFERENT from the linux ctng one: .bat/.ps1/.sh
+triples, an older positional _tc_activation, and flags
+`-nostdlib -fms-runtime-lib=dll -fuse-ld=lld -fno-aligned-allocation` plus a
+clang_rt.builtins defaultlib.

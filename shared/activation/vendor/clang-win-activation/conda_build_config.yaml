@@ -1,0 +1,76 @@
+# corresponding to the most recent clang versions in
+# https://github.com/conda-forge/clang-compiler-activation-feedstock/blob/main/recipe/conda_build_config.yaml
+CLANG_VERSION:
+  - 22.1
+  - 21.1
+  - 20.1
+  - 19.1
+
+# VS-related things that are zipped together:
+# match vcver / vsyear / runtime_version / cl_version from
+# https://github.com/conda-forge/vc-feedstock/blob/main/recipe/conda_build_config.yaml
+VCVER:
+  - 14.3
+  - 14.2
+VSYEAR:                     # [win]
+  - 2022                    # [win]
+  - 2019                    # [win]
+RUNTIME_VERSION:
+  - 14.44.35208
+  - 14.29.30139
+CL_VERSION:
+  - 19.44.35207
+  - 19.29.30139
+
+# toolchain name in Microsoft.VisualStudio.Component.VC.<TOOLCHAIN_COMBINED>.x86.x64, see
+# https://learn.microsoft.com/en-us/visualstudio/install/workload-component-id-vs-build-tools
+TOOLCHAIN_COMBINED:         # [unix]
+  - 14.44.17.14             # [unix]
+  - 14.29.16.11             # [unix]
+
+# header version corresponding to minor version (i.e. x in VS 15.x), see last digits of _MSC_FULL_VER in
+# https://en.wikipedia.org/wiki/Microsoft_Visual_C%2B%2B#Internal_version_numbering;
+# alternatively, download & inspect the *.vsix binaries (for details see install-pkg.sh)
+MSVC_HEADERS_VERSION:       # [unix]
+  - 14.44.35207             # [unix]
+  - 14.29.30133             # [unix]
+
+zip_keys:
+  -
+    - VCVER
+    - VSYEAR                # [win]
+    - RUNTIME_VERSION
+    - CL_VERSION
+    - TOOLCHAIN_COMBINED    # [unix]
+    - MSVC_HEADERS_VERSION  # [unix]
+
+# use latest version from https://github.com/conda-forge/ucrt-feedstock/blob/main/recipe/meta.yaml
+WINSDK_VERSION:
+  # needs to stay on ".0" even though the archive page will show a non-zero patch version
+  - 10.0.26100.0
+# ensure that the above version matches the latest release under
+# https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/
+# and extract the link for the iso from there
+WINSDK_URL:
+  - https://go.microsoft.com/fwlink/?linkid=2326092
+
+CHOST_BASE:
+  - x86_64-pc-windows-msvc
+
+# FINAL_* entries are taken from the linux64 entries in
+# https://github.com/conda-forge/ctng-compiler-activation-feedstock/blob/main/recipe/conda_build_config.yaml;
+# Removed -fPIC & -fno-plt
+FINAL_CFLAGS:
+  - -march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe
+
+FINAL_CXXFLAGS:
+  - -fvisibility-inlines-hidden -std=c++17 -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe
+
+FINAL_CL_FLAGS:
+  # -ftree-vectorize            /Oi
+  # -O2                         /O2
+  # -fstack-protector-strong    /GS
+  # -ffunction-sections         /Gy
+  # -fms-runtime-lib=dll        /MD
+  # -pipe                       no equivalent
+  - /Oi /O2 /GS /Gy /MD -march=nocona -mtune=haswell -fuse-ld=lld

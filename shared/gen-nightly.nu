@@ -69,7 +69,7 @@ const ACPP_SRC_NIGHTLY = '      - git: https://github.com/AdaptiveCpp/AdaptiveCp
 # names to placeholders; phase 3 resolves every placeholder.
 def park-pairs [] {
   [[from, to];
-   ["acpp-runtime-activate.sh", "@PROT_ACT@"]      # a shipped file, never a package
+   ["acpp-runtime-activate.", "@PROT_ACT@"]      # shipped files (.sh/.bat/.ps1/.*), never a package
    ["acpp-clangxx-nightly_linux-64", "@X_CLANGXX@"]
    ["acpp-clang-cl-nightly_win-64", "@X_CLANGCL_WIN@"]
    ["acpp-clangxx-nightly_win-64", "@X_CLANGXX_WIN@"]

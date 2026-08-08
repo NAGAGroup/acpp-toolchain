@@ -170,7 +170,7 @@ def main [] {
     [($src | path join "shared" "licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
     [($src | path join "shared" "licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
   ] {
-    if (open --raw $pair.0) != (open --raw $pair.1) {
+    if ((open --raw $pair.0 | str replace --all "\r" "") != (open --raw $pair.1 | str replace --all "\r" "")) {
       error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update shared/licenses/"}
     }
   }

@@ -22,6 +22,8 @@ const CHOST = "x86_64-pc-windows-msvc"
 # FINAL_* are the ctng linux64 flags minus -fPIC/-fno-plt (see vendored cbc)
 const FINAL_CFLAGS = "-march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe"
 const FINAL_CXXFLAGS = "-fvisibility-inlines-hidden -std=c++17 -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe"
+# clang-cl takes MSVC-style flags; both @CFLAGS@ and @CXXFLAGS@ render to this.
+const FINAL_CL_FLAGS = "/Oi /O2 /GS /Gy /MD -march=nocona -mtune=haswell -fuse-ld=lld"
 
 # ACPP DELTA — the SYCL environment, added on the CXX side only (mirrors the
 # linux port). ACPP_TARGETS respects a pre-set value; generic SSCP is the only
@@ -48,12 +50,27 @@ const ACPP_SH_ENTRIES = '  "ACPP_TARGETS,${ACPP_TARGETS:-generic}" \
   "ACPP_CLANG,${CONDA_PREFIX}/Library/bin/clang++.exe" \
 '
 
-def render [text: string, llvm_major: string] {
+def render [text: string, llvm_major: string, side: string] {
+  # clang-cl is a single driver for both languages, so both flag slots take
+  # the MSVC-style flag set.
+  let cflags = (if $side == "clang-cl" { $FINAL_CL_FLAGS } else { $FINAL_CFLAGS })
+  let cxxflags = (if $side == "clang-cl" { $FINAL_CL_FLAGS } else { $FINAL_CXXFLAGS })
   $text
   | str replace --all "@CHOST@" $CHOST
-  | str replace --all "@CFLAGS@" $FINAL_CFLAGS
-  | str replace --all "@CXXFLAGS@" $FINAL_CXXFLAGS
+  | str replace --all "@CFLAGS@" $cflags
+  | str replace --all "@CXXFLAGS@" $cxxflags
   | str replace --all "@MAJOR_VER@" $llvm_major
+}
+
+# UPSTREAM BUG (conda-forge/clang-win-activation, pinned ref): the clang-cl
+# .ps1 sets CC=clang.exe / CXX=clang++.exe, while the .bat correctly sets
+# clang-cl.exe for both. Shipping that verbatim would give PowerShell users a
+# different compiler than cmd users from the same package, so we correct it.
+def fix-upstream-ps1-driver [text: string, side: string] {
+  if $side != "clang-cl" { return $text }
+  $text
+  | str replace --all '$Env:CC="clang.exe"' '$Env:CC="clang-cl.exe"'
+  | str replace --all '$Env:CXX="clang++.exe"' '$Env:CXX="clang-cl.exe"'
 }
 
 def main [side: string, llvm_major: string] {
@@ -66,26 +83,32 @@ def main [side: string, llvm_major: string] {
   mkdir $actd
   mkdir $deactd
 
-  # `_y-` (clang) must sort after the vs<YEAR> vars; `_z-` (clangxx) after it.
-  let order = (if $side == "clang" { "y" } else { "z" })
+  # `_y-` sorts after the vs<YEAR> compiler vars; `_z-` (clangxx) after `_y-`
+  # (clang) because clangxx reuses CPPFLAGS_USED that clang sets. clang-cl is
+  # a standalone driver that intentionally conflicts with the clang/clangxx
+  # pair, so it takes `_y-` too and ordering against them never arises.
+  let order = (if $side == "clangxx" { "z" } else { "y" })
   let stem = $"vs($VSYEAR)_($order)-acpp-($side)_win-64"
   let src_stem = $"activate-($side)_win-64"
+  # clang-cl covers BOTH languages, so it carries the SYCL delta itself;
+  # otherwise the delta rides the CXX side only.
+  let carries_delta = ($side in ["clangxx" "clang-cl"])
 
   for ext in [bat ps1] {
     let f = ($vendor | path join $"($src_stem).($ext)")
     if not ($f | path exists) { continue }
-    mut out = (render (open --raw $f) $llvm_major)
-    # ACPP DELTA rides the CXX side only
-    if $side == "clangxx" {
+    mut out = (fix-upstream-ps1-driver (render (open --raw $f) $llvm_major $side) $side)
+    if $carries_delta {
       $out = ($out + (if $ext == "bat" { $ACPP_BAT } else { $ACPP_PS1 }))
     }
     $out | save --force ($actd | path join $"($stem).($ext)")
   }
 
   # bash side: activate + deactivate, with the delta inside _tc_activation
+  # clang-cl has no .sh in the feedstock (cmd/PowerShell only)
   let ash = ($vendor | path join $"($src_stem).sh")
   if ($ash | path exists) {
-    mut out = (render (open --raw $ash) $llvm_major)
+    mut out = (render (open --raw $ash) $llvm_major $side)
     if $side == "clangxx" {
       # Insert before the trailing CXXFLAGS entry's line continuation end
       $out = ($out | str replace $'  "CXXFLAGS,@CXXFLAGS@ ${CPPFLAGS_USED}" \
@@ -96,7 +119,7 @@ def main [side: string, llvm_major: string] {
   }
   let dsh = ($vendor | path join $"deactivate-($side)_win-64.sh")
   if ($dsh | path exists) {
-    mut out = (render (open --raw $dsh) $llvm_major)
+    mut out = (render (open --raw $dsh) $llvm_major $side)
     if $side == "clangxx" {
       $out = ($out + $'
 # ---- ACPP DELTA: restore the SYCL environment ---------------------------

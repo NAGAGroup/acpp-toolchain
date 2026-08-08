@@ -668,6 +668,42 @@ outputs:
               - etc/conda/activate.d/vs2022_z-acpp-clangxx_win-64.bat
               - etc/conda/activate.d/vs2022_z-acpp-clangxx_win-64.ps1
 
+  # clang-cl driver: the MSVC-CLI-compatible front end most existing Windows
+  # build systems expect. Upstream ships clang-cl_win-64 as an ALTERNATIVE to
+  # clang_win-64 (they intentionally conflict), so ours conflicts with our own
+  # clang/clangxx activation pair for the same reason: both would install a
+  # vs2022_y-* script and fight over CC/CXX.
+  - package:
+      name: acpp-clang-cl_win-64
+      version: ${{ version }}
+    build:
+      number: 0
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang-cl ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('acpp', exact=True) }}
+      run_exports:
+        strong:
+          - acpp-runtime >=${{ acpp_version }},<25.11
+      run_constraints:
+        - clang-cl_win-64 <0.0a0
+        - clang_win-64 <0.0a0
+        - acpp-clang_win-64 <0.0a0
+        - acpp-clangxx_win-64 <0.0a0
+        - acpp-clang-cl-nightly_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_y-acpp-clang-cl_win-64.bat
+              - etc/conda/activate.d/vs2022_y-acpp-clang-cl_win-64.ps1
+
   # ── Backend metapackages (precise runtime deps, design §5) ────────────────
   # One-package install path: `acpp-runtime-cuda` PULLS IN the lane runtime,
   # so a CUDA user installs exactly one thing (and still gets the omp backend,

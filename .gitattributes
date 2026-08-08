@@ -1,3 +1,5 @@
 # License texts must ship byte-identical to upstream (build-stage.nu asserts
 # this against the extracted trees); never EOL-convert them on checkout.
 shared/licenses/** -text
+# .bat must stay CRLF regardless of checkout platform
+shared/tests/gpu-smoke/*.bat text eol=crlf

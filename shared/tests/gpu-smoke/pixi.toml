@@ -45,7 +45,7 @@ description = "List backends/devices the runtime can see"
 # the device-agnostic SSCP binary. The acpp driver ships as an
 # extensionless python script on win, hence the explicit python call.
 [target.win-64.tasks.build-smoke]
-cmd = 'cmd /d /c "\"%ACPP_SMOKE_VCVARS%\" && python \"%CONDA_PREFIX%\Library\bin\acpp\" -O2 --acpp-targets=generic ..\hello.cpp -o smoke.exe"'
+cmd = "cmd /d /c build-smoke-win.bat"
 description = "Compile the SYCL smoke binary on win (MSVC env from ACPP_SMOKE_VCVARS + python acpp driver)"
 
 [target.win-64.tasks.smoke-cpu]

@@ -1,0 +1,28 @@
+Link the Level Zero loader via find_library instead of a GNU-style -l flag.
+
+The Level Zero backend links its loader with a raw `-lze_loader` literal.
+CMake passes literal flags through to the linker untouched, so with an
+MSVC-style linker the flag is silently dropped and every loader symbol is
+left undefined:
+
+    lld-link: warning: ignoring unknown argument '-lze_loader'
+    lld-link: error: undefined symbol: zeInit
+    ...
+
+Resolving the library with find_library is portable: it yields
+libze_loader.so on Linux and ze_loader.lib on Windows, and turns a missing
+loader into a clear configure-time error instead of a link-time one.
+(find_library REQUIRED needs CMake >= 3.18; the tree declares 3.10 but its
+own CI pins CMake 3.31, so the declared minimum is stale, not a real floor.)
+
+diff --git a/src/runtime/CMakeLists.txt b/src/runtime/CMakeLists.txt
+--- a/src/runtime/CMakeLists.txt
++++ b/src/runtime/CMakeLists.txt
+@@ -215,5 +215,6 @@
+   target_include_directories(rt-backend-ze PRIVATE ${HIPSYCL_SOURCE_DIR}/include)
+-  target_link_libraries(rt-backend-ze PRIVATE acpp-rt -lze_loader)
++  find_library(ACPP_ZE_LOADER_LIBRARY NAMES ze_loader REQUIRED)
++  target_link_libraries(rt-backend-ze PRIVATE acpp-rt ${ACPP_ZE_LOADER_LIBRARY})
+ 
+   target_compile_options(rt-backend-ze PRIVATE ${HIPSYCL_RT_EXTRA_CXX_FLAGS})
+   target_link_libraries(rt-backend-ze PRIVATE ${HIPSYCL_RT_EXTRA_LINKER_FLAGS})

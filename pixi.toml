@@ -61,6 +61,10 @@ description = "Render-check the nightly recipe (fast; no build)"
 cmd = "nu shared/tests/audit.nu"
 description = "Solver-level constraint audits against ./local-channel"
 
+[environments.dev.tasks.audit-win]
+cmd = "nu shared/tests/audit.nu --platform win-64"
+description = "Solver-level constraint audits against ./local-channel (win-64)"
+
 [environments.dev.tasks.publish-channel]
 cmd = "rattler-build upload prefix -c jackm97/naga-labs local-channel/**/*.conda"
 description = "Upload the built local channel to prefix.dev (OIDC in CI)"

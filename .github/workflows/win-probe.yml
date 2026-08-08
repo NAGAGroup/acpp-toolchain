@@ -72,7 +72,7 @@ jobs:
           } catch { Write-Host "Dev Drive probe failed: $_" }
 
   probe-gpu:
-    runs-on: Win-x64-GPU
+    runs-on: Win-x64-GPUv2
     timeout-minutes: 15
     steps:
       - name: GPU present

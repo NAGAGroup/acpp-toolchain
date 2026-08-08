@@ -26,18 +26,23 @@ def main [lane: string] {
   let plat = (if $nu.os-info.name == "windows" { "win-64" } else { "linux-64" })
   let variants = ([shared variants $"($plat).yaml"] | path join)
 
+  # CI points this at fast storage (the win runner's D: temp drive is ~6x
+  # faster than C: for the small-file I/O that dominates work-dir/prefix
+  # copies). Local builds default to ./output as before.
+  let outdir = ($env.ACPP_OUTPUT_DIR? | default "output")
+
   (^rattler-build build
     --recipe $recipe
     --experimental          # staging outputs
     --no-build-id           # stable work dir => ccache hits across runs
     --channel $CHANNEL
     --variant-config $variants
-    --output-dir output)
+    --output-dir $outdir)
 
   if ("local-channel" | path exists) { rm -rf local-channel }
   mkdir local-channel
   for sub in $SUBDIRS {
-    let src = ("output" | path join $sub)
+    let src = ($outdir | path join $sub)
     if ($src | path exists) { cp -r $src ("local-channel" | path join $sub) }
   }
 

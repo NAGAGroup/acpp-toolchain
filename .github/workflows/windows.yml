@@ -21,10 +21,16 @@ jobs:
     runs-on: Win-x64-64
     timeout-minutes: 300
     env:
-      CCACHE_DIR: ${{ github.workspace }}\.ccache
+      # Everything I/O-heavy lives on D: — the runner's temp drive is ~6x
+      # faster than C: for small-file I/O (probed: 4.7k vs 0.8k files/s),
+      # which dominates work-dir copies, staging restores and packaging.
+      # (Defender is already disabled on the runner image; not a factor.)
+      CCACHE_DIR: D:\ccache
       CCACHE_MAXSIZE: 20G
-      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_BASEDIR: D:\rb-output
       CCACHE_NOHASHDIR: "1"
+      RATTLER_CACHE_DIR: D:\rattler-cache
+      ACPP_OUTPUT_DIR: D:\rb-output
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
@@ -32,18 +38,22 @@ jobs:
           cache: true
           environments: dev
 
+      # restore/save are SPLIT (the composite actions/cache only saves when
+      # the job succeeds) so failed runs still warm the next one — during
+      # bring-up loops that is exactly when the cache matters most. Keys use
+      # run_id so every run saves a fresh entry; restore falls back by prefix.
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-win-${{ github.sha }}
+          key: ccache-win-${{ github.run_id }}
           restore-keys: ccache-win-
 
       - name: Restore rattler cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: ~\AppData\Local\rattler\cache
-          key: rattler-win-${{ github.sha }}
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-${{ github.run_id }}
           restore-keys: rattler-win-
 
       # GitHub's Windows runners ship a very long PATH; conda's vs activation
@@ -70,6 +80,31 @@ jobs:
         shell: bash
         run: |
           find local-channel -name '*.conda' -printf '%f  %s bytes\n' | sort
+
+      # Keep only the newest staging entry, else the cached archive grows
+      # without bound across runs.
+      - name: Prune stale staging caches
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = "D:\rattler-cache"
+          if (Test-Path $dir) {
+            Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
+          }
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
         with:

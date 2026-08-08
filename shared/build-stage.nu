@@ -160,6 +160,21 @@ def main [] {
     if ($env | get -o $v | default "") == "" { hide-env --ignore-errors $v }
   }
   let src = $env.SRC_DIR
+
+  # License-drift guard: package outputs ship the VENDORED texts from
+  # shared/licenses/ (they no longer carry the big source trees), so assert
+  # the vendored copies are byte-identical to the licenses in the actually
+  # extracted sources. A pin bump that changes a license fails HERE, loudly,
+  # instead of silently shipping stale text.
+  for pair in [
+    [($src | path join "shared" "licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
+    [($src | path join "shared" "licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
+  ] {
+    if (open --raw $pair.0) != (open --raw $pair.1) {
+      error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update shared/licenses/"}
+    }
+  }
+
   # Conda's Windows layout puts headers/libs/binaries under %PREFIX%\Library,
   # so that — not $PREFIX — is the install prefix and the dependency root on
   # Windows. On Linux the two are the same.

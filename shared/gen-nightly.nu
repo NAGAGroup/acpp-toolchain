@@ -52,13 +52,15 @@ const CONTEXT_NIGHTLY = 'context:
   version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}'
 
 # ── AdaptiveCpp source: pinned tarball -> git at a resolved rev ────────────
-const ACPP_SRC_RELEASE = '  - url: https://github.com/AdaptiveCpp/AdaptiveCpp/archive/9f842c701a599107cc6d117d3539f971036363a1.tar.gz
-    sha256: 816cfdfce0fade314533fc5497f16bfa8419b9d96e47fb39e9e134c3d2cb6d1b
-    target_directory: AdaptiveCpp'
+# NB: indentation matters — the source list lives INSIDE the staging output
+# (6-space item indent) since the per-output source carve.
+const ACPP_SRC_RELEASE = '      - url: https://github.com/AdaptiveCpp/AdaptiveCpp/archive/9f842c701a599107cc6d117d3539f971036363a1.tar.gz
+        sha256: 816cfdfce0fade314533fc5497f16bfa8419b9d96e47fb39e9e134c3d2cb6d1b
+        target_directory: AdaptiveCpp'
 
-const ACPP_SRC_NIGHTLY = '  - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
-    rev: ${{ acpp_commit }}
-    target_directory: AdaptiveCpp'
+const ACPP_SRC_NIGHTLY = '      - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
+        rev: ${{ acpp_commit }}
+        target_directory: AdaptiveCpp'
 
 # Renames run in three phases so no replacement can be re-matched by a later,
 # shorter pattern (a naive sequential pass turns acpp-runtime-cuda into
@@ -160,6 +162,20 @@ def generate [src: path] {
   $s = (apply-pairs $s (rename-pairs))
   $s = (apply-pairs $s (unpark-pairs))
   $s = (apply-pairs $s (tail-pairs))
+
+  # Guard against SILENT substitution misses (e.g. a block replacement whose
+  # indentation drifted from the release recipe): no release-lane pin may
+  # survive into the generated nightly.
+  for leftover in [
+    "AdaptiveCpp/archive/9f842c70"  # release acpp tarball
+    $LLVM_SHA_RELEASE
+    $SPIRV_COMMIT_RELEASE
+    $SPIRV_SHA_RELEASE
+  ] {
+    if ($s | str contains $leftover) {
+      error make {msg: $"gen-nightly: release-lane pin '($leftover)' leaked into nightly output — a substitution pattern no longer matches release/recipe.yaml"}
+    }
+  }
   $s
 }
 

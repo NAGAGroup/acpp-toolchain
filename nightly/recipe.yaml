@@ -21,35 +21,41 @@ recipe:
   name: acpp-toolchain-nightly
   version: ${{ version }}
 
-source:
-  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
-    sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
-    target_directory: llvm-project
-  - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
-    rev: ${{ acpp_commit }}
-    target_directory: AdaptiveCpp
-    patches:
-      - ../shared/patches/0001-llvmspirv-allow-local-source-dir.patch
-      # Level Zero backend includes a glibc-internal header; breaks on win
-      - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
-      # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
-      - ../shared/patches/0003-ze-find-loader-library-portably.patch
-  - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
-    sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
-    target_directory: SPIRV-LLVM-Translator
-  - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
-    sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
-    target_directory: OpenCL-Headers
-  - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
-    sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
-    target_directory: OpenCL-CLHPP
-  - path: ../shared
-    target_directory: shared
+# NB: no top-level source. The big source trees belong to the STAGING output
+# only; package outputs get just ../shared (50 files). rattler-build copies
+# every output's sources into a fresh work dir per output — handing all nine
+# outputs the ~150k-file LLVM tree cost ~21 minutes per Windows run.
+# License texts ship from shared/licenses/ (vendored, drift-checked against
+# the extracted trees by build-stage.nu at every staging build).
 
 outputs:
   # ── Staging: ONE LLVM+AdaptiveCpp build shared by all outputs ──────────
   - staging:
       name: llvm-acpp-stage
+    source:
+      - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+        sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+        target_directory: llvm-project
+      - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
+        rev: ${{ acpp_commit }}
+        target_directory: AdaptiveCpp
+        patches:
+          - ../shared/patches/0001-llvmspirv-allow-local-source-dir.patch
+          # Level Zero backend includes a glibc-internal header; breaks on win
+          - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
+          # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
+          - ../shared/patches/0003-ze-find-loader-library-portably.patch
+      - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
+        sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
+        target_directory: SPIRV-LLVM-Translator
+      - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+        sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+        target_directory: OpenCL-Headers
+      - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+        sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+        target_directory: OpenCL-CLHPP
+      - path: ../shared
+        target_directory: shared
     build:
       script:
         interpreter: nu
@@ -129,6 +135,11 @@ outputs:
   - package:
       name: acpp-runtime-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -280,6 +291,11 @@ outputs:
   - package:
       name: acpp-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -435,6 +451,11 @@ outputs:
   - package:
       name: acpp-llvm-dev-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -693,6 +714,11 @@ outputs:
   - package:
       name: acpp-tools-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -828,6 +854,11 @@ outputs:
   - package:
       name: acpp-lldb-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -863,6 +894,11 @@ outputs:
   - package:
       name: acpp-clang-nightly_linux-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -907,6 +943,11 @@ outputs:
   - package:
       name: acpp-clangxx-nightly_linux-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -953,6 +994,11 @@ outputs:
   - package:
       name: acpp-clang-nightly_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -982,6 +1028,11 @@ outputs:
   - package:
       name: acpp-clangxx-nightly_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -1017,6 +1068,11 @@ outputs:
   - package:
       name: acpp-clang-cl-nightly_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -1053,6 +1109,11 @@ outputs:
   - package:
       name: acpp-runtime-cuda-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
     requirements:
@@ -1070,6 +1131,11 @@ outputs:
   - package:
       name: acpp-runtime-intel-nightly
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
     requirements:
@@ -1090,8 +1156,10 @@ outputs:
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
   license: Apache-2.0 WITH LLVM-exception
+  # Vendored copies (package outputs no longer carry the source trees);
+  # build-stage.nu hard-fails if these ever differ from the extracted trees.
   license_file:
-    - llvm-project/LICENSE.TXT
-    - AdaptiveCpp/LICENSE
+    - shared/licenses/llvm-LICENSE.TXT
+    - shared/licenses/AdaptiveCpp-LICENSE
   summary: AdaptiveCpp SYCL toolchain nightly (develop @ LLVM ${{ llvm_major }}, generic SSCP)
   repository: https://github.com/NAGAGroup/acpp-toolchain

@@ -16,38 +16,44 @@ recipe:
   name: acpp-toolchain
   version: ${{ version }}
 
-source:
-  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
-    sha256: 6898f963c8e938981e6c4a302e83ec5beb4630147c7311183cf61069af16333d
-    target_directory: llvm-project
-  - url: https://github.com/AdaptiveCpp/AdaptiveCpp/archive/9f842c701a599107cc6d117d3539f971036363a1.tar.gz
-    sha256: 816cfdfce0fade314533fc5497f16bfa8419b9d96e47fb39e9e134c3d2cb6d1b
-    target_directory: AdaptiveCpp
-    patches:
-      - ../shared/patches/0001-llvmspirv-allow-local-source-dir.patch
-      # Level Zero backend includes a glibc-internal header; breaks on win
-      - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
-      # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
-      - ../shared/patches/0003-ze-find-loader-library-portably.patch
-      # [release-only] ze/ocl backends lack a RUNTIME install rule, so their
-      # [release-only] DLLs never reach the prefix on win (fixed on develop)
-      - ../shared/patches/0004-ze-ocl-install-runtime-artifacts.patch # [release-only]
-  - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
-    sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
-    target_directory: SPIRV-LLVM-Translator
-  - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
-    sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
-    target_directory: OpenCL-Headers
-  - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
-    sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
-    target_directory: OpenCL-CLHPP
-  - path: ../shared
-    target_directory: shared
+# NB: no top-level source. The big source trees belong to the STAGING output
+# only; package outputs get just ../shared (50 files). rattler-build copies
+# every output's sources into a fresh work dir per output — handing all nine
+# outputs the ~150k-file LLVM tree cost ~21 minutes per Windows run.
+# License texts ship from shared/licenses/ (vendored, drift-checked against
+# the extracted trees by build-stage.nu at every staging build).
 
 outputs:
   # ── Staging: ONE LLVM+AdaptiveCpp build shared by all outputs ──────────
   - staging:
       name: llvm-acpp-stage
+    source:
+      - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+        sha256: 6898f963c8e938981e6c4a302e83ec5beb4630147c7311183cf61069af16333d
+        target_directory: llvm-project
+      - url: https://github.com/AdaptiveCpp/AdaptiveCpp/archive/9f842c701a599107cc6d117d3539f971036363a1.tar.gz
+        sha256: 816cfdfce0fade314533fc5497f16bfa8419b9d96e47fb39e9e134c3d2cb6d1b
+        target_directory: AdaptiveCpp
+        patches:
+          - ../shared/patches/0001-llvmspirv-allow-local-source-dir.patch
+          # Level Zero backend includes a glibc-internal header; breaks on win
+          - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
+          # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
+          - ../shared/patches/0003-ze-find-loader-library-portably.patch
+          # [release-only] ze/ocl backends lack a RUNTIME install rule, so their
+          # [release-only] DLLs never reach the prefix on win (fixed on develop)
+          - ../shared/patches/0004-ze-ocl-install-runtime-artifacts.patch # [release-only]
+      - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
+        sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
+        target_directory: SPIRV-LLVM-Translator
+      - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+        sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+        target_directory: OpenCL-Headers
+      - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+        sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+        target_directory: OpenCL-CLHPP
+      - path: ../shared
+        target_directory: shared
     build:
       script:
         interpreter: nu
@@ -127,6 +133,11 @@ outputs:
   - package:
       name: acpp-runtime
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -278,6 +289,11 @@ outputs:
   - package:
       name: acpp
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -433,6 +449,11 @@ outputs:
   - package:
       name: acpp-llvm-dev
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -691,6 +712,11 @@ outputs:
   - package:
       name: acpp-tools
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -826,6 +852,11 @@ outputs:
   - package:
       name: acpp-lldb
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -861,6 +892,11 @@ outputs:
   - package:
       name: acpp-clang_linux-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -905,6 +941,11 @@ outputs:
   - package:
       name: acpp-clangxx_linux-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -951,6 +992,11 @@ outputs:
   - package:
       name: acpp-clang_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -980,6 +1026,11 @@ outputs:
   - package:
       name: acpp-clangxx_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -1015,6 +1066,11 @@ outputs:
   - package:
       name: acpp-clang-cl_win-64
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
       skip:
@@ -1051,6 +1107,11 @@ outputs:
   - package:
       name: acpp-runtime-cuda
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
     requirements:
@@ -1068,6 +1129,11 @@ outputs:
   - package:
       name: acpp-runtime-intel
       version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
     build:
       number: 0
     requirements:
@@ -1088,8 +1154,10 @@ outputs:
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
   license: Apache-2.0 WITH LLVM-exception
+  # Vendored copies (package outputs no longer carry the source trees);
+  # build-stage.nu hard-fails if these ever differ from the extracted trees.
   license_file:
-    - llvm-project/LICENSE.TXT
-    - AdaptiveCpp/LICENSE
+    - shared/licenses/llvm-LICENSE.TXT
+    - shared/licenses/AdaptiveCpp-LICENSE
   summary: AdaptiveCpp SYCL toolchain (LLVM ${{ llvm_major }} linked-in, generic SSCP)
   repository: https://github.com/NAGAGroup/acpp-toolchain

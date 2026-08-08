@@ -47,19 +47,23 @@ jobs:
           cache: true
           environments: dev
 
+      # restore/save are SPLIT (the composite actions/cache only saves when
+      # the job succeeds) so failed runs still warm the next one — during
+      # debug loops that is exactly when the cache matters most. Keys use
+      # run_id so every run saves a fresh entry; restore falls back by prefix.
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-release-${{ github.sha }}
+          key: ccache-release-${{ github.run_id }}
           restore-keys: ccache-release-
 
       # Holds the staging cache (a full LLVM build) plus the package cache.
       - name: Restore rattler cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/rattler/cache
-          key: rattler-release-${{ github.sha }}
+          key: rattler-release-${{ github.run_id }}
           restore-keys: rattler-release-
 
       - name: Build release lane -> indexed local channel
@@ -73,6 +77,20 @@ jobs:
           cd ~/.cache/rattler/cache 2>/dev/null || exit 0
           ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
           du -sh . || true
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-release-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-release-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
         with:

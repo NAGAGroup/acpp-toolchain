@@ -143,6 +143,13 @@ def windows-args [src: string, libprefix: string] {
     # MSVC headers/libs/SDK that clang-cl targets.
     "-DCMAKE_C_COMPILER=clang-cl"
     "-DCMAKE_CXX_COMPILER=clang-cl"
+    # OpenCL-CLHPP defaults BUILD_EXAMPLES and BUILD_DOCS to ON. Pulled in via
+    # FetchContent, its examples inherit LLVM's exceptions-disabled flags and
+    # fail under clang-cl ("cannot use 'throw' with exceptions disabled"). We
+    # only consume its headers, so skip both. (Harmless on linux, where gcc
+    # builds them anyway — kept win-only to avoid churning a green lane.)
+    "-DBUILD_EXAMPLES=OFF"
+    "-DBUILD_DOCS=OFF"
   ]
 }
 

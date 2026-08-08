@@ -286,10 +286,46 @@ jobs:
       - name: run_exports / run_constraints audits (win-64 solve)
         run: pixi run -e dev audit-win
 
+  win-gpu-gate:
+    needs: build-win
+    runs-on: Win-x64-GPU
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel
+      # The Win-x64-GPU image (Data Science Server 2022) ships a 2021-era
+      # driver (471.11 / CUDA 11.4); cuda-12 runtimes need >=525, so update
+      # the datacenter driver in place (TCC-mode T4: silent, reboot-free).
+      # If NVIDIA moves the URL this step fails loudly — bump the pin.
+      - name: Update NVIDIA datacenter driver
+        run: |
+          nvidia-smi
+          $ver = "553.62"
+          $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-winserver-2022-dch-international.exe"
+          Write-Host "Fetching $url"
+          curl.exe -sL -o driver.exe $url
+          Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait
+          nvidia-smi
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      - name: Backends visible to the runtime
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on CPU backend
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on CUDA backend (PTX JIT on real hardware)
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+
   # ATOMIC publish: requires every platform's build AND gates. A release
   # version exists on the channel for all platforms or for none.
   publish:
-    needs: [build-linux, build-win, gpu-gate, solver-audit, solver-audit-win]
+    needs: [build-linux, build-win, gpu-gate, solver-audit, solver-audit-win, win-gpu-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: read

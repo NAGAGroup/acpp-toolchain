@@ -73,6 +73,19 @@ outputs:
         # swig is only needed for lldb's python bindings (linux-only build)
         - if: linux
           then: swig
+        # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
+        # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp
+        # itself must be compiled by a clang-family driver. We take the
+        # plain `clang` package (deps: vc >=14.3,<15 only) rather than the
+        # clang_win-64 ACTIVATION package, which is built solely against
+        # vs2022/vs2019 and would drag the VS year backwards.
+        # MUST be a build dep, NOT host: rattler-build's staging delta
+        # excludes any path a host dep already provides, and conda-forge's
+        # clang collides with the very files we install (clang.exe,
+        # clang-cl.exe, clang-cpp.exe, lib/clang/**) — as a host dep it
+        # silently ejected them from every package (run 31241929077).
+        - if: win
+          then: clang
       host:
         - zlib
         - zstd
@@ -101,15 +114,9 @@ outputs:
             - numactl
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
+        # NB the clang compiler itself is a BUILD dep (see build: above).
         - if: win
           then:
-            # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
-            # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp
-            # itself must be compiled by a clang-family driver. We take the
-            # plain `clang` package (deps: vc >=14.3,<15 only) rather than the
-            # clang_win-64 ACTIVATION package, which is built solely against
-            # vs2022/vs2019 and would drag the VS year backwards.
-            - clang
             # nvcc.exe is what the legacy FindCUDA module anchors detection on.
             # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
             # hardcoded `vs2019_win-64` dependency and would drag the 2019
@@ -407,7 +414,10 @@ outputs:
                   - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
                   - lib/clang/${{ llvm_major }}/include/omp.h
                 else:
-                  - Library/include/AdaptiveCpp/sycl/sycl.hpp
+                  # win nests the SYCL headers one level deeper than linux
+                  # (AdaptiveCpp/{AdaptiveCpp,hipSYCL}/sycl/sycl.hpp)
+                  - Library/include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp
+                  - Library/include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
                   - Library/lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
                   - Library/lib/clang/${{ llvm_major }}/include/omp.h
             not_exists:

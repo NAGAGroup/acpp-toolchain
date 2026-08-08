@@ -88,7 +88,12 @@ def main [side: string, llvm_major: string] {
   # a standalone driver that intentionally conflicts with the clang/clangxx
   # pair, so it takes `_y-` too and ordering against them never arises.
   let order = (if $side == "clangxx" { "z" } else { "y" })
-  let stem = $"vs($VSYEAR)_($order)-acpp-($side)_win-64"
+  # Name shipped files after the PACKAGE (rattler-build sets PKG_NAME), like
+  # the linux render script: the nightly lane renames the packages
+  # (acpp-clang-nightly_win-64) and the content tests follow the package
+  # name, so hardcoded stems would ship files the tests cannot find.
+  let pkg = ($env.PKG_NAME? | default $"acpp-($side)_win-64")
+  let stem = $"vs($VSYEAR)_($order)-($pkg)"
   let src_stem = $"activate-($side)_win-64"
   # clang-cl covers BOTH languages, so it carries the SYCL delta itself;
   # otherwise the delta rides the CXX side only.
@@ -127,7 +132,7 @@ _tc_activation deactivate host ($CHOST) ($CHOST)- \
   "ACPP_TARGETS," "ACPP_COMPILER_DIR," "ACPP_CLANG,"
 ')
     }
-    $out | save --force ($deactd | path join $"deactivate-acpp-($side)_win-64.sh")
+    $out | save --force ($deactd | path join $"deactivate-($pkg).sh")
   }
 
   print $"installed activation for ($side): (ls $actd | get name | path basename | str join ', ')"

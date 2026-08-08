@@ -96,8 +96,11 @@ outputs:
         # source with the clang-win toolset; conda-forge ships it prebuilt).
         - if: win
           then:
-            # nvcc.exe is what the legacy FindCUDA module anchors detection on
-            - cuda-nvcc >=12,<13
+            # nvcc.exe is what the legacy FindCUDA module anchors detection on.
+            # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
+            # hardcoded `vs2019_win-64` dependency and would drag the 2019
+            # toolset into the host env.
+            - cuda-nvcc-impl >=12,<13
             - libboost-devel
 
   - package:

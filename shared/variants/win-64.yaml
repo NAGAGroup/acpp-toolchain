@@ -13,3 +13,20 @@ cxx_compiler:
 # NOTE: c_stdlib_version is unix-only in conda-forge's pinning; do not set it.
 c_stdlib:
   - vs
+# Pin the Visual Studio year EXACTLY to what the build machine has installed.
+# The conda vs20XX_win-64 packages are activation shims: they locate a system
+# VS install and call vcvars with that year's toolset. If the pinned year is
+# not installed as a PRODUCT, compilation fails even when a newer VS is
+# present (side-by-side toolsets are not a reliable substitute).
+#
+# Our Win-x64-64 runner has ONLY VS 18 Enterprise (2026): the activation probes
+# every VS2019 path, finds none, and falls back to `vswhere -latest`. Its
+# default toolset is 14.51 and `vc` resolves to 14.5 — so pinning 2022 would
+# request -vcvars_ver=14.44 and rely on a side-by-side toolset while the
+# runtime line is 14.5. Track this pin to the runner image.
+#
+# NB: conda-forge scopes c_stdlib_version to unix in its global pinning; we set
+# it on win deliberately, because choosing clang as the build compiler means we
+# never get the year pinned via `c_compiler: vs2022`.
+c_stdlib_version:
+  - "2026.*"

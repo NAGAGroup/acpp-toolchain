@@ -43,9 +43,25 @@ jobs:
           key: rattler-win-${{ github.sha }}
           restore-keys: rattler-win-
 
+      # GitHub's Windows runners ship a very long PATH; conda's vs activation
+      # then calls vcvars64.bat, which appends more and blows cmd.exe's 8191
+      # character limit ("The input line is too long."). conda's own docs say to
+      # strip PATH, so keep only what the build needs and let activation
+      # rebuild the rest.
+      #
       # build-lane.nu selects shared/variants/win-64.yaml from the OS.
       - name: Build release lane (win-64) -> indexed local channel
-        run: pixi run -e dev build-release
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          Write-Host "PATH length: $($env:PATH.Length)"
+          pixi run -e dev build-release
 
       - name: Inventory the produced packages
         shell: bash

@@ -8,6 +8,10 @@ name: release
 
 on:
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: "Build number override (bump when trialing workflow changes so publish gets fresh filenames)"
+        default: "0"
   push:
     tags: ["v*"]
 
@@ -36,6 +40,7 @@ jobs:
     runs-on: Linux-x64-64
     timeout-minutes: 240
     env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 20G
       CCACHE_BASEDIR: ${{ github.workspace }}

@@ -11,6 +11,10 @@ name: windows
 
 on:
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: "Build number override (bump when trialing workflow changes so publish gets fresh filenames)"
+        default: "0"
 
 concurrency:
   group: windows-${{ github.ref }}
@@ -21,6 +25,7 @@ jobs:
     runs-on: Win-x64-64
     timeout-minutes: 300
     env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       CCACHE_MAXSIZE: 20G
       CCACHE_NOHASHDIR: "1"
     steps:

@@ -140,7 +140,9 @@ outputs:
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       files:
         include:
           - if: linux
@@ -294,7 +296,9 @@ outputs:
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       files:
         include:
           - if: linux
@@ -452,7 +456,9 @@ outputs:
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       files:
         include:
           - if: linux
@@ -713,7 +719,9 @@ outputs:
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       files:
         include:
           - if: linux
@@ -851,7 +859,9 @@ outputs:
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
       skip:
         - win
@@ -890,7 +900,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       skip:
         - target_platform != "linux-64"
       script:
@@ -939,7 +951,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       skip:
         - target_platform != "linux-64"
       script:
@@ -990,7 +1004,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1024,7 +1040,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1064,7 +1082,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1105,7 +1125,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
@@ -1127,7 +1149,9 @@ outputs:
       - path: ../shared
         target_directory: shared
     build:
-      number: 0
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}

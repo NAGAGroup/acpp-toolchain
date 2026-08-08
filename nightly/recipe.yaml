@@ -533,12 +533,17 @@ outputs:
               - etc/conda/deactivate.d/deactivate-acpp-clang-nightly_linux-64.sh
       - script:
           - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
             export CONDA_PREFIX="${PREFIX}"
+            before="${CC:-__UNSET__}"
             source "${PREFIX}/etc/conda/activate.d/activate-acpp-clang-nightly_linux-64.sh"
             test -n "${CC}" || (echo "CC not set" && exit 1)
             echo "${CC}" | grep -q "x86_64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
             source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clang-nightly_linux-64.sh"
-            test -z "${CC:-}" || (echo "CC not restored" && exit 1)
+            after="${CC:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CC not restored: ${before} != ${after}" && exit 1)
             echo "activation round-trip OK"
 
   - package:
@@ -571,12 +576,17 @@ outputs:
               - etc/conda/deactivate.d/deactivate-acpp-clangxx-nightly_linux-64.sh
       - script:
           - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
             export CONDA_PREFIX="${PREFIX}"
+            before="${CXX:-__UNSET__}"
             source "${PREFIX}/etc/conda/activate.d/activate-acpp-clangxx-nightly_linux-64.sh"
             test -n "${CXX}" || (echo "CXX not set" && exit 1)
             echo "${CXX}" | grep -q "x86_64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
             source "${PREFIX}/etc/conda/deactivate.d/deactivate-acpp-clangxx-nightly_linux-64.sh"
-            test -z "${CXX:-}" || (echo "CXX not restored" && exit 1)
+            after="${CXX:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
             echo "activation round-trip OK"
 
   # ── Backend metapackages (precise runtime deps, design §5) ────────────────

@@ -127,6 +127,14 @@ def windows-args [src: string, libprefix: string] {
     $"-DCUDA_TOOLKIT_INCLUDE=($libprefix)/include"
     $"-DCUDA_CUDART_LIBRARY=($libprefix)/lib/cudart.lib"
     $"-DCUDA_DEVICE_LIBS_PATH=($libprefix)/nvvm/libdevice"
+    # AdaptiveCpp probes the BUILD compiler for -mcpu=native / -march=native and
+    # uses the result as a proxy for whether llc supports -mcpu=native at JIT
+    # time — upstream's own comment concedes this is the wrong check ("We should
+    # actually check llc/opt here!"). MSVC rejects those clang/gcc spellings, so
+    # the probe fails even though the llc we ship handles -mcpu=native fine.
+    # Force exactly the value the passing path yields on linux, so host JIT
+    # codegen targets the user's CPU identically on both platforms.
+    "-DACPP_HOST_FORCE_MCPU_TARGET=native"
   ]
 }
 

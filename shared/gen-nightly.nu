@@ -69,6 +69,8 @@ def park-pairs [] {
   [[from, to];
    ["acpp-runtime-activate.sh", "@PROT_ACT@"]      # a shipped file, never a package
    ["acpp-clangxx-nightly_linux-64", "@X_CLANGXX@"]
+   ["acpp-clangxx-nightly_win-64", "@X_CLANGXX_WIN@"]
+   ["acpp-clang-nightly_win-64", "@X_CLANG_WIN@"]
    ["acpp-clang-nightly_linux-64", "@X_CLANG@"]
    ["acpp-runtime-cuda-nightly", "@X_CUDA@"]
    ["acpp-runtime-intel-nightly", "@X_INTEL@"]
@@ -82,6 +84,8 @@ def park-pairs [] {
 def rename-pairs [] {
   [[from, to];
    ["acpp-clangxx_linux-64", "@N_CLANGXX@"]
+   ["acpp-clangxx_win-64", "@N_CLANGXX_WIN@"]
+   ["acpp-clang_win-64", "@N_CLANG_WIN@"]
    ["acpp-clang_linux-64", "@N_CLANG@"]
    ["acpp-runtime-cuda", "@N_CUDA@"]
    ["acpp-runtime-intel", "@N_INTEL@"]
@@ -97,6 +101,8 @@ def unpark-pairs [] {
   [[from, to];
    # cross-lane exclusions point at the RELEASE names
    ["@X_CLANGXX@", "acpp-clangxx_linux-64"]
+   ["@X_CLANGXX_WIN@", "acpp-clangxx_win-64"]
+   ["@X_CLANG_WIN@", "acpp-clang_win-64"]
    ["@X_CLANG@", "acpp-clang_linux-64"]
    ["@X_CUDA@", "acpp-runtime-cuda"]
    ["@X_INTEL@", "acpp-runtime-intel"]
@@ -107,6 +113,8 @@ def unpark-pairs [] {
    ["@X_ACPP@", "acpp"]
    # this lane's own packages
    ["@N_CLANGXX@", "acpp-clangxx-nightly_linux-64"]
+   ["@N_CLANGXX_WIN@", "acpp-clangxx-nightly_win-64"]
+   ["@N_CLANG_WIN@", "acpp-clang-nightly_win-64"]
    ["@N_CLANG@", "acpp-clang-nightly_linux-64"]
    ["@N_CUDA@", "acpp-runtime-cuda-nightly"]
    ["@N_INTEL@", "acpp-runtime-intel-nightly"]

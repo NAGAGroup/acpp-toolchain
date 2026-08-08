@@ -611,6 +611,68 @@ outputs:
             test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
             echo "activation round-trip OK"
 
+  # ── Windows compiler activation (design v3 §D2) ───────────────────────────
+  # Ported from conda-forge clang-win-activation (a different lineage from the
+  # linux ctng one: .bat/.ps1/.sh triples, ordering encoded in the FILENAME).
+  - package:
+      name: acpp-clang-nightly_win-64
+      version: ${{ version }}
+    build:
+      number: 0
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('acpp-nightly', exact=True) }}
+      run_exports:
+        strong:
+          - acpp-runtime-nightly ==${{ version }}
+      run_constraints:
+        - clang_win-64 <0.0a0
+        - clang-cl_win-64 <0.0a0
+        - acpp-clang_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_y-acpp-clang-nightly_win-64.bat
+              - etc/conda/activate.d/vs2022_y-acpp-clang-nightly_win-64.ps1
+
+  - package:
+      name: acpp-clangxx-nightly_win-64
+      version: ${{ version }}
+    build:
+      number: 0
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clangxx ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        # clangxx activation reuses CPPFLAGS_USED that the clang script sets,
+        # which is why the filenames force _z- to sort after _y-.
+        - ${{ pin_subpackage('acpp-clang-nightly_win-64', exact=True) }}
+      run_exports:
+        strong:
+          - acpp-runtime-nightly ==${{ version }}
+      run_constraints:
+        - clangxx_win-64 <0.0a0
+        - acpp-clangxx_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_z-acpp-clangxx-nightly_win-64.bat
+              - etc/conda/activate.d/vs2022_z-acpp-clangxx-nightly_win-64.ps1
+
   # ── Backend metapackages (precise runtime deps, design §5) ────────────────
   # One-package install path: `acpp-runtime-cuda-nightly` PULLS IN the lane runtime,
   # so a CUDA user installs exactly one thing (and still gets the omp backend,

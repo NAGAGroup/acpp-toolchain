@@ -1,14 +1,27 @@
-# Nightly lane. Resolves AdaptiveCpp develop HEAD first and skips the whole
-# build when it hasn't moved. The resolved SHA is passed into the recipe
+# Nightly lane, BOTH platforms. Resolves AdaptiveCpp develop HEAD once and
+# skips a platform's build when it hasn't moved past that platform's last
+# published SHA. The resolved SHA is passed into the recipe
 # (ACPP_NIGHTLY_SHA) so the source is pinned per-commit — that also makes the
 # staging cache key rotate deterministically instead of relying on a floating
 # branch.
+#
+# Publish is PER-PLATFORM (unlike the atomic release publish): a nightly is
+# "whatever succeeded tonight", so a failing platform never blocks the other.
+# Each platform tracks its own bookkeeping variable (NIGHTLY_LAST_SHA /
+# NIGHTLY_LAST_SHA_WIN).
+#
+# Windows GPU gate: PLACEHOLDER — pending the runner-choices discussion;
+# Windows GPU validation is manual on real hardware until then.
 name: nightly
 
 on:
   schedule:
     - cron: "17 9 * * *" # daily; 24h cadence per design
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: "Build number override (bump when trialing workflow changes so publish gets fresh filenames)"
+        default: "0"
 
 concurrency:
   group: nightly
@@ -19,8 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.check.outputs.sha }}
-      changed: ${{ steps.check.outputs.changed }}
       date: ${{ steps.check.outputs.date }}
+      changed_linux: ${{ steps.check.outputs.changed_linux }}
+      changed_win: ${{ steps.check.outputs.changed_win }}
     steps:
       - uses: actions/checkout@v4
       - uses: prefix-dev/setup-pixi@v0.10.0
@@ -35,21 +49,24 @@ jobs:
           # Exact ref: a bare `develop` glob also matches refs/remotes/*/develop
           # upstream, which yields two lines and corrupts $GITHUB_OUTPUT.
           SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp refs/heads/develop | head -1 | cut -f1)
-          LAST=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
+          LAST_LINUX=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
+          LAST_WIN=$(gh variable get NIGHTLY_LAST_SHA_WIN -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
           {
             echo "sha=$SHA"
             echo "date=$(date -u +%Y.%m.%d)"
-            echo "changed=$([ "$SHA" != "$LAST" ] && echo true || echo false)"
+            echo "changed_linux=$([ "$SHA" != "$LAST_LINUX" ] && echo true || echo false)"
+            echo "changed_win=$([ "$SHA" != "$LAST_WIN" ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
 
-  build:
+  build-linux:
     needs: upstream
-    if: needs.upstream.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.upstream.outputs.changed_linux == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: Linux-x64-64
     timeout-minutes: 240
     env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NIGHTLY_SHA: ${{ needs.upstream.outputs.sha }}
       ACPP_NIGHTLY_DATE: ${{ needs.upstream.outputs.date }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -64,7 +81,7 @@ jobs:
           environments: dev
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-nightly-${{ github.run_id }}
@@ -73,7 +90,7 @@ jobs:
             ccache-release-
 
       - name: Restore rattler cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/rattler/cache
           key: rattler-nightly-${{ github.run_id }}
@@ -89,14 +106,141 @@ jobs:
           ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
           du -sh . || true
 
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-nightly-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-nightly-${{ github.run_id }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: local-channel-nightly
           path: local-channel/
           retention-days: 14
 
+  build-win:
+    needs: upstream
+    if: needs.upstream.outputs.changed_win == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: Win-x64-64
+    timeout-minutes: 300
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NIGHTLY_SHA: ${{ needs.upstream.outputs.sha }}
+      ACPP_NIGHTLY_DATE: ${{ needs.upstream.outputs.date }}
+      CCACHE_MAXSIZE: 20G
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # See release.yml build-win for the storage rationale (D: removal,
+      # VHDX fallback, probed numbers).
+      - name: Select build storage
+        run: |
+          $root = $null
+          if (Test-Path "D:\") {
+            $root = "D:"
+          } else {
+            try {
+              $vhd = "C:\build-drive.vhdx"
+              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
+              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
+              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
+              $root = "$($part.DriveLetter):"
+              Write-Host "No D: on this instance (fleet is mid D:-removal); mounted ReFS VHDX at $root"
+            } catch {
+              Write-Host "VHDX fallback failed ($_); using workspace drive"
+              $root = $env:GITHUB_WORKSPACE
+            }
+          }
+          Write-Host "Fast storage root: $root"
+          New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
+          @(
+            "CCACHE_DIR=$root\ccache"
+            "CCACHE_BASEDIR=$root\rb-output"
+            "RATTLER_CACHE_DIR=$root\rattler-cache"
+            "ACPP_OUTPUT_DIR=$root\rb-output"
+          ) | Add-Content -Path $env:GITHUB_ENV
+
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-nightly-${{ github.run_id }}
+          restore-keys: |
+            ccache-win-nightly-
+            ccache-win-
+
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-nightly-${{ github.run_id }}
+          restore-keys: rattler-win-nightly-
+
+      # Same PATH strip as the release build-win (cmd.exe 8191-char limit).
+      - name: Build nightly lane (win-64) -> indexed local channel
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          Write-Host "PATH length: $($env:PATH.Length)"
+          pixi run -e dev build-nightly
+
+      - name: Inventory the produced packages
+        shell: bash
+        run: |
+          find local-channel -name '*.conda' -printf '%f  %s bytes\n' | sort
+
+      - name: Prune stale staging caches
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = $env:RATTLER_CACHE_DIR
+          if ($dir -and (Test-Path $dir)) {
+            Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
+          }
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-nightly-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-nightly-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-win-nightly
+          path: local-channel/
+          retention-days: 14
+
   gpu-gate:
-    needs: [upstream, build]
+    needs: [upstream, build-linux]
     runs-on: Linux-x64-GPU
     timeout-minutes: 60
     steps:
@@ -122,8 +266,8 @@ jobs:
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cuda
 
-  publish:
-    needs: [upstream, build, gpu-gate]
+  publish-linux:
+    needs: [upstream, build-linux, gpu-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -143,5 +287,29 @@ jobs:
         run: pixi run -e dev publish-channel
       - name: Record built develop SHA
         run: gh variable set NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream.outputs.sha }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  publish-win:
+    needs: [upstream, build-win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing
+      actions: write # the skip-check bookkeeping variable (gh variable set)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-nightly
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: Upload to prefix.dev
+        run: pixi run -e dev publish-channel
+      - name: Record built develop SHA
+        run: gh variable set NIGHTLY_LAST_SHA_WIN -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream.outputs.sha }}"
         env:
           GH_TOKEN: ${{ github.token }}

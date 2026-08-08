@@ -1,9 +1,15 @@
-# Release lane. Cheap gates on free runners, the LLVM build on the 64-core
-# larger runner, a real-solve GPU gate on the T4 runner, then OIDC publish.
+# Release lane, BOTH platforms. Cheap gates on free runners, the LLVM builds
+# on the 64-core larger runners, a real-solve GPU gate on the T4 runner plus
+# solver audits per platform, then ONE ATOMIC OIDC publish: a release version
+# either ships for every platform or none (Jack's ruling, 2026-08-08).
 #
-# The build job produces an INDEXED local conda channel (`pixi publish --to`)
-# and ships it between jobs as an artifact, so every downstream job consumes
-# the packages exactly the way a user would.
+# Each build job produces an INDEXED local conda channel shipped between jobs
+# as an artifact, so every downstream job consumes the packages exactly the
+# way a user would.
+#
+# Windows GPU gate: PLACEHOLDER — a Win-x64-GPU runner exists; wiring the win
+# smoke into CI is pending the runner-choices discussion. Until then Windows
+# GPU validation is manual on real hardware.
 name: release
 
 on:
@@ -35,7 +41,7 @@ jobs:
           pixi run -e dev render-release > /dev/null
           pixi run -e dev render-nightly > /dev/null
 
-  build:
+  build-linux:
     needs: checks
     runs-on: Linux-x64-64
     timeout-minutes: 240
@@ -103,8 +109,128 @@ jobs:
           path: local-channel/
           retention-days: 14
 
+  build-win:
+    needs: checks
+    runs-on: Win-x64-64
+    timeout-minutes: 300
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      CCACHE_MAXSIZE: 20G
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Everything I/O-heavy goes on the fastest storage the instance has.
+      # Probed on Win-x64-64 (small-file writes): D: temp disk 4.7k files/s,
+      # ReFS VHDX ~2.9k, raw C: ~0.8k. GitHub is REMOVING the D: temp disk
+      # from Windows runners (actions/runner-images#12647, "Hosted Compute
+      # Agent" provisioner since 2025-07) and the fleet is mixed mid-
+      # migration, so: D: when present, else a ReFS VHDX on C: (~3.6x raw
+      # C:), else the workspace drive. (Defender is already disabled on the
+      # image; not a factor.)
+      # Must run before setup-pixi: pixi honors RATTLER_CACHE_DIR and errors
+      # out if the directory cannot be created.
+      - name: Select build storage
+        run: |
+          $root = $null
+          if (Test-Path "D:\") {
+            $root = "D:"
+          } else {
+            try {
+              $vhd = "C:\build-drive.vhdx"
+              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
+              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
+              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
+              $root = "$($part.DriveLetter):"
+              Write-Host "No D: on this instance (fleet is mid D:-removal); mounted ReFS VHDX at $root"
+            } catch {
+              Write-Host "VHDX fallback failed ($_); using workspace drive"
+              $root = $env:GITHUB_WORKSPACE
+            }
+          }
+          Write-Host "Fast storage root: $root"
+          New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
+          @(
+            "CCACHE_DIR=$root\ccache"
+            "CCACHE_BASEDIR=$root\rb-output"
+            "RATTLER_CACHE_DIR=$root\rattler-cache"
+            "ACPP_OUTPUT_DIR=$root\rb-output"
+          ) | Add-Content -Path $env:GITHUB_ENV
+
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-${{ github.run_id }}
+          restore-keys: ccache-win-
+
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-${{ github.run_id }}
+          restore-keys: rattler-win-
+
+      # GitHub's Windows runners ship a very long PATH; conda's vs activation
+      # then calls vcvars64.bat, which appends more and blows cmd.exe's 8191
+      # character limit ("The input line is too long."). conda's own docs say
+      # to strip PATH, so keep only what the build needs and let activation
+      # rebuild the rest.
+      - name: Build release lane (win-64) -> indexed local channel
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          Write-Host "PATH length: $($env:PATH.Length)"
+          pixi run -e dev build-release
+
+      - name: Inventory the produced packages
+        shell: bash
+        run: |
+          find local-channel -name '*.conda' -printf '%f  %s bytes\n' | sort
+
+      - name: Prune stale staging caches
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = $env:RATTLER_CACHE_DIR
+          if ($dir -and (Test-Path $dir)) {
+            Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
+          }
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel/
+          retention-days: 14
+
   gpu-gate:
-    needs: build
+    needs: build-linux
     runs-on: Linux-x64-GPU
     timeout-minutes: 60
     steps:
@@ -129,7 +255,7 @@ jobs:
         run: pixi run smoke-cuda
 
   solver-audit:
-    needs: build
+    needs: build-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,8 +270,26 @@ jobs:
       - name: run_exports / run_constraints audits
         run: pixi run -e dev audit
 
+  solver-audit-win:
+    needs: build-win
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: run_exports / run_constraints audits (win-64 solve)
+        run: pixi run -e dev audit-win
+
+  # ATOMIC publish: requires every platform's build AND gates. A release
+  # version exists on the channel for all platforms or for none.
   publish:
-    needs: [build, gpu-gate, solver-audit]
+    needs: [build-linux, build-win, gpu-gate, solver-audit, solver-audit-win]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -155,7 +299,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-release
-          path: local-channel
+          path: channel-linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: channel-win
+      - name: Merge platform channels
+        run: |
+          mkdir -p local-channel
+          find channel-linux channel-win -name '*.conda' -exec cp {} local-channel/ \;
+          ls -la local-channel/
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true

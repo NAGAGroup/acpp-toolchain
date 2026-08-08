@@ -26,17 +26,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Everything I/O-heavy goes on D: WHEN THE INSTANCE HAS ONE — the temp
-      # drive probed ~6x faster than C: for small-file I/O (4.7k vs 0.8k
-      # files/s), which dominates work-dir copies, staging restores and
-      # packaging. The Win-x64-64 fleet is NOT uniform: some instances have
-      # no D: at all, so detect at runtime and fall back to the workspace
-      # drive. (Defender is already disabled on the image; not a factor.)
+      # Everything I/O-heavy goes on the fastest storage the instance has.
+      # Probed on Win-x64-64 (small-file writes): D: temp disk 4.7k files/s,
+      # ReFS VHDX ~2.9k, raw C: ~0.8k. GitHub is REMOVING the D: temp disk
+      # from Windows runners (actions/runner-images#12647, "Hosted Compute
+      # Agent" provisioner since 2025-07) and the fleet is mixed mid-
+      # migration, so: D: when present, else a ReFS VHDX on C: (~3.6x raw
+      # C:), else the workspace drive. (Defender is already disabled on the
+      # image; not a factor.)
       # Must run before setup-pixi: pixi honors RATTLER_CACHE_DIR and errors
       # out if the directory cannot be created.
       - name: Select build storage
         run: |
-          $root = if (Test-Path "D:\") { "D:" } else { $env:GITHUB_WORKSPACE }
+          $root = $null
+          if (Test-Path "D:\") {
+            $root = "D:"
+          } else {
+            try {
+              $vhd = "C:\build-drive.vhdx"
+              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
+              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
+              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
+              $root = "$($part.DriveLetter):"
+              Write-Host "No D: on this instance (fleet is mid D:-removal); mounted ReFS VHDX at $root"
+            } catch {
+              Write-Host "VHDX fallback failed ($_); using workspace drive"
+              $root = $env:GITHUB_WORKSPACE
+            }
+          }
           Write-Host "Fast storage root: $root"
           New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
           @(

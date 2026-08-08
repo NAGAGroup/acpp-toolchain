@@ -103,3 +103,19 @@ CodeAccelerate-SYCLBuildKit with a pointer README.
   `acpp-llvm-spirv` (built against acpp-llvm-dev; acpp-runtime run-dep;
   removes the ExternalProject patch + last in-build fetch); OpenCL
   headers as env-provided find. Isolated, non-breaking swap post-E2E.
+
+## ✅ RELEASE LANE PUBLISHED (2026-08-08, run 31230199905)
+Full pipeline green in ~18 min: checks → build (Linux-x64-64) → gpu-gate
+(Linux-x64-GPU) + solver-audit → publish via OIDC trusted publishing (no API
+key). All 9 packages live on https://prefix.dev/jackm97/naga-labs.
+- GPU gate installs from the indexed artifact channel through a REAL solve;
+  acpp-info saw `Loaded backend 2: CUDA / Found device: Tesla T4`; CUDA smoke
+  `device: Tesla T4` + PASS (generic SSCP → PTX JIT on hardware). CPU PASS.
+- Solver audits 8/8 PASS.
+- CI bugs fixed en route: llvm-spirv patch was never git-tracked (fresh clones
+  failed); libLLVM must be built before the SPIRV ExternalProject (race only
+  visible at -j64); activation tests must assert a round-trip, not a pristine
+  env (rattler-build pre-activates the test env).
+- Interim: build shells out to rattler-build (see shared/build-lane.nu) because
+  pixi-build-rattler-build drops channels for staging outputs. Revert to
+  `pixi publish --to ./local-channel` when fixed upstream.

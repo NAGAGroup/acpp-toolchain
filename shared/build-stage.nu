@@ -86,6 +86,11 @@ def main [] {
     "-DCMAKE_SHARED_LINKER_FLAGS_INIT=-pthread"
     "-DCMAKE_MODULE_LINKER_FLAGS_INIT=-pthread"
     "-B" $build)
+  # libLLVM.so must exist BEFORE AdaptiveCpp's SPIRV-LLVM-Translator
+  # ExternalProject builds: its inner cmake links the file directly, so the
+  # outer ninja has no rule for it and high job counts race ahead of the link
+  # (invisible at -j16, fatal at -j64).
+  ^cmake --build $build --target LLVM --parallel (cpu-count)
   ^cmake --build $build --parallel (cpu-count)
   cd $build
   ^cmake --install $build

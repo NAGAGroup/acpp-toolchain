@@ -1,0 +1,72 @@
+# Temporary diagnostic: measure the Win-x64-64 runner's storage layout, I/O
+# characteristics and Defender state to pick the fast-storage mechanism for
+# the build (C: vs D: vs ReFS Dev Drive). Delete after the CI-optimization
+# work lands.
+name: win-probe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: Win-x64-64
+    timeout-minutes: 15
+    steps:
+      - name: Drives and free space
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, Root
+          Get-Volume | Format-Table DriveLetter, FileSystem, @{n='SizeGB';e={[math]::Round($_.Size/1GB,1)}}, @{n='FreeGB';e={[math]::Round($_.SizeRemaining/1GB,1)}}
+
+      - name: Defender status
+        run: |
+          try {
+            Get-MpComputerStatus | Format-List AMRunningMode, RealTimeProtectionEnabled, AntivirusEnabled
+            Get-MpPreference | Format-List DisableRealtimeMonitoring, ExclusionPath
+          } catch { Write-Host "Defender cmdlets unavailable: $_" }
+
+      - name: Small-file I/O benchmark (4000 files x 4KB, per drive)
+        run: |
+          function Bench($root, $label) {
+            if (-not (Test-Path $root)) { Write-Host "$label ($root): NOT PRESENT"; return }
+            $dir = Join-Path $root ("iobench-" + [guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            $payload = [byte[]]::new(4096)
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            for ($i = 0; $i -lt 4000; $i++) {
+              [IO.File]::WriteAllBytes((Join-Path $dir "f$i.bin"), $payload)
+            }
+            $write = $sw.Elapsed.TotalSeconds
+            $sw.Restart()
+            $copy = Join-Path $root ("iobench-copy-" + [guid]::NewGuid().ToString("N"))
+            Copy-Item $dir $copy -Recurse
+            $copyT = $sw.Elapsed.TotalSeconds
+            $sw.Restart()
+            Remove-Item $dir, $copy -Recurse -Force
+            $del = $sw.Elapsed.TotalSeconds
+            Write-Host ("{0}: write 4000x4KB = {1:N1}s ({2:N0} files/s) | copy tree = {3:N1}s | delete = {4:N1}s" -f $label, $write, (4000/$write), $copyT, $del)
+          }
+          Bench "C:\a" "C: (workspace)"
+          Bench "D:\" "D: (temp)"
+          Bench $env:RUNNER_TEMP "RUNNER_TEMP"
+
+      - name: Dev Drive feasibility (ReFS VHDX)
+        run: |
+          try {
+            $vhd = "C:\dev-drive-probe.vhdx"
+            New-VHD -Path $vhd -SizeBytes 10GB -Dynamic | Out-Null
+            $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
+            $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+            Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
+            Write-Host "Dev Drive mounted at $($part.DriveLetter):"
+            # benchmark it
+            $root = "$($part.DriveLetter):\"
+            $dir = Join-Path $root "iobench"
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            $payload = [byte[]]::new(4096)
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            for ($i = 0; $i -lt 4000; $i++) {
+              [IO.File]::WriteAllBytes((Join-Path $dir "f$i.bin"), $payload)
+            }
+            Write-Host ("ReFS VHDX: write 4000x4KB = {0:N1}s ({1:N0} files/s)" -f $sw.Elapsed.TotalSeconds, (4000/$sw.Elapsed.TotalSeconds))
+            Dismount-VHD -Path $vhd
+          } catch { Write-Host "Dev Drive probe failed: $_" }

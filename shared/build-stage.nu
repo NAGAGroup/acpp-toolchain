@@ -116,6 +116,17 @@ def windows-args [src: string, libprefix: string] {
     "-DLLVM_TOOL_BUGPOINT_BUILD=OFF"
     "-DLLVM_HOST_TRIPLE=x86_64-pc-windows-msvc"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-pc-windows-msvc"
+    # AdaptiveCpp still uses the DEPRECATED FindCUDA module
+    # (`find_package(CUDA QUIET)`), which on Windows searches a
+    # <root>/lib/x64 toolkit layout. conda ships the import libs flat in
+    # Library/lib, so detection silently fails and acpp aborts with
+    # "CUDA was not found". Seed the cache entries with the real paths so
+    # the find_* calls short-circuit instead of guessing.
+    $"-DCUDA_TOOLKIT_ROOT_DIR=($libprefix)"
+    $"-DCUDA_NVCC_EXECUTABLE=($libprefix)/bin/nvcc.exe"
+    $"-DCUDA_TOOLKIT_INCLUDE=($libprefix)/include"
+    $"-DCUDA_CUDART_LIBRARY=($libprefix)/lib/cudart.lib"
+    $"-DCUDA_DEVICE_LIBS_PATH=($libprefix)/nvvm/libdevice"
   ]
 }
 
@@ -136,6 +147,17 @@ def main [] {
   let sep = (if (is-windows) { ";" } else { ":" })
   $env.CMAKE_PREFIX_PATH = ($build + $sep + ($env.CMAKE_PREFIX_PATH? | default ""))
   $env.CCACHE_COMPILERCHECK = "content"
+
+  if (is-windows) {
+    # FindCUDA consults %CUDA_PATH% before anything else on Windows.
+    $env.CUDA_PATH = $prefix
+    # conda's win activation exports a Visual Studio generator; leaving those
+    # set makes CMake reject `-G Ninja` ("does not support platform/toolset
+    # specification").
+    hide-env --ignore-errors CMAKE_GENERATOR
+    hide-env --ignore-errors CMAKE_GENERATOR_PLATFORM
+    hide-env --ignore-errors CMAKE_GENERATOR_TOOLSET
+  }
 
   let args = ((common-args $src $prefix $build)
     | append (if (is-windows) { (windows-args $src $prefix) } else { (linux-args $src $prefix) }))

@@ -101,6 +101,8 @@ outputs:
         # source with the clang-win toolset; conda-forge ships it prebuilt).
         - if: win
           then:
+            # nvcc.exe is what the legacy FindCUDA module anchors detection on
+            - cuda-nvcc >=12,<13
             - libboost-devel
 
   - package:

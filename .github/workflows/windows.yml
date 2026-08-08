@@ -33,6 +33,12 @@ jobs:
       ACPP_OUTPUT_DIR: D:\rb-output
     steps:
       - uses: actions/checkout@v4
+
+      # Must exist before setup-pixi runs: pixi honors RATTLER_CACHE_DIR and
+      # errors out if the directory cannot be created (os error 3).
+      - name: Prepare D: build directories
+        run: New-Item -ItemType Directory -Force -Path D:\rattler-cache, D:\rb-output, D:\ccache | Out-Null
+
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true

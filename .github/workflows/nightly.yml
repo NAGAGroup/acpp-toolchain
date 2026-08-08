@@ -32,7 +32,9 @@ jobs:
       - name: Resolve AdaptiveCpp develop HEAD
         id: check
         run: |
-          SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp develop | cut -f1)
+          # Exact ref: a bare `develop` glob also matches refs/remotes/*/develop
+          # upstream, which yields two lines and corrupts $GITHUB_OUTPUT.
+          SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp refs/heads/develop | head -1 | cut -f1)
           LAST=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
           {
             echo "sha=$SHA"

@@ -49,8 +49,11 @@ jobs:
           # Exact ref: a bare `develop` glob also matches refs/remotes/*/develop
           # upstream, which yields two lines and corrupts $GITHUB_OUTPUT.
           SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp refs/heads/develop | head -1 | cut -f1)
-          LAST_LINUX=$(gh variable get NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
-          LAST_WIN=$(gh variable get NIGHTLY_LAST_SHA_WIN -R "$GITHUB_REPOSITORY" 2>/dev/null || echo none)
+          # Bookkeeping lives in tag NAMES (nightly-last/<plat>/<sha>):
+          # GITHUB_TOKEN cannot access the repo Variables API at all
+          # (community#84700), but it can push refs with contents: write.
+          LAST_LINUX=$(git ls-remote origin "refs/tags/nightly-last/linux/*" | head -1 | sed 's|.*nightly-last/linux/||'); LAST_LINUX=${LAST_LINUX:-none}
+          LAST_WIN=$(git ls-remote origin "refs/tags/nightly-last/win/*" | head -1 | sed 's|.*nightly-last/win/||'); LAST_WIN=${LAST_WIN:-none}
           {
             echo "sha=$SHA"
             echo "date=$(date -u +%Y.%m.%d)"
@@ -316,9 +319,8 @@ jobs:
     needs: [upstream, build-linux, gpu-gate]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # the skip-check bookkeeping tag marker
       id-token: write # OIDC trusted publishing
-      actions: write # the skip-check bookkeeping variable (gh variable set)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -331,10 +333,12 @@ jobs:
           environments: dev
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel
-      - name: Record built develop SHA
-        run: gh variable set NIGHTLY_LAST_SHA -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream.outputs.sha }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Record built develop SHA (tag marker)
+        run: |
+          OLD=$(git ls-remote origin "refs/tags/nightly-last/linux/*" | awk '{print $2}')
+          if [ -n "$OLD" ]; then git push origin $(echo "$OLD" | sed 's/^/:/') || true; fi
+          git tag "nightly-last/linux/${{ needs.upstream.outputs.sha }}"
+          git push origin "nightly-last/linux/${{ needs.upstream.outputs.sha }}"
 
   win-gpu-gate:
     needs: [upstream, build-win]
@@ -388,9 +392,8 @@ jobs:
     needs: [upstream, build-win, win-gpu-gate]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # the skip-check bookkeeping tag marker
       id-token: write # OIDC trusted publishing
-      actions: write # the skip-check bookkeeping variable (gh variable set)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -403,7 +406,9 @@ jobs:
           environments: dev
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel
-      - name: Record built develop SHA
-        run: gh variable set NIGHTLY_LAST_SHA_WIN -R "$GITHUB_REPOSITORY" -b "${{ needs.upstream.outputs.sha }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Record built develop SHA (tag marker)
+        run: |
+          OLD=$(git ls-remote origin "refs/tags/nightly-last/win/*" | awk '{print $2}')
+          if [ -n "$OLD" ]; then git push origin $(echo "$OLD" | sed 's/^/:/') || true; fi
+          git tag "nightly-last/win/${{ needs.upstream.outputs.sha }}"
+          git push origin "nightly-last/win/${{ needs.upstream.outputs.sha }}"

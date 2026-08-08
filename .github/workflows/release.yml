@@ -77,6 +77,16 @@ jobs:
           key: rattler-release-${{ github.run_id }}
           restore-keys: rattler-release-
 
+      # The staging cache (full LLVM+acpp build) lives under the rattler
+      # OUTPUT dir (<output>/build_cache), NOT the global rattler cache —
+      # cache it explicitly or every run rebuilds staging from scratch.
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: output/build_cache
+          key: staging-release-${{ github.run_id }}
+          restore-keys: staging-release-
+
       - name: Build release lane -> indexed local channel
         run: pixi run -e dev build-release
 
@@ -85,9 +95,16 @@ jobs:
       - name: Prune stale staging caches
         if: always()
         run: |
-          cd ~/.cache/rattler/cache 2>/dev/null || exit 0
+          cd output/build_cache 2>/dev/null || exit 0
           ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
           du -sh . || true
+
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/build_cache
+          key: staging-release-${{ github.run_id }}
 
       - name: Save ccache
         if: always()
@@ -177,6 +194,15 @@ jobs:
           key: rattler-win-${{ github.run_id }}
           restore-keys: rattler-win-
 
+      # Staging cache lives under the OUTPUT dir, not RATTLER_CACHE_DIR —
+      # see the linux job note.
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
+          key: staging-win-${{ github.run_id }}
+          restore-keys: staging-win-
+
       # GitHub's Windows runners ship a very long PATH; conda's vs activation
       # then calls vcvars64.bat, which appends more and blows cmd.exe's 8191
       # character limit ("The input line is too long."). conda's own docs say
@@ -204,10 +230,17 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $dir = $env:RATTLER_CACHE_DIR
+          $dir = Join-Path $env:ACPP_OUTPUT_DIR "build_cache"
           if ($dir -and (Test-Path $dir)) {
             Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
           }
+
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
+          key: staging-win-${{ github.run_id }}
 
       - name: Save ccache
         if: always()

@@ -96,6 +96,13 @@ outputs:
         # source with the clang-win toolset; conda-forge ships it prebuilt).
         - if: win
           then:
+            # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
+            # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp
+            # itself must be compiled by a clang-family driver. We take the
+            # plain `clang` package (deps: vc >=14.3,<15 only) rather than the
+            # clang_win-64 ACTIVATION package, which is built solely against
+            # vs2022/vs2019 and would drag the VS year backwards.
+            - clang
             # nvcc.exe is what the legacy FindCUDA module anchors detection on.
             # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
             # hardcoded `vs2019_win-64` dependency and would drag the 2019

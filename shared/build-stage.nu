@@ -135,6 +135,14 @@ def windows-args [src: string, libprefix: string] {
     # Force exactly the value the passing path yields on linux, so host JIT
     # codegen targets the user's CPU identically on both platforms.
     "-DACPP_HOST_FORCE_MCPU_TARGET=native"
+    # AdaptiveCpp requires a clang-family driver (it uses GCC/Clang builtin
+    # atomics that MSVC lacks), but we deliberately do NOT pull the
+    # clang_win-64 activation package, which is only ever built against
+    # vs2022/vs2019 and would force the VS year backwards. Instead the plain
+    # `clang` package supplies clang-cl and the vs2026 activation supplies the
+    # MSVC headers/libs/SDK that clang-cl targets.
+    "-DCMAKE_C_COMPILER=clang-cl"
+    "-DCMAKE_CXX_COMPILER=clang-cl"
   ]
 }
 

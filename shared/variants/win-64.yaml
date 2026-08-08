@@ -1,41 +1,29 @@
 # Windows build variants.
 #
-# conda-forge's default on win is vs2022 (MSVC) and llvmdev builds that way,
-# but AdaptiveCpp is only ever built with clang-cl upstream and its sources
-# have never been exercised under MSVC — so we deviate on the BUILD compiler
-# only, using conda-forge's own clang_win-64/clangxx_win-64 toolchain. The
-# stdlib stays conda-forge canonical (vs), and the compiler we SHIP still
-# targets the MSVC ABI either way.
+# BUILD COMPILER = MSVC (vs2026), matching conda-forge's own llvmdev feedstock,
+# which overrides the compiler only for osx and builds Windows with MSVC.
+#
+# An earlier revision used clang_win-64 on the reasoning that AdaptiveCpp's CI
+# builds with clang-cl. That was wrong twice over: a CI configuration is not a
+# documented requirement (the install docs never say clang is required on
+# Windows), and it actively breaks here — conda-forge builds clang_win-64 ONLY
+# against vs2022_win-64 or vs2019_win-64, so depending on it drags the VS year
+# backwards and makes vs2026 unsolvable.
+#
+# The VS year must match a VS installed as a PRODUCT on the build machine: the
+# vs20XX_win-64 packages are activation shims that locate a system VS and call
+# vcvars with that year's toolset, so a year that is not installed fails even
+# when a newer VS is present. Our Win-x64-64 runner has ONLY VS 18 Enterprise
+# (2026) — the activation probes every VS2019 path, finds none, and falls back
+# to `vswhere -latest`; its default toolset is 14.51 and vc resolves to 14.5.
 c_compiler:
-  - clang
+  - vs2026
 cxx_compiler:
-  - clangxx
-# NOTE: c_stdlib_version is unix-only in conda-forge's pinning; do not set it.
+  - vs2026
 c_stdlib:
   - vs
-# Pin the Visual Studio year EXACTLY to what the build machine has installed.
-# The conda vs20XX_win-64 packages are activation shims: they locate a system
-# VS install and call vcvars with that year's toolset. If the pinned year is
-# not installed as a PRODUCT, compilation fails even when a newer VS is
-# present (side-by-side toolsets are not a reliable substitute).
-#
-# 2022 is currently the ONLY viable pin, and that is forced by the ecosystem,
-# not by preference: conda-forge builds clang_win-64 only against
-# vs2022_win-64 (==19.44.35207) or vs2019_win-64 (==19.29.30139) — its
-# clang-win-activation feedstock zips VSYEAR over [2022, 2019] and there is no
-# vs2026 variant yet. Pinning 2026 makes clang_win-64 unsolvable outright.
-#
-# Our Win-x64-64 runner has ONLY VS 18 Enterprise (2026) as a PRODUCT, but it
-# does carry the 14.44 toolset side-by-side (VC\Redist\MSVC\14.44.35112), and
-# a prior run confirmed `vcvars64.bat -vcvars_ver=14.44` succeeds there with no
-# "Toolset directory ... was not found" error. That is what makes 2022 safe
-# HERE; revisit if the runner image drops the 14.44 toolset, and switch to
-# 2026 as soon as conda-forge ships a clang_win-64 built against it.
-#
-# Pinning the year also keeps vs2019 out, which is the real goal.
-#
-# NB: conda-forge scopes c_stdlib_version to unix in its global pinning; we set
-# it on win deliberately, because choosing clang as the build compiler means we
-# never get the year pinned via `c_compiler: vs2022`.
+# NB: conda-forge scopes c_stdlib_version to unix in its global pinning. We set
+# it on win deliberately so the year is pinned in ONE place; vs2026_win-64
+# already constrains vs_win-64 ==2026.1, this just makes it explicit.
 c_stdlib_version:
-  - "2022.*"
+  - "2026.*"

@@ -129,7 +129,7 @@ def unpark-pairs [] {
    ["@N_TOOLS@", "acpp-tools-nightly"]
    ["@N_LLDB@", "acpp-lldb-nightly"]
    ["@N_ACPP@", "acpp-nightly"]
-   ["@PROT_ACT@", "acpp-runtime-activate.sh"]]
+   ["@PROT_ACT@", "acpp-runtime-activate."]]
 }
 
 def tail-pairs [] {

@@ -193,7 +193,7 @@ outputs:
               - Library/etc/AdaptiveCpp/**
           # backend bitcode wiring on activation (opt-in, fail-soft;
           # .sh on linux, .bat/.ps1/.sh triple on win)
-          - etc/conda/activate.d/acpp-runtime-activate.sh*
+          - etc/conda/activate.d/acpp-runtime-activate.*
         exclude:
           - if: linux
             then:
@@ -262,7 +262,7 @@ outputs:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
                   - etc/AdaptiveCpp/acpp-core.json
-                  - etc/conda/activate.d/acpp-runtime-activate.shsh
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
                   # backend plugins are RUNTIME artifacts -> bin on win;
                   # llvm-to-backend is linked statically into per-target
@@ -276,9 +276,9 @@ outputs:
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
                   - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-core.json
-                  - etc/conda/activate.d/acpp-runtime-activate.shbat
-                  - etc/conda/activate.d/acpp-runtime-activate.shps1
-                  - etc/conda/activate.d/acpp-runtime-activate.shsh
+                  - etc/conda/activate.d/acpp-runtime-activate.bat
+                  - etc/conda/activate.d/acpp-runtime-activate.ps1
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
             not_exists:
               - if: linux
                 then:

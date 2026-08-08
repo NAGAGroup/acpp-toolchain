@@ -68,21 +68,40 @@ outputs:
         - ninja
         - ccache
         - python >=3.9
-        - swig
+        # swig is only needed for lldb's python bindings (linux-only build)
+        - if: linux
+          then: swig
       host:
         - zlib
         - zstd
-        - libxml2-devel
-        - python
         - cuda-cudart-dev >=12,<13
-        - cuda-driver-dev >=12,<13
         - cuda-nvvm >=12,<13
         - cuda-nvcc-tools >=12,<13
-        - cuda-crt-dev_linux-64 >=12,<13
+        # Both platforms get Level Zero + OpenCL: level-zero{,-devel} and
+        # opencl-headers all ship for win-64, so the Intel backends are not
+        # linux-only. (Upstream's Windows CI disables OpenCL, but the docs
+        # never say it cannot work — we build it and let CI adjudicate.)
         - level-zero-devel
-        - ocl-icd
         - opencl-headers
-        - numactl
+        - if: linux
+          then:
+            - ocl-icd
+          else:
+            - khronos-opencl-icd-loader
+        # Linux-only: lldb needs python+swig; libxml2/numactl and the cudart
+        # CRT headers are linux packages.
+        - if: linux
+          then:
+            - libxml2-devel
+            - python
+            - cuda-driver-dev >=12,<13
+            - cuda-crt-dev_linux-64 >=12,<13
+            - numactl
+        # AdaptiveCpp's Windows build links Boost (upstream builds it from
+        # source with the clang-win toolset; conda-forge ships it prebuilt).
+        - if: win
+          then:
+            - libboost-devel
 
   - package:
       name: acpp-runtime-nightly
@@ -476,6 +495,9 @@ outputs:
     inherit: llvm-acpp-stage
     build:
       number: 0
+      # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
+      skip:
+        - win
       files:
         include:
           - bin/lldb*
@@ -620,7 +642,11 @@ outputs:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
         - level-zero
-        - ocl-icd
+        # The OpenCL ICD loader ships under a different name per platform:
+        # ocl-icd is linux-only, Windows uses the Khronos loader.
+        - if: linux
+          then: ocl-icd
+          else: khronos-opencl-icd-loader
       run_constraints:
         - acpp-runtime-intel <0.0a0
     about:

@@ -1,0 +1,15 @@
+# Windows build variants.
+#
+# conda-forge's default on win is vs2022 (MSVC) and llvmdev builds that way,
+# but AdaptiveCpp is only ever built with clang-cl upstream and its sources
+# have never been exercised under MSVC — so we deviate on the BUILD compiler
+# only, using conda-forge's own clang_win-64/clangxx_win-64 toolchain. The
+# stdlib stays conda-forge canonical (vs), and the compiler we SHIP still
+# targets the MSVC ABI either way.
+c_compiler:
+  - clang
+cxx_compiler:
+  - clangxx
+# NOTE: c_stdlib_version is unix-only in conda-forge's pinning; do not set it.
+c_stdlib:
+  - vs

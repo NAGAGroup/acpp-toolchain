@@ -20,11 +20,18 @@ def main [lane: string] {
   let recipe = ($lane | path join "recipe.yaml")
   if not ($recipe | path exists) { error make {msg: $"no recipe at ($recipe)"} }
 
+  # Variant config is per-platform (linux uses gcc + sysroot; windows uses
+  # clang-cl + vs). Passed explicitly rather than auto-discovered so the wrong
+  # platform's file can never be picked up.
+  let plat = (if $nu.os-info.name == "windows" { "win-64" } else { "linux-64" })
+  let variants = ([shared variants $"($plat).yaml"] | path join)
+
   (^rattler-build build
     --recipe $recipe
     --experimental          # staging outputs
     --no-build-id           # stable work dir => ccache hits across runs
     --channel $CHANNEL
+    --variant-config $variants
     --output-dir output)
 
   if ("local-channel" | path exists) { rm -rf local-channel }

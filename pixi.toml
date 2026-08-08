@@ -50,11 +50,11 @@ cmd = "nu shared/gen-nightly.nu --check"
 description = "Fail if nightly/recipe.yaml is stale w.r.t. the release recipe"
 
 [environments.dev.tasks.render-release]
-cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only"
+cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
 description = "Render-check the release recipe (fast; no build)"
 
 [environments.dev.tasks.render-nightly]
-cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --render-only"
+cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
 description = "Render-check the nightly recipe (fast; no build)"
 
 [environments.dev.tasks.audit]

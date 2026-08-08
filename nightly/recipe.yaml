@@ -135,11 +135,9 @@ outputs:
   - package:
       name: acpp-runtime-nightly
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: ../shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -291,11 +289,9 @@ outputs:
   - package:
       name: acpp-nightly
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: ../shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -451,11 +447,9 @@ outputs:
   - package:
       name: acpp-llvm-dev-nightly
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: ../shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -714,11 +708,9 @@ outputs:
   - package:
       name: acpp-tools-nightly
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: ../shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
       number: 0
@@ -854,11 +846,9 @@ outputs:
   - package:
       name: acpp-lldb-nightly
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: ../shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
       number: 0

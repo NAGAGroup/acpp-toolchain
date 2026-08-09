@@ -27,6 +27,18 @@ outputs:
   # ── Staging: ONE LLVM+AdaptiveCpp build shared by all outputs ──────────
   - staging:
       name: llvm-acpp-stage
+    build:
+      script:
+        interpreter: nu
+        file: ../shared/build-stage.nu
+        env:
+          # rattler-build builds with a sanitized env, so anything ccache needs
+          # must be forwarded explicitly. Empty => ccache defaults.
+          CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
+          CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
+          CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
+          CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
+          ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
     source:
       - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
         sha256: 6898f963c8e938981e6c4a302e83ec5beb4630147c7311183cf61069af16333d
@@ -60,24 +72,21 @@ outputs:
         target_directory: OpenCL-CLHPP
       - path: ../shared
         target_directory: shared
-    build:
-      script:
-        interpreter: nu
-        file: ../shared/build-stage.nu
-        env:
-          # rattler-build builds with a sanitized env, so anything ccache needs
-          # must be forwarded explicitly. Empty => ccache defaults.
-          CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
-          CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
-          CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
-          CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
-          ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
     requirements:
       build:
         - ${{ compiler('c') }}
         - ${{ compiler('cxx') }}
         - ${{ stdlib('c') }}
-        - nushell
+        # The staging cache key hashes ONLY resolved requirements, the variant
+        # keys referenced IN THOSE REQUIREMENTS, and the platforms — never the
+        # sources, patches or build script (verified: adding a patch left the
+        # key byte-identical, so a stale toolchain was rebuilt silently).
+        # staging_inputs is a hash of those real inputs
+        # (shared/gen-staging-hash.nu, enforced by check-staging-hash in CI);
+        # mentioning it here is what pulls it into the key. Renders to plain
+        # "nushell" — staging builds reject build.variant.use_keys, so this
+        # is the only available hook.
+        - ${{ "nushell" ~ ("" if staging_inputs else "") }}
         - cmake >=3.24
         - ninja
         - ccache

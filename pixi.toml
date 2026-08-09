@@ -49,6 +49,14 @@ description = "Regenerate nightly/recipe.yaml from release/recipe.yaml"
 cmd = "nu shared/gen-nightly.nu --check"
 description = "Fail if nightly/recipe.yaml is stale w.r.t. the release recipe"
 
+[environments.dev.tasks.gen-staging-hash]
+cmd = "nu shared/gen-staging-hash.nu"
+description = "Refresh the staging_inputs hash (patches/build script/sources) in the variant configs"
+
+[environments.dev.tasks.check-staging-hash]
+cmd = "nu shared/gen-staging-hash.nu --check"
+description = "Fail if a variant config's staging_inputs hash is stale"
+
 [environments.dev.tasks.render-release]
 cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
 description = "Render-check the release recipe (fast; no build)"

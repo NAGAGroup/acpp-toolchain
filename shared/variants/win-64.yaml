@@ -27,3 +27,4 @@ c_stdlib:
 # already constrains vs_win-64 ==2026.1, this just makes it explicit.
 c_stdlib_version:
   - "2026.*"
+staging_inputs: ["c38367c4e59d4518"]

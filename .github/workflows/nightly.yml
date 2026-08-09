@@ -43,6 +43,10 @@ jobs:
           environments: dev
       - name: nightly recipe is in sync with release
         run: pixi run -e dev check-nightly
+      # Without this the staging cache silently reuses a build made from
+      # different patches/sources (rattler-build does not hash them).
+      - name: staging_inputs hash is current
+        run: pixi run -e dev check-staging-hash
       - name: Resolve AdaptiveCpp develop HEAD
         id: check
         run: |

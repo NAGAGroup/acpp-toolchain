@@ -138,6 +138,13 @@ outputs:
     # No source here: staging-inheriting outputs get the ENTIRE staging work
     # dir restored (shared/ and its licenses included); fetching ../shared
     # ourselves collides with that restore ("File already exists").
+    source:
+      # A FRESH copy of shared/, under its own target dir. The staging restore
+      # brings the work dir back with the shared/ that existed when the cache
+      # was built, so reading activation scripts from there serves stale files
+      # (and re-fetching onto the same path collides with the restore).
+      - path: ../shared
+        target_directory: shared-fresh
     inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so

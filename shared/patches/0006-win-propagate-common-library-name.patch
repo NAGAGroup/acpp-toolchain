@@ -1,0 +1,36 @@
+Propagate HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME so Windows path resolution works.
+
+src/common/CMakeLists.txt sets HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME without
+PARENT_SCOPE, and src/CMakeLists.txt forwards only the unrelated
+HIPSYCL_RT_LIBRARY_OUTPUT_NAME. The top-level CMakeLists — which configures
+common/config.hpp.in — therefore expands @HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME@
+to an EMPTY string, so on Windows:
+
+    library_name = HIPSYCL_COMMON_LIBRARY_NAME + ".dll";   // == ".dll"
+    GetModuleHandleA(".dll")                               // always NULL
+
+get_lib_directory() then falls back to the baked-in build-time install
+prefix, which does not exist on the user's machine, and every path derived
+from it fails: the SSCP JIT cannot find its kernel bitcode
+("Could not open file libkernel-sscp-host-full.bc") or libdevice, so no
+kernel can be compiled at runtime on Windows.
+
+Fixed upstream on develop (PARENT_SCOPE propagation added in
+src/CMakeLists.txt, and the ".dll" concatenation dropped since the variable
+carries the full name there), so this is a release-pin backport.
+
+diff --git a/src/common/CMakeLists.txt b/src/common/CMakeLists.txt
+--- a/src/common/CMakeLists.txt
++++ b/src/common/CMakeLists.txt
+@@ -31,2 +31,4 @@
+ set(HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME "acpp-common")
++# the top level configures config.hpp.in and needs to see this
++set(HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME ${HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME} PARENT_SCOPE)
+ if(WIN32)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -58,2 +58,3 @@
+ set(HIPSYCL_RT_LIBRARY_OUTPUT_NAME ${HIPSYCL_RT_LIBRARY_OUTPUT_NAME} PARENT_SCOPE)
++set(HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME ${HIPSYCL_COMMON_LIBRARY_OUTPUT_NAME} PARENT_SCOPE)
+ set(hipSYCL_OpenMP_CXX_LIBRARIES ${hipSYCL_OpenMP_CXX_LIBRARIES} PARENT_SCOPE)

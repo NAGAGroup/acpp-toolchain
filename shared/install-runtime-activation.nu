@@ -9,13 +9,14 @@
 # the win libdevice path fix never reached the package). Output scripts run
 # on every build, so these files are always current.
 #
-# Sources come from the staging work dir, which the cache restores alongside
-# the prefix. Missing files are a hard error, never a silent skip.
+# Sources come from shared-fresh/, a copy fetched by THIS output — not from
+# the staging work dir, whose shared/ is restored from the cache and can be
+# arbitrarily old. Missing files are a hard error, never a silent skip.
 
 def is-windows [] { $nu.os-info.name == "windows" }
 
 def main [] {
-  let src = ($env.SRC_DIR | path join "shared" "activation")
+  let src = ($env.SRC_DIR | path join "shared-fresh" "activation")
   # Activation scripts always live under $PREFIX/etc, never %PREFIX%\Library\etc.
   let act = ($env.PREFIX | path join "etc" "conda" "activate.d")
   mkdir $act

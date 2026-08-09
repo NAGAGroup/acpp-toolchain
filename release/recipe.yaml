@@ -46,6 +46,9 @@ outputs:
           # [release-only] ze/ocl backends lack a RUNTIME install rule, so their
           # [release-only] DLLs never reach the prefix on win (fixed on develop)
           - ../shared/patches/0004-ze-ocl-install-runtime-artifacts.patch # [release-only]
+          # [release-only] win runtime cannot locate ANY of its own data dirs:
+          # [release-only] the common-library name never reaches config.hpp.in
+          - ../shared/patches/0006-win-propagate-common-library-name.patch # [release-only]
       - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
         sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
         target_directory: SPIRV-LLVM-Translator
@@ -139,6 +142,13 @@ outputs:
     # No source here: staging-inheriting outputs get the ENTIRE staging work
     # dir restored (shared/ and its licenses included); fetching ../shared
     # ourselves collides with that restore ("File already exists").
+    source:
+      # A FRESH copy of shared/, under its own target dir. The staging restore
+      # brings the work dir back with the shared/ that existed when the cache
+      # was built, so reading activation scripts from there serves stale files
+      # (and re-fetching onto the same path collides with the restore).
+      - path: ../shared
+        target_directory: shared-fresh
     inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so

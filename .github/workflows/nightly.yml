@@ -385,28 +385,27 @@ jobs:
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
-      # Diagnostics: acpp resolves bitcode dirs from the location of
-      # acpp-common.dll at runtime, with a build-time path as fallback; two
-      # different resolution failures appeared across lanes, so print the
-      # actual layout and let ACPP_DEBUG_LEVEL report what it picks.
-      - name: Diagnose runtime layout
+      # Guard the layout the win runtime actually depends on: acpp locates
+      # its bitcode relative to acpp-common.dll (Library/bin), and the
+      # activation script must land libdevice there. Both have silently
+      # regressed before, surfacing only as an opaque JIT error, so assert
+      # them with a clear message instead.
+      - name: Verify runtime layout
         working-directory: shared/tests/gpu-smoke
         run: |
           $p = ".pixi\envs\default"
-          Write-Host "--- activate.d contents:"
-          Get-ChildItem "$p\etc\conda\activate.d" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name
-          foreach ($f in @(
+          $required = @(
             "$p\Library\bin\acpp-common.dll",
             "$p\Library\lib\hipSYCL\bitcode\libkernel-sscp-host-full.bc",
-            "$p\Library\nvvm\libdevice\libdevice.10.bc",
-            "$p\Library\bin\hipSYCL\ext\bitcode\ptx\libdevice.10.bc",
-            "$p\Library\lib\hipSYCL\ext\bitcode\ptx\libdevice.10.bc")) {
-            Write-Host ("{0}  {1}" -f (Test-Path $f), $f)
+            "$p\Library\bin\hipSYCL\ext\bitcode\ptx\libdevice.10.bc"
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            Write-Host "Missing required runtime files:"
+            $missing | ForEach-Object { Write-Host "  $_" }
+            exit 1
           }
-          Write-Host "--- acpp resolution (debug):"
-          $env:ACPP_DEBUG_LEVEL = "3"
-          pixi run smoke-cpu 2>&1 | Select-String -Pattern "libdevice|bitcode|lib_directory|Using|install" | Select-Object -First 25
-        continue-on-error: true
+          Write-Host "runtime layout OK"
       - name: SYCL smoke on CPU backend
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu

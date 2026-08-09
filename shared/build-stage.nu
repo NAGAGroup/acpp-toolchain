@@ -229,19 +229,7 @@ def main [] {
       ^ln -s clang++ ($prefix | path join "bin" "x86_64-conda-linux-gnu-clang++")
       ^ln -s clang-cpp ($prefix | path join "bin" "x86_64-conda-linux-gnu-clang-cpp")
     }
-    let act = ($prefix | path join "etc" "conda" "activate.d")
-    mkdir $act
-    cp ($src | path join "shared" "activation" "acpp-runtime-activate.sh") $act
   } else {
-    # Activation scripts live under %PREFIX%\etc, NOT %PREFIX%\Library\etc.
-    # Windows gets the full .bat/.ps1/.sh triple (per-shell activation);
-    # the .sh variant differs from linux's (Library paths, copy not symlink)
-    # so it is renamed on install.
-    let act = ($env.PREFIX | path join "etc" "conda" "activate.d")
-    mkdir $act
-    cp ($src | path join "shared" "activation" "acpp-runtime-activate.bat") $act
-    cp ($src | path join "shared" "activation" "acpp-runtime-activate.ps1") $act
-    cp ($src | path join "shared" "activation" "acpp-runtime-activate-win.sh") ($act | path join "acpp-runtime-activate.sh")
   }
 
   ^ccache --show-stats

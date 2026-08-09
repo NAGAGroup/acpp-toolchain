@@ -144,6 +144,13 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Installed HERE rather than in the staging build: the staging cache is
+      # keyed on resolved requirements + variant vars and does NOT hash
+      # shared/, so staging-installed copies of these scripts go stale
+      # silently when we edit them. Output scripts always re-run.
+      script:
+        interpreter: nu
+        file: ../shared/install-runtime-activation.nu
       files:
         include:
           - if: linux
@@ -209,6 +216,8 @@ outputs:
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
     requirements:
+      build:
+        - nushell
       run:
         - llvm-openmp >=${{ llvm_major }}
         - if: linux

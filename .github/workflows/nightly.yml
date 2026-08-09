@@ -363,22 +363,21 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
+      # NB pwsh, not bash: on the Data Science Server image `shell: bash`
+      # resolves to C:\Windows\system32\bash.EXE (the WSL stub, no distro)
+      # rather than Git Bash, so every bash step fails instantly.
       - name: Retarget smoke manifest at the nightly suite
         working-directory: shared/tests/gpu-smoke
-        shell: bash
         run: |
-          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /' pixi.toml
+          (Get-Content pixi.toml) -replace '^acpp = ', 'acpp-nightly = ' -replace '^acpp-runtime-cuda = ', 'acpp-runtime-cuda-nightly = ' | Set-Content pixi.toml
       - name: Stage prebuilt smoke binary
-        shell: bash
-        run: cp local-channel/smoke.exe shared/tests/gpu-smoke/smoke.exe
+        run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
       # pixi solves EVERY platform in the manifest; pin to this gate's own
       # platform so a linux gate never tries to solve win-64 (and vice versa)
       - name: Pin smoke manifest to this platform
         working-directory: shared/tests/gpu-smoke
-        shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then P=win-64; else P=linux-64; fi
-          sed -i "s/^platforms = .*/platforms = [\"$P\"]/" pixi.toml
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info

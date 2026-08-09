@@ -365,16 +365,13 @@ jobs:
         with:
           run-install: false
       - name: Stage prebuilt smoke binary
-        shell: bash
-        run: cp local-channel/smoke.exe shared/tests/gpu-smoke/smoke.exe
+        run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
       # pixi solves EVERY platform in the manifest; pin to this gate's own
       # platform so a linux gate never tries to solve win-64 (and vice versa)
       - name: Pin smoke manifest to this platform
         working-directory: shared/tests/gpu-smoke
-        shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then P=win-64; else P=linux-64; fi
-          sed -i "s/^platforms = .*/platforms = [\"$P\"]/" pixi.toml
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
       - name: Backends visible to the runtime
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info

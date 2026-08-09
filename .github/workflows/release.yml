@@ -434,5 +434,7 @@ jobs:
         with:
           cache: true
           environments: dev
+      - name: "C-11 gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel

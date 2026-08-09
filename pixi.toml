@@ -73,9 +73,14 @@ description = "Solver-level constraint audits against ./local-channel"
 cmd = "nu shared/tests/audit.nu --platform win-64"
 description = "Solver-level constraint audits against ./local-channel (win-64)"
 
+[environments.dev.tasks.check-no-collision]
+cmd = "nu shared/check-no-collision.nu"
+description = "C-11 gate: fail if any staged artifact name exists on conda-forge (overlay-first channel would shadow it)"
+
 [environments.dev.tasks.publish-channel]
 cmd = "rattler-build upload prefix -c jackm97/naga-labs local-channel/**/*.conda"
 description = "Upload the built local channel to prefix.dev (OIDC in CI)"
+depends-on = ["check-no-collision"]
 
 [environments.dev.tasks.build-release]
 cmd = "nu shared/build-lane.nu release"

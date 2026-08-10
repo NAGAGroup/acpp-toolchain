@@ -335,27 +335,27 @@ outputs:
         # The unversioned-name cases below are the ones that needed widening.
         - libllvm${{ llvm_major }} <0.0a0
         - libclang-cpp${{ llvm_maj_min }} <0.0a0
-        # CUDA constraints are NOT stated here, deliberately.
+        # THE BASE RUNTIME HAS ZERO CUDA SURFACE. This is a ruling, not an
+        # oversight, and not a consequence of any build limitation: the base
+        # runtime must not constrain CUDA AT ALL.
         #
-        # The ruling asked for derived pins instead of the old hand-guessed
-        # ">=12,<13". Deriving them means pin_compatible(), and pin_compatible
-        # CANNOT be used in an output that inherits a staging build — it does
-        # not resolve against the staging solution (run 31346371052, then
-        # reproduced locally). So the choice here was a derived pin that does
-        # not build, or a hand-written guess that the ruling rejected.
+        # Every CUDA constraint belongs to acpp-runtime-cuda's dependency
+        # chain, which already carries the correct ones — cudart pins the
+        # runtime library, cudart depends on cuda-version, and cuda-version
+        # supplies the "__cuda >=12" driver floor. Restating any part of that
+        # here would duplicate a contract we do not own, and duplicated
+        # constraints drift.
         #
-        # Neither: the derived floors live on acpp-runtime-cuda, which does not
-        # inherit and therefore CAN derive them — it takes real CUDA host deps
-        # and pins them via pin_compatible to ">=12.9.79,<13.0a0", exactly the
-        # range cuda-cudart-dev exports. That is the package whose job is to
-        # say what CUDA this runtime was built against, and it is the supported
-        # way to get the CUDA backend at all.
+        # The CUDA backend is dlopened and fails SOFT — a mismatched or absent
+        # cudart disables the backend rather than breaking the process — so
+        # solver-level protection is the metapackage's job, and asking for it
+        # in the base runtime would make a CPU-only environment carry GPU
+        # constraints it can never need.
         #
-        # What is lost is a defensive constraint for an environment that drags
-        # cudart in from somewhere else without the metapackage. That case
-        # already fails at dlopen time rather than silently, and stating a
-        # looser range here would be reintroducing the exact pattern the ruling
-        # struck.
+        # Previous revisions had "cuda-cudart >=12,<13" here (a guess), then
+        # pin_compatible (derived, but unresolvable in a staging-inheriting
+        # output). Both were answering a question this package should not be
+        # asking.
         # __cuda: DELETED, deliberately, and not replaced here.
         #
         # It was written as "__cuda >=12,<13" — a CEILING on a driver virtual

@@ -34,6 +34,18 @@ def dep-line [d: string] {
   }
 }
 
+# A whole major, as an explicit RANGE. Jack's ruling: "no wildcards. none."
+#
+# These cases used to say "clang 21.*". That is a version wildcard, and the
+# ban is not stylistic — a wildcard's meaning depends on the matcher, so the
+# same string can mean different sets to pixi, conda and rattler. A range says
+# one thing everywhere, and it is the same form the pin functions emit, so the
+# suite asserts specs of the shape our packages actually ship.
+def major-range [m: string] {
+  let next = (($m | into int) + 1)
+  $">=($m),<($next).0a0"
+}
+
 def try-solve [platform: string, channels: list<string>, name: string, deps: list<string>, should_solve: bool] {
   let dir = (mktemp -d)
   let dep_lines = ($deps | each {|d| dep-line $d } | str join "\n")
@@ -130,16 +142,14 @@ def linux-cases [maj: string, next: string] {
 
     # same-major collisions must still be rejected
     ["same-major libllvm rejected", [acpp-runtime $"libllvm($maj)"], false]
-    ["same-major clang rejected", [acpp $"clang ($maj).*"], false]
-    ["same-major lld rejected", [acpp $"lld ($maj).*"], false]
+    ["same-major clang rejected", [acpp $"clang (major-range $maj)"], false]
+    ["same-major lld rejected", [acpp $"lld (major-range $maj)"], false]
 
     # ...while a DIFFERENT major of the same dev tooling may coexist. This is
     # the concession the same-major windows exist to make.
-    # NB "21.*", not "==21.*": pixi rejects an equality operator combined with
-    # a wildcard ("expected a version specifier but looks like a matchspec").
-    ["different-major clang allowed", [acpp $"clang ($next).*"], true]
-    ["different-major clang-tools allowed", [acpp-runtime $"clang-tools ($next).*"], true]
-    ["different-major clang-format allowed", [acpp-tools $"clang-format ($next).*"], true]
+    ["different-major clang allowed", [acpp $"clang (major-range $next)"], true]
+    ["different-major clang-tools allowed", [acpp-runtime $"clang-tools (major-range $next)"], true]
+    ["different-major clang-format allowed", [acpp-tools $"clang-format (major-range $next)"], true]
 
     # lane mixing, both directions, via the mirrored run_constraints
     ["lane mixing rejected (runtime)", [acpp-runtime acpp-runtime-nightly], false]
@@ -166,10 +176,14 @@ def linux-cases [maj: string, next: string] {
 def win-cases [maj: string, next: string] {
   [
     ["suite coherent", [acpp acpp-tools acpp-runtime-cuda], true]
-    ["same-major clang rejected", [acpp $"clang ==($maj).*"], false]
-    ["different-major clang allowed", [acpp $"clang ==($next).*"], true]
-    ["same-major clang-format rejected", [acpp-tools $"clang-format ==($maj).*"], false]
-    ["different-major clang-format allowed", [acpp-tools $"clang-format ==($next).*"], true]
+    # NB these carried "==20.*" until now — a form pixi rejects outright
+    # ("expected a version specifier but looks like a matchspec"), so the win
+    # cases were failing to parse rather than testing anything. Only the linux
+    # half of that bug was caught on run 1; this is the other half.
+    ["same-major clang rejected", [acpp $"clang (major-range $maj)"], false]
+    ["different-major clang allowed", [acpp $"clang (major-range $next)"], true]
+    ["same-major clang-format rejected", [acpp-tools $"clang-format (major-range $maj)"], false]
+    ["different-major clang-format allowed", [acpp-tools $"clang-format (major-range $next)"], true]
     ["lane mixing rejected (runtime)", [acpp-runtime acpp-runtime-nightly], false]
     ["lane mixing rejected (compiler)", [acpp acpp-nightly], false]
     ["release compiler + nightly mutex rejected", [acpp $"acpp-llvm ==($next)"], false]

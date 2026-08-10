@@ -56,10 +56,63 @@ def check-recipe [path: string] {
   $bad
 }
 
+# The mutex host spec must name THIS lane's own major.
+#
+# A bare `acpp-llvm` resolves to the HIGHEST published major, which would pin
+# the release lane to the nightly lane's range — it builds green, publishes
+# green, and produces a channel where the release toolchain demands the wrong
+# lane. Checked on the RENDERED recipe rather than the source text, because the
+# spec is built from a context variable and the thing that matters is what the
+# variable expanded to.
+def check-mutex-spec [recipe: string, platform: string] {
+  let variants = ([shared variants $"($platform).yaml"] | path join)
+  let res = (do {
+    (^rattler-build build --recipe $recipe --experimental --render-only
+      -m $variants --target-platform $platform)
+  } | complete)
+  if $res.exit_code != 0 {
+    return [$"($recipe) [($platform)]: render failed, cannot check the mutex spec"]
+  }
+  let rendered = ($res.stdout | from json)
+  # The mutex lives on the STAGING output, which the render exposes under
+  # `staging_caches`, NOT under each output's own `requirements` (an
+  # inheriting output has none of its own — that is the whole reason the mutex
+  # moved there).
+  let specs = ($rendered
+    | each {|o| $o.recipe.staging_caches? | default [] }
+    | flatten
+    | each {|c| $c.requirements?.host? | default [] }
+    | flatten
+    | each {|s| if ($s | describe) == "string" { $s } else { "" } }
+    | where {|s| $s | str starts-with "acpp-llvm" }
+    | uniq)
+
+  if ($specs | is-empty) {
+    return [$"($recipe) [($platform)]: NO acpp-llvm host spec in the rendered recipe — the lane mutex would not be applied at all"]
+  }
+  let bare = ($specs | where {|s| ($s | str trim) == "acpp-llvm" })
+  if ($bare | is-not-empty) {
+    return [$"($recipe) [($platform)]: BARE acpp-llvm host spec — resolves to the highest published major, not this lane's"]
+  }
+  # Must be pinned to an exact bare major, e.g. "acpp-llvm ==21".
+  let ok = ($specs | all {|s| $s =~ '^acpp-llvm ==[0-9]+$' })
+  if not $ok {
+    return [$"($recipe) [($platform)]: mutex host spec is not an exact major pin — got ($specs | str join ', ')"]
+  }
+  print $"check-pins: ($recipe) [($platform)] mutex host spec = ($specs | uniq | str join ', ')"
+  []
+}
+
 def main [] {
   mut bad = []
   for r in $RECIPES {
     if ($r | path exists) { $bad = ($bad | append (check-recipe $r)) }
+  }
+  for r in $RECIPES {
+    if not ($r | path exists) { continue }
+    for p in ["linux-64" "win-64"] {
+      $bad = ($bad | append (check-mutex-spec $r $p))
+    }
   }
   if ($bad | is-empty) {
     print "check-pins: no pin_compatible in staging-inheriting outputs"

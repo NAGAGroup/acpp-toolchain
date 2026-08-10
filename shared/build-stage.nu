@@ -162,13 +162,28 @@ def outer-flag-args [] {
   ]
 }
 
-# Dump the runtimes child-configure's failure evidence into the CI log. The
-# console only ever shows "ABI info - failed"; the WHY lives in these files,
-# which no runner surfaces on its own (this cost us a blind red on win-64).
+# Dump the runtimes/builtins child-configure failure evidence into the CI
+# log. The console only ever shows "ABI info - failed"; the WHY lives in the
+# children's configure logs, which no runner surfaces on its own (this cost
+# us a blind red on win-64). Two hard-won details:
+# - CMake >= 3.26 does NOT write CMakeError.log anymore — try_compile
+#   evidence (full command line + stderr per failed check) lives in
+#   CMakeFiles/CMakeConfigureLog.yaml. Globbing for CMakeError.log finds
+#   nothing on the cmake 4.4 runners.
+# - nushell's glob parser treats backslash as an escape character, so a
+#   Windows path from `path join` makes `glob` ERROR OUT (run 31351719706
+#   died exactly here, masking the evidence it was built to surface).
+#   Normalize to forward slashes before globbing.
 def dump-runtimes-logs [build: string] {
-  for f in (glob ($build | path join "runtimes" "**" "CMakeError.log")) {
-    print $"===== runtimes configure evidence: ($f) ====="
-    open --raw $f | lines | last 120 | str join "\n" | print
+  let root = ($build | path join "runtimes" | str replace --all '\' '/')
+  for f in (glob $"($root)/**/CMakeConfigureLog.yaml") {
+    print $"===== child configure evidence: ($f) ====="
+    let text = (open --raw $f | lines)
+    # ABI detection is among the FIRST entries (usually where the rot starts);
+    # the tail carries the last failed checks. Print both ends.
+    $text | first 500 | str join "\n" | print
+    print $"===== ... tail of ($f) ====="
+    $text | last 200 | str join "\n" | print
   }
 }
 
@@ -378,8 +393,10 @@ def main [] {
   # green build that ships no clang_rt libs (caught only by the package
   # content test, 8 minutes later, with zero evidence). Fail HERE instead,
   # with the child's CMakeError.log dumped into the CI log.
+  # NB backslashes are glob ESCAPES in nushell — normalize the joined path or
+  # `glob` fails to parse on Windows (this crash ate a run's evidence).
   let rt_glob = (if (is-windows) {
-    ($prefix | path join "lib" "clang" "**" "clang_rt.asan*")
+    ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')
   } else {
     ($prefix | path join "lib" "clang" "**" "libclang_rt.asan*")
   })

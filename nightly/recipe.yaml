@@ -685,7 +685,13 @@ outputs:
         # lib/clang/<major>/lib path, so it is a genuine file collision, not
         # just a version disagreement. A different major is fine.
         - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # BOTH platform payload packages. conda-forge splits compiler-rt into a
+        # front package plus a per-platform one, and it publishes the Windows
+        # half too (compiler-rt_win-64 20.1.8 exists — checked, not assumed),
+        # so constraining only the linux name would have left the Windows
+        # collision wide open on the one platform this output is newest on.
         - compiler-rt_linux-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - compiler-rt_win-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-compiler-rt <0.0a0
       ignore_run_exports:
         # By source package; see the note on acpp-runtime-nightly.

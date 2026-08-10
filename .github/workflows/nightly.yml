@@ -272,6 +272,16 @@ jobs:
       # Build-once/run-on-GPU: compile the SYCL smoke HERE (this box has
       # VS2026) against the just-built channel; the GPU gate box has no VS
       # and only runs the device-agnostic SSCP binary.
+      # pixi solves EVERY platform in the manifest; pin to this leg's own
+      # platform BEFORE the first solve or the local channel (win-64-only
+      # here) fails the linux-64 solve — this bit run 31354340049 after the
+      # legacy linux artifacts were deleted from the published channel (the
+      # foreign-platform solve had been silently satisfied by stale
+      # published artifacts until then). Mirrors the gpu-gate jobs' pin.
+      - name: Pin smoke manifest to this platform
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
       - name: Compile GPU smoke binary
         working-directory: shared/tests/gpu-smoke
         env:

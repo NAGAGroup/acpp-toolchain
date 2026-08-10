@@ -82,7 +82,8 @@ channel-priority = "strict"
 }
 
 def main [channel_dir: string = "local-channel", --remote: string = $REMOTE] {
-  let artifacts = (glob $"($channel_dir)/**/*.conda")
+  # channel_dir may carry backslashes on win; they are glob escapes in nushell
+  let artifacts = (glob $"($channel_dir | str replace --all '\' '/')/**/*.conda")
   if ($artifacts | is-empty) {
     error make {msg: $"closure: no artifacts under ($channel_dir) — refusing to pass vacuously"}
   }

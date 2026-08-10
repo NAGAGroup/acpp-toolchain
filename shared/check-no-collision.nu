@@ -34,7 +34,9 @@ def probe-conda-forge [name: string]: nothing -> int {
 }
 
 def main [channel_dir: string = "local-channel"] {
-    let artifacts = (glob $"($channel_dir)/**/*.conda") ++ (glob $"($channel_dir)/**/*.tar.bz2")
+    # channel_dir may carry backslashes on win; they are glob escapes in nushell
+    let norm = ($channel_dir | str replace --all '\' '/')
+    let artifacts = (glob $"($norm)/**/*.conda") ++ (glob $"($norm)/**/*.tar.bz2")
     if ($artifacts | is-empty) {
         error make { msg: $"no conda artifacts found under '($channel_dir)' — nothing staged for upload, refusing to pass vacuously" }
     }

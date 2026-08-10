@@ -86,7 +86,9 @@ def main [lane: string] {
     mkdir ("local-channel" | path join "noarch")
     # `glob`, not `ls`: nushell expands glob patterns only for bare words, so
     # `ls $pattern` would look for a file literally named "*.conda".
-    for f in (glob ($mutex_noarch | path join "*.conda")) {
+    # Backslashes are glob ESCAPES in nushell — normalize win paths before
+    # globbing or the parse fails (this killed run 31352823522 at packaging).
+    for f in (glob ($mutex_noarch | path join "*.conda" | str replace --all '\' '/')) {
       cp $f ("local-channel" | path join "noarch")
     }
   }

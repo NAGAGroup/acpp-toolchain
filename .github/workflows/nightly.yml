@@ -53,6 +53,29 @@ jobs:
           # Exact ref: a bare `develop` glob also matches refs/remotes/*/develop
           # upstream, which yields two lines and corrupts $GITHUB_OUTPUT.
           SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp refs/heads/develop | head -1 | cut -f1)
+          DATE=$(date -u +%Y.%m.%d)
+          # PAUSE GATE. This lane's builds run on the 64-core runner, and the
+          # schedule fires them UNATTENDED whenever upstream develop moves. A
+          # marker file lets work-in-progress land on main without a cron
+          # deciding, at 09:17 UTC, to spend an hour of that runner proving a
+          # half-finished tree red.
+          #
+          # Deliberately scoped to `schedule` ONLY: workflow_dispatch always
+          # runs, so pausing never blocks the work, it only stops the clock
+          # from spending money on our behalf. Committed rather than a repo
+          # setting so it is visible in review and impossible to forget
+          # silently — every scheduled run it suppresses says so in the log.
+          if [ -f nightly/PAUSE-SCHEDULED ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "::notice title=Scheduled nightly paused::nightly/PAUSE-SCHEDULED present — skipping. Dispatch manually to override."
+            sed 's/^/  /' nightly/PAUSE-SCHEDULED
+            {
+              echo "sha=$SHA"
+              echo "date=$DATE"
+              echo "changed_linux=false"
+              echo "changed_win=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Bookkeeping lives in tag NAMES (nightly-last/<plat>/<sha>):
           # GITHUB_TOKEN cannot access the repo Variables API at all
           # (community#84700), but it can push refs with contents: write.
@@ -60,7 +83,7 @@ jobs:
           LAST_WIN=$(git ls-remote origin "refs/tags/nightly-last/win/*" | head -1 | sed 's|.*nightly-last/win/||'); LAST_WIN=${LAST_WIN:-none}
           {
             echo "sha=$SHA"
-            echo "date=$(date -u +%Y.%m.%d)"
+            echo "date=$DATE"
             echo "changed_linux=$([ "$SHA" != "$LAST_LINUX" ] && echo true || echo false)"
             echo "changed_win=$([ "$SHA" != "$LAST_WIN" ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"

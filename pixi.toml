@@ -88,10 +88,24 @@ description = "Solver-level constraint audits against ./local-channel (win-64)"
 cmd = "nu shared/check-no-collision.nu"
 description = "C-11 gate: fail if any staged artifact name exists on conda-forge (overlay-first channel would shadow it)"
 
+[environments.dev.tasks.check-closure]
+cmd = "nu shared/check-closure.nu"
+description = "Publish gate: every declared output is present, and every staged artifact freshly solves against the channel"
+
 [environments.dev.tasks.publish-channel]
 cmd = "nu shared/publish-channel.nu"
 description = "Upload the built local channel to prefix.dev (OIDC in CI), behind the publish gates"
-depends-on = ["check-no-collision"]
+# Both gates are depends-on rather than merely separate workflow steps, so
+# they are unbypassable: publishing by hand still runs them.
+depends-on = ["check-no-collision", "check-closure"]
+
+[environments.dev.tasks.prune-nightly]
+cmd = "nu shared/prune-nightly.nu"
+description = "Retention: drop nightly build-sets outside the newest-N window, honouring nightly/keepers.txt"
+
+[environments.dev.tasks.prune-nightly-dry-run]
+cmd = "nu shared/prune-nightly.nu --dry-run"
+description = "Show what retention would delete, without deleting it"
 
 [environments.dev.tasks.publish-dry-run]
 cmd = "nu shared/publish-channel.nu --dry-run"

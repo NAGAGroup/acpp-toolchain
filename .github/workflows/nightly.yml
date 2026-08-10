@@ -311,13 +311,16 @@ jobs:
       - name: Retarget smoke manifest at the nightly suite
         working-directory: shared/tests/gpu-smoke
         run: |
-          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
+          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /; s/^acpp-compiler-rt = /acpp-compiler-rt-nightly = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
       - name: SYCL smoke on CPU backend
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu
       - name: SYCL smoke on CUDA backend
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cuda
+      - name: Sanitizer smoke (acpp-compiler-rt-nightly)
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run sanitizer-smoke
 
   publish-linux:
     needs: [upstream, build-linux, gpu-gate]
@@ -337,6 +340,8 @@ jobs:
           environments: dev
       - name: "C-11 gate: no conda-forge name collisions"
         run: pixi run -e dev check-no-collision
+      - name: "Closure gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel
       - name: Record built develop SHA (tag marker)
@@ -375,7 +380,11 @@ jobs:
       - name: Retarget smoke manifest at the nightly suite
         working-directory: shared/tests/gpu-smoke
         run: |
-          (Get-Content pixi.toml) -replace '^acpp = ', 'acpp-nightly = ' -replace '^acpp-runtime-cuda = ', 'acpp-runtime-cuda-nightly = ' | Set-Content pixi.toml
+          # Every acpp* name must be renamed, not just the ones the smoke runs:
+          # a single release-lane name left in a nightly manifest is a lane mix,
+          # and the mirrored run_constraints make the whole workspace
+          # unsolvable rather than just ignoring the stray package.
+          (Get-Content pixi.toml) -replace '^acpp = ', 'acpp-nightly = ' -replace '^acpp-runtime-cuda = ', 'acpp-runtime-cuda-nightly = ' -replace '^acpp-compiler-rt = ', 'acpp-compiler-rt-nightly = ' | Set-Content pixi.toml
       - name: Stage prebuilt smoke binary
         run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
       # pixi solves EVERY platform in the manifest; pin to this gate's own
@@ -433,6 +442,8 @@ jobs:
           environments: dev
       - name: "C-11 gate: no conda-forge name collisions"
         run: pixi run -e dev check-no-collision
+      - name: "Closure gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel
       - name: Record built develop SHA (tag marker)
@@ -441,3 +452,30 @@ jobs:
           if [ -n "$OLD" ]; then git push origin $(echo "$OLD" | sed 's/^/:/') || true; fi
           git tag "nightly-last/win/${{ needs.upstream.outputs.sha }}"
           git push origin "nightly-last/win/${{ needs.upstream.outputs.sha }}"
+
+  # ── Retention ─────────────────────────────────────────────────────────────
+  # ONE job, gated on BOTH platform publishes.
+  #
+  # Not a step inside the publish jobs: those run per-platform, so retention
+  # would run twice, and the first run would compute its window while the
+  # newest set existed on only one platform. The prune unit is a COMPLETE
+  # (date, llvm) set across every output AND both platforms, so retention must
+  # not form an opinion until the set it is protecting is actually complete.
+  #
+  # `needs` both publishes, so a red or skipped publish on either platform
+  # means no pruning at all — a broken streak must never eat the last known
+  # good nightlies.
+  retention:
+    needs: [publish-linux, publish-win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # deletion goes through the same OIDC trusted publisher
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "Retention: prune old nightly build-sets"
+        run: pixi run -e dev prune-nightly

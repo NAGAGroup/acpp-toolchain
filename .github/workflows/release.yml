@@ -309,6 +309,12 @@ jobs:
       - name: SYCL smoke on CUDA backend (PTX JIT on real hardware)
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cuda
+      # acpp-compiler-rt is new in phase 3. Shipping sanitizer runtimes without
+      # proving they link is worse than not shipping them, so this both builds
+      # sanitized binaries and makes ASan actually trip.
+      - name: Sanitizer smoke (acpp-compiler-rt)
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run sanitizer-smoke
 
   solver-audit:
     needs: build-linux
@@ -436,5 +442,10 @@ jobs:
           environments: dev
       - name: "C-11 gate: no conda-forge name collisions"
         run: pixi run -e dev check-no-collision
+      # Publishing a name means owning it: every declared output must be
+      # present, and every artifact must freshly solve against the channel as
+      # consumers see it.
+      - name: "Closure gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
       - name: Upload to prefix.dev
         run: pixi run -e dev publish-channel

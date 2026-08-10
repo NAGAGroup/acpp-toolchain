@@ -15,9 +15,16 @@ channels = [
 platforms = ["linux-64", "win-64"]
 
 # One-package install path: acpp-runtime-cuda pulls the lane runtime with it.
+#
+# NB nothing here names acpp-runtime or a lane: acpp's run_exports supply the
+# runtime range AND the acpp-llvm mutex, so this manifest is itself a live test
+# that a consumer needs no lane text of its own.
 [dependencies]
 acpp = "*"
 acpp-runtime-cuda = "*"
+# The sanitizer runtimes, so the smoke can prove they link and fire.
+acpp-compiler-rt = "*"
+nushell = "*"
 
 [tasks.build-smoke]
 cmd = "acpp -O2 --acpp-targets=generic ../hello.cpp -o ./smoke"
@@ -36,6 +43,10 @@ description = "Run the smoke binary on the CUDA backend (PTX JIT on real hardwar
 [tasks.acpp-info]
 cmd = "acpp-info -l"
 description = "List backends/devices the runtime can see"
+
+[tasks.sanitizer-smoke]
+cmd = "nu ../sanitizer-smoke.nu"
+description = "Prove the shipped compiler-rt runtimes link, run clean, and actually fire"
 
 # ── Windows variants ──────────────────────────────────────────────────────
 # build-once / run-on-GPU split (same design as the linux nightly test

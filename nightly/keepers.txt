@@ -1,0 +1,31 @@
+# Nightly build-sets kept INDEFINITELY, exempt from newest-N pruning.
+#
+# KEEPER POLICY (Jack-ratified 2026-08-09): the first GREEN set of each month
+# is kept forever. Keepers layer ON TOP of the newest-N window rather than
+# consuming slots in it, so keeping a set never costs a recent one.
+#
+# A LINE NAMES A SET, NEVER A PACKAGE. The unit here is identical to the unit
+# the pruner deletes: a COMPLETE (date, llvm_version) set across every output
+# AND both platforms. A partially-kept set is exactly as unsolvable as a
+# partially-pruned one, because the nightly lane pins its own packages exactly
+# — keep acpp-nightly but drop acpp-runtime-nightly and the survivor's
+# dependency can never be satisfied again.
+#
+# FORMAT: one set per line, "<date>_llvm<version>", '#' starts a comment.
+#
+#   2026.08.09_llvm21.1.8
+#
+# The publishing job appends a line automatically when it publishes the first
+# green set of a month. Add one by hand to promote a set on demand — for
+# example a nightly that a downstream project pinned, or one that reproduced a
+# bug worth keeping around.
+#
+# READ AT PRUNE TIME, never baked into a snapshot: the pruner re-reads this
+# file on every run, so a hand-added keeper protects a set immediately rather
+# than at the next release.
+#
+# Removing a line makes that set eligible for pruning again. Do that only if
+# you are certain nothing pins it; there is no undelete.
+
+# --- keepers -----------------------------------------------------------------
+# (none yet — the first green set of 2026.08 will be appended here by CI)

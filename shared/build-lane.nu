@@ -84,7 +84,9 @@ def main [lane: string] {
   let mutex_noarch = ($mutexdir | path join "noarch")
   if ($mutex_noarch | path exists) {
     mkdir ("local-channel" | path join "noarch")
-    for f in (ls ($mutex_noarch | path join "*.conda") | get name) {
+    # `glob`, not `ls`: nushell expands glob patterns only for bare words, so
+    # `ls $pattern` would look for a file literally named "*.conda".
+    for f in (glob ($mutex_noarch | path join "*.conda")) {
       cp $f ("local-channel" | path join "noarch")
     }
   }

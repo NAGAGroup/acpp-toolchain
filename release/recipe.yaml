@@ -521,6 +521,19 @@ outputs:
               - Library/lib/AdaptiveCpp.lib
               - Library/lib/acpp-frontend.lib
               - Library/lib/acpp-clang-cbs.lib
+        exclude:
+          # The clang resource dir is claimed above as lib/clang/**, but its
+          # lib/ and share/ subtrees are the compiler-rt runtimes and belong to
+          # acpp-compiler-rt. Two outputs claiming one path is a clobber, and
+          # the partition audit fails the build on it — so the split is stated
+          # here rather than discovered in CI.
+          - if: linux
+            then:
+              - lib/clang/${{ llvm_major }}/lib/**
+              - lib/clang/${{ llvm_major }}/share/**
+            else:
+              - Library/lib/clang/${{ llvm_major }}/lib/**
+              - Library/lib/clang/${{ llvm_major }}/share/**
     requirements:
       host:
         # Lane mutex — see the note on acpp-runtime's host block.
@@ -628,6 +641,105 @@ outputs:
                   - Library/bin/clang-tidy.exe
                   - Library/bin/lldb.exe
                   - Library/bin/llvm-config.exe
+
+  # ── compiler-rt: the sanitizer/profile runtimes ─────────────────────────
+  # NEW in phase 3. These components were built OFF, which quietly made the
+  # toolchain a NON-drop-in replacement: `clang -fsanitize=address` would fail
+  # to link against a runtime that was never built. Since standing in for a
+  # conda-forge clang is the toolchain's whole promise, they now ship.
+  #
+  # SEPARATE OUTPUT rather than folded into acpp, matching conda-forge, which
+  # ships compiler-rt as its own package: the runtimes are large and only
+  # wanted by people who actually instrument builds.
+  #
+  # Run-dep target settled from conda-forge's own artifact rather than argued
+  # (the ruling said to look it up): conda-forge's compiler-rt 20.1.8 depends
+  # on `clang 20.1.8.*` — the COMPILER, not the runtime — so this hangs off
+  # acpp. Deltas from their layout, for the record: they split into
+  # compiler-rt + compiler-rt_linux-64 (a front package plus the platform
+  # payload) because of their cross-compilation matrix, which we do not have,
+  # so we ship one output; and they pin the exact clang version where we use
+  # the lane range plus the mutex.
+  - package:
+      name: acpp-compiler-rt
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      files:
+        include:
+          # The clang resource directory splits cleanly: include/ holds the
+          # compiler's own headers and belongs to acpp; lib/ and share/ hold
+          # the compiler-rt archives, shared objects and sanitizer ignorelists
+          # and belong here. acpp excludes exactly these two, so the partition
+          # stays a partition (the zero-clobber audit enforces it).
+          - if: linux
+            then:
+              - lib/clang/${{ llvm_major }}/lib/**
+              - lib/clang/${{ llvm_major }}/share/**
+            else:
+              - Library/lib/clang/${{ llvm_major }}/lib/**
+              - Library/lib/clang/${{ llvm_major }}/share/**
+    requirements:
+      host:
+        # Lane mutex — see the note on acpp-runtime's host block.
+        - acpp-llvm ==${{ llvm_major }}
+      run:
+        - ${{ pin_subpackage('acpp', upper_bound='x.x') }}
+        - ${{ pin_compatible('acpp-llvm') }}
+      run_constraints:
+        # conda-forge's compiler-rt of OUR major installs into the same
+        # lib/clang/<major>/lib path, so it is a genuine file collision, not
+        # just a version disagreement. A different major is fine.
+        - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - compiler-rt_linux-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - acpp-compiler-rt-nightly <0.0a0
+      ignore_run_exports:
+        # By source package; see the note on acpp-runtime.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: linux
+                then:
+                  # The archive every -fsanitize=address link needs. Named
+                  # explicitly rather than globbed: a glob that matches
+                  # nothing packages an empty directory and passes silently,
+                  # which is how blind partitions ship hollow packages.
+                  - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.asan*
+                  - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.profile*
+                else:
+                  - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.asan*
+            not_exists:
+              # The resource HEADERS belong to acpp, not here.
+              - if: linux
+                then:
+                  - lib/clang/${{ llvm_major }}/include/omp.h
+                  - bin/clang
+                else:
+                  - Library/lib/clang/${{ llvm_major }}/include/omp.h
+                  - Library/bin/clang.exe
+
   - package:
       name: acpp-llvm-dev
       version: ${{ version }}

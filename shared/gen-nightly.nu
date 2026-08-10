@@ -92,6 +92,7 @@ const ACPP_SRC_NIGHTLY = '      - git: https://github.com/AdaptiveCpp/AdaptiveCp
 def park-pairs [] {
   [[from, to];
    ["acpp-runtime-activate.", "@PROT_ACT@"]      # shipped files (.sh/.bat/.ps1/.*), never a package
+   ["acpp-compiler-rt-nightly", "@X_CRT@"]
    ["acpp-clangxx-nightly_linux-64", "@X_CLANGXX@"]
    ["acpp-clang-cl-nightly_win-64", "@X_CLANGCL_WIN@"]
    ["acpp-clangxx-nightly_win-64", "@X_CLANGXX_WIN@"]
@@ -108,6 +109,10 @@ def park-pairs [] {
 
 def rename-pairs [] {
   [[from, to];
+   # Before the shorter acpp-clang* patterns: none of them is a prefix of
+   # "acpp-compiler-rt", but keeping longest-first is the invariant that makes
+   # this table safe to extend.
+   ["acpp-compiler-rt", "@N_CRT@"]
    ["acpp-clangxx_linux-64", "@N_CLANGXX@"]
    ["acpp-clang-cl_win-64", "@N_CLANGCL_WIN@"]
    ["acpp-clangxx_win-64", "@N_CLANGXX_WIN@"]
@@ -126,6 +131,7 @@ def rename-pairs [] {
 def unpark-pairs [] {
   [[from, to];
    # cross-lane exclusions point at the RELEASE names
+   ["@X_CRT@", "acpp-compiler-rt"]
    ["@X_CLANGXX@", "acpp-clangxx_linux-64"]
    ["@X_CLANGXX_WIN@", "acpp-clangxx_win-64"]
    ["@X_CLANGCL_WIN@", "acpp-clang-cl_win-64"]
@@ -139,6 +145,7 @@ def unpark-pairs [] {
    ["@X_LLDB@", "acpp-lldb"]
    ["@X_ACPP@", "acpp"]
    # this lane's own packages
+   ["@N_CRT@", "acpp-compiler-rt-nightly"]
    ["@N_CLANGXX@", "acpp-clangxx-nightly_linux-64"]
    ["@N_CLANGXX_WIN@", "acpp-clangxx-nightly_win-64"]
    ["@N_CLANGCL_WIN@", "acpp-clang-cl-nightly_win-64"]

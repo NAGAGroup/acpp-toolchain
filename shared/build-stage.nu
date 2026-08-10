@@ -44,13 +44,20 @@ def common-args [src: string, prefix: string, build: string] {
     $"-DCUDA_TOOLKIT_ROOT_DIR=($prefix)"
     $"-DLLVMSPIRV_SOURCE_DIR=($src)/SPIRV-LLVM-Translator"
     "-DOPENMP_ENABLE_LIBOMPTARGET=OFF"
+    # compiler-rt: builtins plus the sanitizer runtimes (phase-3 ruling [B]).
+    #
+    # These were all OFF, which made the toolchain a NON-drop-in replacement:
+    # `clang -fsanitize=address` would fail to link against a runtime we never
+    # built. Since the toolchain's whole promise is that it can stand in for a
+    # conda-forge clang, the sanitizer runtimes ship, in acpp-compiler-rt.
+    #
+    # Per-component rather than a blanket ON because the components have
+    # genuinely different platform support; the per-platform arg sets below add
+    # the ones that are linux-only.
     "-DCOMPILER_RT_BUILD_BUILTINS=ON"
-    "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
-    "-DCOMPILER_RT_BUILD_XRAY=OFF"
-    "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF"
-    "-DCOMPILER_RT_BUILD_PROFILE=OFF"
-    "-DCOMPILER_RT_BUILD_MEMPROF=OFF"
-    "-DCOMPILER_RT_BUILD_ORC=OFF"
+    "-DCOMPILER_RT_BUILD_SANITIZERS=ON"
+    "-DCOMPILER_RT_BUILD_PROFILE=ON"
+    "-DCOMPILER_RT_BUILD_LIBFUZZER=ON"
     $"-DLLVM_PARALLEL_LINK_JOBS=(link-jobs)"
     "-DLLVM_INCLUDE_BENCHMARKS=OFF"
     "-DLLVM_INCLUDE_EXAMPLES=OFF"
@@ -64,6 +71,12 @@ def linux-args [src: string, prefix: string] {
   [
     # lldb/bolt/polly/clang-tools-extra are linux-only in this suite
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;bolt;polly;openmp"
+    # compiler-rt components that upstream supports on linux but not on
+    # Windows. XRay has no Windows port at all; MemProf and ORC are
+    # linux-first and not built by conda-forge's own Windows clang either.
+    "-DCOMPILER_RT_BUILD_XRAY=ON"
+    "-DCOMPILER_RT_BUILD_MEMPROF=ON"
+    "-DCOMPILER_RT_BUILD_ORC=ON"
     # One dylib every tool links against — the seam the whole partition rests on
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
@@ -102,6 +115,12 @@ def windows-args [src: string, libprefix: string] {
     # is why the win file partition differs from linux by construction.
     "-DLLVM_BUILD_LLVM_DYLIB=OFF"
     "-DLLVM_LINK_LLVM_DYLIB=OFF"
+    # See linux-args: XRay has no Windows port, and MemProf/ORC are not built
+    # for Windows by conda-forge's clang either. ASan, the profile runtime and
+    # libFuzzer DO support Windows and are enabled in common-args.
+    "-DCOMPILER_RT_BUILD_XRAY=OFF"
+    "-DCOMPILER_RT_BUILD_MEMPROF=OFF"
+    "-DCOMPILER_RT_BUILD_ORC=OFF"
     # Level Zero and OpenCL loaders BOTH ship for win-64 (level-zero-devel,
     # khronos-opencl-icd-loader), so the Intel backends are built here too.
     # Upstream's CI disables OpenCL on Windows but the docs never say it

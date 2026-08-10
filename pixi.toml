@@ -22,13 +22,21 @@ platforms = ["linux-64", "win-64"]
 preview = ["pixi-build"]
 requires-pixi = ">=0.76.1"
 
-# ---- Compiler pin for the toolchain build itself ---------------------------
-# The current default GCC builds our LLVM on linux; single-valued (a pin, not
-# a matrix axis).
-[workspace.target.linux-64.build-variants]
-c_compiler_version = ["14"]
-cxx_compiler_version = ["14"]
-c_stdlib_version = ["2.28"]
+# ---- Build variants: deliberately NOT here ---------------------------------
+# There used to be a [workspace.target.linux-64.build-variants] block pinning
+# the compiler and sysroot. It is gone, and nothing replaces it in this file.
+#
+# Every build goes through `rattler-build ... -m shared/variants/<platform>.yaml`
+# (see shared/build-lane.nu), so a pin written here would not be read by any
+# build we actually run — it was a second, silently divergent copy of the real
+# pins. Worse, it only ever covered linux: Windows inherited the default vs2022
+# while the real config selects vs2026, so the one platform where a stale
+# compiler default actually bites was the one this block did not cover.
+#
+# shared/variants/{linux-64,win-64}.yaml are the single source of truth. If
+# this workspace ever moves back to the pixi-build path, the correct wiring is
+# `[workspace] build-variants-files` pointing at those same files — NOT a
+# retyped copy of their contents.
 
 # ---- Build tasks -----------------------------------------------------------
 # `pixi publish --to <dir>` builds the whole lane and writes an INDEXED conda

@@ -92,6 +92,32 @@ def check [name: string, cond: bool, detail: string] {
   $cond
 }
 
+# Does the OTHER lane on the channel already carry the mutex?
+#
+# The cross-lane MUTEX cases can only bite once both lanes have been rebuilt on
+# the phase-3 scheme. In a release run, local-channel holds the new release
+# packages while the nightly ones still come from the channel on the old
+# scheme, where acpp-llvm does not appear at all — so "nightly compiler +
+# release mutex" legitimately solves, and asserting otherwise would be
+# asserting that the transition is already finished.
+#
+# This probes the channel instead of hard-coding a transitional expectation, so
+# the case turns itself back on the moment the counterpart lane republishes,
+# rather than sitting as a permanently skipped test nobody revisits.
+def counterpart-has-mutex [platform: string, pkg: string] {
+  let url = $"https://repo.prefix.dev/jackm97/naga-labs/($platform)/repodata.json"
+  # --raw + explicit from json: the server's content-type is not always one
+  # nushell auto-parses, and a silently-unparsed string would make this probe
+  # look like a network failure rather than a parse one.
+  let repo = (try { http get --raw $url | from json } catch { null })
+  if $repo == null { return null }
+  let groups = [($repo | get -o packages | default {}), ($repo | get -o "packages.conda" | default {})]
+  let entries = ($groups | each {|g| $g | values } | flatten)
+  let mine = ($entries | where {|e| ($e | get -o name) == $pkg })
+  if ($mine | is-empty) { return null }
+  $mine | any {|e| ($e | get -o depends | default []) | any {|d| $d | str starts-with "acpp-llvm" } }
+}
+
 # ── A. solve audits ────────────────────────────────────────────────────────
 
 # NB on the same-major cases: conda-forge's `clang` version tracks the LLVM
@@ -104,14 +130,16 @@ def linux-cases [maj: string, next: string] {
 
     # same-major collisions must still be rejected
     ["same-major libllvm rejected", [acpp-runtime $"libllvm($maj)"], false]
-    ["same-major clang rejected", [acpp $"clang ==($maj).*"], false]
-    ["same-major lld rejected", [acpp $"lld ==($maj).*"], false]
+    ["same-major clang rejected", [acpp $"clang ($maj).*"], false]
+    ["same-major lld rejected", [acpp $"lld ($maj).*"], false]
 
     # ...while a DIFFERENT major of the same dev tooling may coexist. This is
     # the concession the same-major windows exist to make.
-    ["different-major clang allowed", [acpp $"clang ==($next).*"], true]
-    ["different-major clang-tools allowed", [acpp-runtime $"clang-tools ==($next).*"], true]
-    ["different-major clang-format allowed", [acpp-tools $"clang-format ==($next).*"], true]
+    # NB "21.*", not "==21.*": pixi rejects an equality operator combined with
+    # a wildcard ("expected a version specifier but looks like a matchspec").
+    ["different-major clang allowed", [acpp $"clang ($next).*"], true]
+    ["different-major clang-tools allowed", [acpp-runtime $"clang-tools ($next).*"], true]
+    ["different-major clang-format allowed", [acpp-tools $"clang-format ($next).*"], true]
 
     # lane mixing, both directions, via the mirrored run_constraints
     ["lane mixing rejected (runtime)", [acpp-runtime acpp-runtime-nightly], false]
@@ -121,7 +149,6 @@ def linux-cases [maj: string, next: string] {
     # ...and independently via the mutex, which is what catches a consumer who
     # pins the wrong lane rather than naming the wrong package
     ["release compiler + nightly mutex rejected", [acpp $"acpp-llvm ==($next)"], false]
-    ["nightly compiler + release mutex rejected", [acpp-nightly $"acpp-llvm ==($maj)"], false]
 
     # the taught consumer pin: ==major selects a lane explicitly
     ["mutex ==major selects release lane", [acpp $"acpp-llvm ==($maj)"], true]
@@ -298,6 +325,16 @@ def main [
   mut results = []
   for c in $cases {
     $results = ($results | append (try-solve $platform $channels $c.0 $c.1 $c.2))
+  }
+
+  # The reverse mutex direction, gated on the counterpart lane actually having
+  # been rebuilt on this scheme. See counterpart-has-mutex.
+  let cp = (counterpart-has-mutex $platform "acpp-nightly")
+  if $cp == true {
+    $results = ($results | append (try-solve $platform $channels
+      "nightly compiler + release mutex rejected" [acpp-nightly $"acpp-llvm ==($maj)"] false))
+  } else {
+    print $"[SKIP] solve: nightly compiler + release mutex rejected — the nightly lane on the channel does not carry the mutex yet \(probe=($cp)\); this case arms itself once nightly republishes on the phase-3 scheme"
   }
 
   $results = ($results | append (artifact-audits $channel_dir $platform $maj $next))

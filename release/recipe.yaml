@@ -137,6 +137,30 @@ outputs:
         # this repo's pinning feedstock. Bare names are not "unpinned": a
         # variant key matching the package name supplies the version, and the
         # render annotates the resolved spec with (V) to prove it applied.
+        #
+        # THE LANE MUTEX LIVES HERE, on the staging output, not on the package
+        # outputs (run 31346371052: "Could not apply pin_compatible. The
+        # following package is not part of the solution: acpp-llvm").
+        #
+        # Outputs that `inherit:` this staging build do not get their own host
+        # environment solved — the staging one is what exists — so a host dep
+        # declared on an inheriting output never enters any solution. Declared
+        # here it does, and the mutex's own weak run_export then reaches every
+        # inheriting output automatically as
+        #   acpp-llvm >=20,<21.0a0   (RE of [host: acpp-llvm])
+        # which is the python_abi idiom working exactly as designed, and why
+        # none of those outputs names the mutex itself.
+        #
+        # Safe as a host dep specifically because the mutex is CONTENTLESS:
+        # rattler-build excludes from the carve any path a host dep provides,
+        # and an empty package provides none. (A real host dep here silently
+        # ejected clang.exe and friends from every win package, run
+        # 31241929077.)
+        #
+        # Names this lane's own major deliberately: a bare `acpp-llvm` resolves
+        # to the HIGHEST published major, which would pin the release lane to
+        # the nightly lane's range.
+        - acpp-llvm ==${{ llvm_major }}
         - zlib
         - zstd
         # The single CUDA pin. cuda-version is what every other cuda-* package
@@ -273,22 +297,12 @@ outputs:
     requirements:
       build:
         - nushell
-      host:
-        # THE LANE MUTEX. Contentless by construction, which is what makes it
-        # safe as a host dep of a staging-inheriting output: rattler-build
-        # excludes from the carve any path a host dep already provides, and an
-        # empty package provides none. (A real host dep here silently ejected
-        # clang.exe & friends from every win package in run 31241929077.)
-        #
-        # It MUST name this lane's own major. A bare `acpp-llvm` resolves to
-        # the HIGHEST published major, which would have pinned the release
-        # lane to the nightly lane's mutex range — measured, not theorised.
-        - acpp-llvm ==${{ llvm_major }}
       run:
-        # Renders "acpp-llvm >=20,<21.0a0" — the whole major and nothing else.
-        # Spelled through the pin function so it cannot drift from the host
-        # spec above.
-        - ${{ pin_compatible('acpp-llvm') }}
+        # NB the lane mutex is deliberately absent from this list. It arrives
+        # automatically as a run_export of the staging output's host dep — see
+        # the long note there. Naming it here as well would be a second source
+        # of truth for the same range, and pin_compatible() cannot resolve it
+        # in an inheriting output anyway.
         - llvm-openmp >=${{ llvm_major }}
         - if: linux
           then:
@@ -305,7 +319,14 @@ outputs:
         # built against acpp-runtime would inherit the runtime range while
         # saying nothing about which LLVM lane it needs — exactly the mismatch
         # the mutex exists to prevent.
-        - ${{ pin_compatible('acpp-llvm') }}
+        #
+        # Spelled out rather than via pin_compatible(): the mutex lives only in
+        # the STAGING solution, and pin_compatible cannot see it from here
+        # (run 31346371052). Still derived rather than literal — both bounds
+        # come from the context vars, so a lane bump moves them together. Same
+        # carve-out the ratified doctrine already makes for exclusion windows
+        # on packages absent from the build env.
+        - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
       run_constraints:
         # These two are already major-scoped BY NAME (libllvm20, not libllvm),
         # so a blanket "must not exist" is the same-major window: it forbids
@@ -314,16 +335,27 @@ outputs:
         # The unversioned-name cases below are the ones that needed widening.
         - libllvm${{ llvm_major }} <0.0a0
         - libclang-cpp${{ llvm_maj_min }} <0.0a0
-        # DERIVED, not hand-written (phase-3 ruling [B]). The CUDA backend is
-        # dlopened, so cudart must stay OPTIONAL — a constraint, not a
-        # dependency, which is why the run_export is still ignored below. What
-        # changed is that the range now comes from the actual host solve
-        # instead of a guessed ">=12,<13": pin_compatible yields
-        # ">=12.9.79,<13.0a0", the same range cuda-cudart-dev itself exports.
-        # Ignoring an export and then hand-writing a LOOSER constraint in its
-        # place was the pattern this replaces.
-        - ${{ pin_compatible('cuda-cudart') }}
-        - ${{ pin_compatible('cuda-nvvm') }}
+        # CUDA constraints are NOT stated here, deliberately.
+        #
+        # The ruling asked for derived pins instead of the old hand-guessed
+        # ">=12,<13". Deriving them means pin_compatible(), and pin_compatible
+        # CANNOT be used in an output that inherits a staging build — it does
+        # not resolve against the staging solution (run 31346371052, then
+        # reproduced locally). So the choice here was a derived pin that does
+        # not build, or a hand-written guess that the ruling rejected.
+        #
+        # Neither: the derived floors live on acpp-runtime-cuda, which does not
+        # inherit and therefore CAN derive them — it takes real CUDA host deps
+        # and pins them via pin_compatible to ">=12.9.79,<13.0a0", exactly the
+        # range cuda-cudart-dev exports. That is the package whose job is to
+        # say what CUDA this runtime was built against, and it is the supported
+        # way to get the CUDA backend at all.
+        #
+        # What is lost is a defensive constraint for an environment that drags
+        # cudart in from somewhere else without the metapackage. That case
+        # already fails at dlopen time rather than silently, and stating a
+        # looser range here would be reintroducing the exact pattern the ruling
+        # struck.
         # __cuda: DELETED, deliberately, and not replaced here.
         #
         # It was written as "__cuda >=12,<13" — a CEILING on a driver virtual
@@ -535,12 +567,10 @@ outputs:
               - Library/lib/clang/${{ llvm_major }}/lib/**
               - Library/lib/clang/${{ llvm_major }}/share/**
     requirements:
-      host:
-        # Lane mutex — see the note on acpp-runtime's host block.
-        - acpp-llvm ==${{ llvm_major }}
       run:
+        # Mutex omitted deliberately — it arrives as a run_export of the
+        # staging host dep. See the note on the staging output.
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-        - ${{ pin_compatible('acpp-llvm') }}
         - python >=3.9
         - if: linux
           then:
@@ -555,7 +585,10 @@ outputs:
         # llvm20 toolchain from being installed next to the llvm21 runtime.
         strong:
           - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-          - ${{ pin_compatible('acpp-llvm') }}
+          # Spelled out, not pin_compatible(): the mutex exists only in the
+          # staging solution and pin_compatible cannot resolve it from an
+          # inheriting output. Both bounds still come from context vars.
+          - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
       run_constraints:
         # SAME-MAJOR WINDOWS, not blanket exclusions (phase-3 ruling [B]).
         # These names are unversioned on conda-forge, so a bare "<0.0a0" said
@@ -688,12 +721,9 @@ outputs:
               - Library/lib/clang/${{ llvm_major }}/lib/**
               - Library/lib/clang/${{ llvm_major }}/share/**
     requirements:
-      host:
-        # Lane mutex — see the note on acpp-runtime's host block.
-        - acpp-llvm ==${{ llvm_major }}
       run:
         - ${{ pin_subpackage('acpp', upper_bound='x.x') }}
-        - ${{ pin_compatible('acpp-llvm') }}
+
       run_constraints:
         # conda-forge's compiler-rt of OUR major installs into the same
         # lib/clang/<major>/lib path, so it is a genuine file collision, not
@@ -976,12 +1006,9 @@ outputs:
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
     requirements:
-      host:
-        # Lane mutex — see the note on acpp-runtime's host block.
-        - acpp-llvm ==${{ llvm_major }}
       run:
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-        - ${{ pin_compatible('acpp-llvm') }}
+
       run_constraints:
         # Same-major windows (see acpp): these names are unversioned upstream,
         # so a blanket forbid barred every major instead of just ours.
@@ -1158,12 +1185,9 @@ outputs:
               - Library/lib/libscanbuild/**
               - Library/libexec/**
     requirements:
-      host:
-        # Lane mutex — see the note on acpp-runtime's host block.
-        - acpp-llvm ==${{ llvm_major }}
       run:
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-        - ${{ pin_compatible('acpp-llvm') }}
+
         - python >=3.9
       run_constraints:
         # Same-major windows. This is the block the CPP Project Expert's
@@ -1242,12 +1266,9 @@ outputs:
           # python bindings (lldb module)
           - lib/python*/**
     requirements:
-      host:
-        # Lane mutex — see the note on acpp-runtime's host block.
-        - acpp-llvm ==${{ llvm_major }}
       run:
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-        - ${{ pin_compatible('acpp-llvm') }}
+
         # POINT REPAIR: this package ships lib/python*/** — the lldb python
         # bindings — so it needs an interpreter to be of any use, and it was
         # not asking for one. python's own run_export supplies python_abi,

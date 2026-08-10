@@ -47,6 +47,9 @@ jobs:
       # different patches/sources (rattler-build does not hash them).
       - name: staging_inputs hash is current
         run: pixi run -e dev check-staging-hash
+      # Invisible to --render-only; fails at build time on the big runner.
+      - name: pins are resolvable
+        run: pixi run -e dev check-pins
       - name: Resolve AdaptiveCpp develop HEAD
         id: check
         run: |

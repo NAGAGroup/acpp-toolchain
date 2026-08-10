@@ -84,6 +84,10 @@ description = "Solver-level constraint audits against ./local-channel"
 cmd = "nu shared/tests/audit.nu --platform win-64 --skip-round-trip"
 description = "Solver-level constraint audits against ./local-channel (win-64)"
 
+[environments.dev.tasks.check-pins]
+cmd = "nu shared/check-pins.nu"
+description = "Fail if a staging-inheriting output uses pin_compatible (unresolvable at build time, invisible to --render-only)"
+
 [environments.dev.tasks.check-no-collision]
 cmd = "nu shared/check-no-collision.nu"
 description = "C-11 gate: fail if any staged artifact name exists on conda-forge (overlay-first channel would shadow it)"

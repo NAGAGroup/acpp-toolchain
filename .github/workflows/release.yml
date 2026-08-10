@@ -44,6 +44,11 @@ jobs:
         run: |
           pixi run -e dev render-release > /dev/null
           pixi run -e dev render-nightly > /dev/null
+      # Rendering does NOT resolve environments, so it cannot see a
+      # pin_compatible that will fail at build time. This catches that class in
+      # the cheap job instead of on both platform runners.
+      - name: pins are resolvable
+        run: pixi run -e dev check-pins
 
   build-linux:
     needs: checks

@@ -77,6 +77,11 @@ outputs:
           # [release-only] win runtime cannot locate ANY of its own data dirs:
           # [release-only] the common-library name never reaches config.hpp.in
           - ../shared/patches/0006-win-propagate-common-library-name.patch # [release-only]
+          # [release-only] omp backend guards its POSIX/Windows split with plain
+          # [release-only] WIN32 (flag-supplied, not the _WIN32 builtin) — the
+          # [release-only] POSIX branch compiles on win unless CMake's default
+          # [release-only] /DWIN32 survives; backport of upstream's develop fix
+          - ../shared/patches/0007-omp-queue-win32-guard-use-compiler-builtin.patch # [release-only]
       - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
         sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
         target_directory: SPIRV-LLVM-Translator

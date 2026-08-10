@@ -1,0 +1,49 @@
+Guard the omp backend's platform split with _WIN32, not WIN32.
+
+omp_queue.cpp already carries correct dual-platform code (unistd.h
+sysconf(_SC_PAGESIZE) on POSIX, Windows.h GetSystemInfo on Windows) but
+selects between them with plain WIN32 — which is NOT a compiler builtin.
+It only exists when the build system defines it (CMake's Windows-MSVC
+default flags inject /DWIN32 /D_WINDOWS); any build that sets
+CMAKE_C(XX)_FLAGS explicitly loses it and the POSIX branch is compiled
+on Windows:
+
+    src/runtime/omp/omp_queue.cpp(44,10):
+        fatal error: 'unistd.h' file not found
+
+_WIN32 is predefined by every Windows compiler (MSVC, clang-cl, clang,
+MinGW GCC) independent of build flags, making the selection portable
+across flag regimes.
+
+This is a BACKPORT: upstream develop already carries exactly this change
+(all three sites read _WIN32 there as of 2026-08-10), so the patch
+retires by itself at the next release bump. Nothing to file upstream.
+
+diff --git a/src/runtime/omp/omp_queue.cpp b/src/runtime/omp/omp_queue.cpp
+--- a/src/runtime/omp/omp_queue.cpp
++++ b/src/runtime/omp/omp_queue.cpp
+@@ -34,13 +34,13 @@
+ #include "hipSYCL/runtime/adaptivity_engine.hpp"
+ #include "hipSYCL/runtime/omp/omp_code_object.hpp"
+ 
+-#ifndef WIN32 // MSVC might not have #warning?
++#ifndef _WIN32 // MSVC might not have #warning?
+ #ifndef _OPENMP
+ #warning Building omp backend with JIT support, but OpenMP parallelization is not available - kernels will run sequentially! This points to an issue in the build system.
+ #endif
+ #endif
+ 
+-#ifndef WIN32
++#ifndef _WIN32
+ #include <unistd.h>
+ #else
+ #include <Windows.h>
+@@ -183,7 +183,7 @@
+ #ifdef HIPSYCL_WITH_SSCP_COMPILER
+ 
+ std::size_t get_page_size() {
+-#ifndef WIN32
++#ifndef _WIN32
+   return static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+ #else
+   SYSTEM_INFO si;

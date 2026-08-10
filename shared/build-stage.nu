@@ -128,17 +128,31 @@ def conda-toolchain-args [] {
   ]
 }
 
-# The outer configure must receive the conda flags EXPLICITLY once main()
-# strips them from the env (see conda-toolchain-args). Replicates cmake's own
-# env-seeding semantics: CFLAGS->CMAKE_C_FLAGS, CXXFLAGS->CMAKE_CXX_FLAGS,
-# LDFLAGS->all three *_LINKER_FLAGS. The linux -pthread that previously rode
-# in via *_LINKER_FLAGS_INIT is folded in here (an explicit cache value
-# overrides _INIT, so keeping both would have silently dropped it).
+# LINUX ONLY: the outer configure must receive the conda flags EXPLICITLY once
+# main() strips them from the env (see conda-toolchain-args). Replicates
+# cmake's own env-seeding semantics: CFLAGS->CMAKE_C_FLAGS,
+# CXXFLAGS->CMAKE_CXX_FLAGS, LDFLAGS->all three *_LINKER_FLAGS. The linux
+# -pthread that previously rode in via *_LINKER_FLAGS_INIT is folded in here
+# (an explicit cache value overrides _INIT, so keeping both would have
+# silently dropped it).
+#
+# On WINDOWS this returns NOTHING, deliberately. An explicit -DCMAKE_CXX_FLAGS
+# on the command line pre-seeds the cache and suppresses CMake's Windows-MSVC
+# platform defaults (/DWIN32 /D_WINDOWS /EHsc) — and those defaults are
+# LOAD-BEARING: AdaptiveCpp guards its POSIX includes with `#ifndef WIN32`
+# (plain WIN32, NOT the compiler builtin _WIN32; the macro only exists because
+# CMake's default flags define it), so clobbering them broke omp_queue.cpp
+# with "'unistd.h' file not found" (run 31350122413). Emitting no flag args
+# lets CMake initialize from its platform *_INIT values; env CFLAGS/CXXFLAGS
+# are stripped by main() before configure, so nothing gnu-shaped appends, and
+# env LDFLAGS (kept) appends to /machine:x64 exactly as in the proven-green
+# pre-override builds.
 def outer-flag-args [] {
+  if (is-windows) { return [] }
   let cflags = ($env.CFLAGS? | default "")
   let cxxflags = ($env.CXXFLAGS? | default "")
   let base_ld = ($env.LDFLAGS? | default "")
-  let ldflags = (if (is-windows) { $base_ld } else { ([$base_ld "-pthread"] | str join " " | str trim) })
+  let ldflags = ([$base_ld "-pthread"] | str join " " | str trim)
   [
     $"-DCMAKE_C_FLAGS=($cflags)"
     $"-DCMAKE_CXX_FLAGS=($cxxflags)"
@@ -197,20 +211,21 @@ def linux-args [src: string, prefix: string] {
 
 def windows-args [src: string, libprefix: string, build: string] {
   [
-    # The runtimes child-configure on win runs the just-built clang-cl
-    # (LLVMExternalProjectUtils.cmake:219 — deliberate upstream choice for
-    # msvc targets) but forwards NO linker: clang-cl's default link.exe
-    # discovery inside a bare child cmake was the leading suspect for the
-    # "Detecting C compiler ABI info - failed" -> empty-arch -> hollow
-    # acpp-compiler-rt failure (run 31346899644). Hand the child the
-    # just-built lld-link and llvm-mt explicitly; env flag hygiene is
-    # handled by main() stripping CFLAGS/CXXFLAGS (gnu-shaped flags from
-    # the plain-clang build dep would be rejected wholesale by clang-cl's
-    # MSVC-style CLI — every try-compile dies, which matches the log).
-    ([
-      $"-DCMAKE_LINKER=($build)/bin/lld-link.exe"
-      $"-DCMAKE_MT=($build)/bin/llvm-mt.exe"
-    ] | str join ";" | $"-DRUNTIMES_CMAKE_ARGS=($in)")
+    # NO RUNTIMES_CMAKE_ARGS linker/mt injection — that was tried (8a24d34)
+    # and DISPROVEN by run 31350122413: the builtins child, which receives no
+    # such args, passed ABI detection via default MSVC-env discovery
+    # (link.exe/mt.exe on PATH from the vs2026 activation), proving the
+    # env-strip of gnu-shaped CFLAGS/CXXFLAGS in main() was the whole fix for
+    # the original empty-arch failure (run 31346899644). Worse, the injection
+    # itself poisoned the runtimes child: CMake wraps EVERY MSVC-style exe
+    # link — try-compiles included — in `cmake -E vs_link_exe --mt=<CMAKE_MT>`
+    # (see cmake#24425 / ninja#2257 for the identical CMAKE_MT-NOTFOUND
+    # shape), and our -DCMAKE_MT pointed at build_dir/bin/llvm-mt.exe, which
+    # is only LINKED at build step ~5150 while the runtimes child configures
+    # at ~4351: every try-compile died against a nonexistent mt, ABI detection
+    # "failed", and the supported-arch list came out empty. The child gets the
+    # same MSVC activation env as the outer build and the builtins child; let
+    # it discover the toolchain the same, proven way.
     # Mirrors AdaptiveCpp's own windows-acppllvm.yml: no lldb/bolt/polly.
     # clang-tools-extra is added on top (LLVM builds it fine on Windows and it
     # keeps acpp-tools at parity with the linux suite).

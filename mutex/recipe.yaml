@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvm — THE mutex (phase-3 ruling [A], as corrected by Jack 2026-08-09).
+#
+# ONE mutex, not two: the `acpp-lane` mutex that an earlier sub-ruling proposed
+# NEVER EXISTS. This package is the single handle a consumer uses to say which
+# LLVM major the acpp toolchain in their environment is built against.
+#
+# MAJOR-ONLY VERSIONS. The packages are `18`, `20`, `21` — there is no
+# "acpp-llvm 20.1.8". A release lane tracks ONE stable LLVM major at whatever
+# its latest minor/patch happens to be, so there is no minor matrix to
+# disambiguate and nothing for a third version segment to say. `acpp-llvm ==20`
+# is therefore a legitimate, taught consumer pin and resolves exactly one
+# family. (The old "==18 matches nothing" objection assumed full versions and
+# was struck.)
+#
+# Accepted consequence, on the record: major-only cannot express a WITHIN-major
+# bitcode break. If one ever appears, the lever is a semantic build-string
+# component on this package — NOT a third version segment, which would break
+# every `==major` pin in the wild.
+#
+# LANE-SHARED: there is deliberately no `acpp-llvm-nightly` twin. Both lanes
+# depend on the same mutex family; that is what makes the mutex able to see a
+# cross-lane conflict at all. The nightly lane pins a different major (21) than
+# release (20), so mixing the two lanes in one environment is already
+# unsolvable through this package.
+#
+# ...which does NOT make the mirrored `-nightly <0.0a0` run_constraints in the
+# lane recipes redundant, and they stay verbatim. The mutex only bites when the
+# two lanes sit on DIFFERENT majors. The day nightly and release share a major
+# — which happens every time release catches up — the mutex is satisfied by the
+# same package and only the explicit bidirectional constraints keep the lanes
+# apart. Verbose is not wrong.
+#
+# NOT to be confused with `acpp-llvm-dev` (headers, static libs, LLVMConfig).
+# That is a payload package and is NEVER the pinning handle.
+
+package:
+  name: acpp-llvm
+  version: ${{ llvm_major }}
+
+# The ONLY reason this recipe has a source at all: `license_file` is resolved
+# against the recipe dir and the work dir, and will not escape upwards into
+# ../shared, so the license text has to be fetched into the work dir first.
+# Nothing here reaches the prefix — there is no build script.
+source:
+  - path: ../shared/licenses/AdaptiveCpp-LICENSE
+
+build:
+  # Bumping this republishes the mutex for every major. Uploads run with
+  # `--skip-existing`, so rebuilding an unchanged mutex in every lane run is a
+  # no-op rather than a 409.
+  number: 0
+  # No files, no platform surface: this package exists purely to be a name and
+  # a version that solvers can collide on. Being noarch also means ONE artifact
+  # serves linux-64 and win-64, so the two lanes' platform jobs cannot drift
+  # into publishing different mutex builds.
+  noarch: generic
+  variant:
+    # `llvm_major` reaches this recipe only through the variant config
+    # (mutex/variants.yaml), and it is consumed in `version:` rather than in a
+    # requirement, so it is not auto-discovered as a variant key. Declaring it
+    # here is what makes rattler-build build one output per listed major
+    # instead of collapsing to a single arbitrary one.
+    use_keys:
+      - llvm_major
+
+requirements:
+  run_exports:
+    # WEAK, following the python_abi idiom: the export fires for packages that
+    # take acpp-llvm as a HOST dependency (every lane output does), and does
+    # not leak out of environments that merely happen to contain it.
+    #
+    # Defaults do the right thing on a one-segment version: lower_bound
+    # "x.x.x.x.x.x" against "20" yields ">=20" and upper_bound "x" yields
+    # "<21.0a0", i.e. `acpp-llvm >=20,<21.0a0` — the whole major and nothing
+    # else. Spelled through the pin function rather than by hand so it cannot
+    # drift from the version above.
+    weak:
+      - ${{ pin_subpackage('acpp-llvm') }}
+
+tests:
+  # There is nothing to test but the contract: the package must install, and
+  # its version must be the bare major. The `^[0-9]+$` shape is additionally
+  # asserted at publish time (publish gate), because a mutex that ever ships a
+  # dotted version silently breaks every `==major` pin consumers were taught.
+  - package_contents:
+      files:
+        not_exists:
+          - lib/**
+          - bin/**
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-2-Clause
+  license_file: AdaptiveCpp-LICENSE
+  summary: Mutex selecting the LLVM major of the AdaptiveCpp toolchain
+  description: |
+    A contentless mutex package. Every acpp toolchain package depends on the
+    acpp-llvm major it was built against, so an environment can hold exactly
+    one LLVM major worth of AdaptiveCpp toolchain at a time.
+
+    Pin it directly to choose a lane explicitly:
+
+        acpp-llvm ==20
+
+    This is NOT acpp-llvm-dev, which ships the LLVM/Clang development files.

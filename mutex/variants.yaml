@@ -1,0 +1,20 @@
+# Variant config for the acpp-llvm mutex (mutex/recipe.yaml).
+#
+# EVERY LLVM major the channel supports must be listed here, not just the ones
+# the current lanes build: the mutex is the package a consumer pins, so a major
+# that is missing from this list is a major nobody can select even if lane
+# artifacts for it still exist on the channel.
+#
+# Both lanes build this file in full and upload with `--skip-existing`, so
+# whichever workflow runs first publishes any newly added major and every later
+# run is a no-op. Adding a major is therefore a one-line edit here.
+#
+#   20 — release lane (LLVM 20.1.8)
+#   21 — nightly lane (LLVM 21.1.8)
+#
+# Retiring a major is NOT just deleting its line: published lane artifacts that
+# depend on it would become unsolvable. The mutex is name-excluded from nightly
+# pruning for the same reason.
+llvm_major:
+  - "20"
+  - "21"

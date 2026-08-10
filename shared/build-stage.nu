@@ -67,8 +67,43 @@ def common-args [src: string, prefix: string, build: string] {
   ]
 }
 
-def linux-args [src: string, prefix: string] {
+# Where the conda toolchain lives, for the runtimes sub-build. See the note in
+# linux-args. Returns [] when neither can be located, so the build fails with
+# the real compiler error rather than a confusing empty --sysroot=.
+def conda-toolchain-args [] {
+  let sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
+  let bp = ($env.BUILD_PREFIX? | default "")
+  # conda's own layout when CONDA_BUILD_SYSROOT is not exported.
+  let derived = (if $bp != "" { [$bp "x86_64-conda-linux-gnu" "sysroot"] | path join } else { "" })
+  let chosen = (if ($sysroot != "" and ($sysroot | path exists)) {
+    $sysroot
+  } else if ($derived != "" and ($derived | path exists)) {
+    $derived
+  } else {
+    ""
+  })
+
+  if $chosen == "" {
+    print "WARNING: no conda sysroot found (CONDA_BUILD_SYSROOT unset and BUILD_PREFIX layout absent); compiler-rt will use system headers"
+    return []
+  }
+  print $"compiler-rt runtimes toolchain: sysroot=($chosen) gcc-toolchain=($bp)"
+
+  # Both flags are needed and they do DIFFERENT jobs:
+  #   --sysroot      finds the C library headers (glibc 2.28)
+  #   --gcc-toolchain finds the C++ standard library headers (libstdc++)
+  # Only the second fixes the observed failure; only the first keeps the
+  # artifacts redistributable. Passed through RUNTIMES_CMAKE_ARGS because the
+  # runtimes are configured by a SEPARATE cmake invocation that does not
+  # inherit the outer flags.
+  let flags = $"--sysroot=($chosen) --gcc-toolchain=($bp)"
   [
+    $"-DRUNTIMES_CMAKE_ARGS=-DCMAKE_SYSROOT=($chosen);-DCMAKE_C_FLAGS=($flags);-DCMAKE_CXX_FLAGS=($flags)"
+  ]
+}
+
+def linux-args [src: string, prefix: string] {
+  ([
     # lldb/bolt/polly/clang-tools-extra are linux-only in this suite
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;bolt;polly;openmp"
     # compiler-rt components that upstream supports on linux but not on
@@ -102,7 +137,7 @@ def linux-args [src: string, prefix: string] {
     "-DCMAKE_EXE_LINKER_FLAGS_INIT=-pthread"
     "-DCMAKE_SHARED_LINKER_FLAGS_INIT=-pthread"
     "-DCMAKE_MODULE_LINKER_FLAGS_INIT=-pthread"
-  ]
+  ] ++ (conda-toolchain-args))
 }
 
 def windows-args [src: string, libprefix: string] {

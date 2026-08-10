@@ -84,6 +84,10 @@ description = "Solver-level constraint audits against ./local-channel"
 cmd = "nu shared/tests/audit.nu --platform win-64 --skip-round-trip"
 description = "Solver-level constraint audits against ./local-channel (win-64)"
 
+[environments.dev.tasks.acceptance]
+cmd = "nu shared/tests/acceptance.nu"
+description = "Acceptance artifact: fresh workspace, clean cache, single channel — locks, builds, runs, and refuses the wrong lane"
+
 [environments.dev.tasks.check-pins]
 cmd = "nu shared/check-pins.nu"
 description = "Fail if a staging-inheriting output uses pin_compatible (unresolvable at build time, invisible to --render-only)"

@@ -70,7 +70,10 @@ cmd = "nu shared/tests/audit.nu"
 description = "Solver-level constraint audits against ./local-channel"
 
 [environments.dev.tasks.audit-win]
-cmd = "nu shared/tests/audit.nu --platform win-64"
+# The export round trip is skipped here on purpose: it installs the whole
+# toolchain to build its consumer, and run_exports are platform-independent
+# metadata, so proving the round trip once (on linux) proves it.
+cmd = "nu shared/tests/audit.nu --platform win-64 --skip-round-trip"
 description = "Solver-level constraint audits against ./local-channel (win-64)"
 
 [environments.dev.tasks.check-no-collision]
@@ -78,9 +81,13 @@ cmd = "nu shared/check-no-collision.nu"
 description = "C-11 gate: fail if any staged artifact name exists on conda-forge (overlay-first channel would shadow it)"
 
 [environments.dev.tasks.publish-channel]
-cmd = "rattler-build upload prefix -c jackm97/naga-labs local-channel/**/*.conda"
-description = "Upload the built local channel to prefix.dev (OIDC in CI)"
+cmd = "nu shared/publish-channel.nu"
+description = "Upload the built local channel to prefix.dev (OIDC in CI), behind the publish gates"
 depends-on = ["check-no-collision"]
+
+[environments.dev.tasks.publish-dry-run]
+cmd = "nu shared/publish-channel.nu --dry-run"
+description = "Run the publish gates and print what would be uploaded, without uploading"
 
 [environments.dev.tasks.build-release]
 cmd = "nu shared/build-lane.nu release"

@@ -284,6 +284,7 @@ jobs:
           (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
       - name: Compile GPU smoke binary
         working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
         env:
           ACPP_SMOKE_VCVARS: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat
         run: |
@@ -348,13 +349,25 @@ jobs:
         working-directory: shared/tests/gpu-smoke
         run: |
           sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /; s/^acpp-compiler-rt = /acpp-compiler-rt-nightly = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
+      # Install SEPARATELY from running, with a generous bound: tonight a hung
+      # binary and a slow ~1GB cold download were indistinguishable, because
+      # the first `pixi run` silently carried the install. Splitting them means
+      # the run steps below can take a TIGHT timeout that only ever fires on a
+      # genuinely wedged binary.
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
       - name: SYCL smoke on CPU backend
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu
       - name: SYCL smoke on CUDA backend
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cuda
       - name: Sanitizer smoke (acpp-compiler-rt-nightly)
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run sanitizer-smoke
 
@@ -429,7 +442,17 @@ jobs:
         working-directory: shared/tests/gpu-smoke
         run: |
           (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
+      # Install SEPARATELY from running, with a generous bound: tonight a hung
+      # binary and a slow ~1GB cold download were indistinguishable, because
+      # the first `pixi run` silently carried the install. Splitting them means
+      # the run steps below can take a TIGHT timeout that only ever fires on a
+      # genuinely wedged binary.
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
       - name: Backends visible to the runtime
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
       # Guard the layout the win runtime actually depends on: acpp locates
@@ -454,9 +477,11 @@ jobs:
           }
           Write-Host "runtime layout OK"
       - name: SYCL smoke on CPU backend
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu
       - name: SYCL smoke on CUDA backend (PTX JIT on real hardware)
+        timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cuda
 

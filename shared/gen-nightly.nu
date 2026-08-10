@@ -39,7 +39,23 @@ const CONTEXT_RELEASE = 'context:
   llvm_major_next: "21"
   llvm_maj_min: "20.1"
   acpp_version: "25.10.0"
-  version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}'
+  # PURE upstream version (phase-3 ruling [A]). The LLVM lane used to live here
+  # as "25.10.0_llvm20.1.8"; it now lives in the build string, because a
+  # trailing lane component makes ordinary semver ranges unwritable — no spec
+  # can say "any 25.10.x, but only the llvm20 build". Consumers now write a
+  # plain range and select the lane on the dependency axis through the
+  # acpp-llvm mutex, which is the same answer the ecosystem reached for
+  # python_abi and cuda-version.
+  #
+  # Cutover note: a trailing string component sorts BELOW the bare version, so
+  # 25.10.0_llvm20.1.8 < 25.10.0 and the new artifacts win every sane spec
+  # against the legacy ones already on the channel. No epoch needed.
+  version: ${{ acpp_version }}
+  # Build-string component naming the lane. Human-chosen and semantic on
+  # purpose — this is the legitimate use of a build string, as distinct from
+  # the variant-HASH pins the channel doctrine rejects (hashes rot across
+  # rebuilds; "llvm20_1_8" does not).
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}'
 
 const CONTEXT_NIGHTLY = 'context:
   llvm_version: "21.1.8"
@@ -49,7 +65,13 @@ const CONTEXT_NIGHTLY = 'context:
   acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   # CI resolves develop HEAD and passes it; local builds float on the branch.
   acpp_commit: ${{ env.get("ACPP_NIGHTLY_SHA", default="develop") }}
-  version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}'
+  # Date-versioned, and like the release lane the LLVM major moves OUT of the
+  # version and into the build string. The date stays because the two lanes are
+  # separate package families with different contracts, and 2026.x sorting
+  # above 25.x is exactly what keeps a nightly from ever satisfying a release
+  # spec by accident.
+  version: ${{ acpp_version }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}'
 
 # ── AdaptiveCpp source: pinned tarball -> git at a resolved rev ────────────
 # NB: indentation matters — the source list lives INSIDE the staging output
@@ -134,8 +156,17 @@ def unpark-pairs [] {
 
 def tail-pairs [] {
   [[from, to];
-   # date-based nightly versions carry no range semantics: pin exactly
-   ['- acpp-runtime-nightly >=${{ acpp_version }},<25.11', '- acpp-runtime-nightly ==${{ version }}']
+   # EXPORT POLICY DIVERGENCE (phase-3 ruling [A]). The release lane pins and
+   # exports semver RANGES; exact pins are nightly-only, because a date version
+   # like 2026.08.09 carries no range semantics — ">=2026.08.09,<2026.09.0a0"
+   # would happily pair Monday's compiler with Friday's runtime across a week
+   # of upstream develop commits.
+   #
+   # One rule covers every pin in the file rather than one rule per package
+   # name, so a pin added to the release recipe later cannot silently keep
+   # range semantics in the nightly lane. The mutex pin is untouched: it is
+   # pin_compatible() with no bounds argument and does not match.
+   [", upper_bound='x.x') }}", ", exact=True) }}"]
    ["name: acpp-toolchain\n", "name: acpp-toolchain-nightly\n"]
    ['summary: AdaptiveCpp SYCL toolchain (LLVM ${{ llvm_major }} linked-in, generic SSCP)',
     'summary: AdaptiveCpp SYCL toolchain nightly (develop @ LLVM ${{ llvm_major }}, generic SSCP)']]

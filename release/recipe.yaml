@@ -10,7 +10,23 @@ context:
   llvm_major_next: "21"
   llvm_maj_min: "20.1"
   acpp_version: "25.10.0"
-  version: ${{ acpp_version ~ "_llvm" ~ llvm_version }}
+  # PURE upstream version (phase-3 ruling [A]). The LLVM lane used to live here
+  # as "25.10.0_llvm20.1.8"; it now lives in the build string, because a
+  # trailing lane component makes ordinary semver ranges unwritable — no spec
+  # can say "any 25.10.x, but only the llvm20 build". Consumers now write a
+  # plain range and select the lane on the dependency axis through the
+  # acpp-llvm mutex, which is the same answer the ecosystem reached for
+  # python_abi and cuda-version.
+  #
+  # Cutover note: a trailing string component sorts BELOW the bare version, so
+  # 25.10.0_llvm20.1.8 < 25.10.0 and the new artifacts win every sane spec
+  # against the legacy ones already on the channel. No epoch needed.
+  version: ${{ acpp_version }}
+  # Build-string component naming the lane. Human-chosen and semantic on
+  # purpose — this is the legitimate use of a build string, as distinct from
+  # the variant-HASH pins the channel doctrine rejects (hashes rot across
+  # rebuilds; "llvm20_1_8" does not).
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
 
 recipe:
   name: acpp-toolchain
@@ -163,6 +179,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       # Installed HERE rather than in the staging build: the staging cache is
       # keyed on resolved requirements + variant vars and does NOT hash
       # shared/, so staging-installed copies of these scripts go stale
@@ -237,15 +255,45 @@ outputs:
     requirements:
       build:
         - nushell
+      host:
+        # THE LANE MUTEX. Contentless by construction, which is what makes it
+        # safe as a host dep of a staging-inheriting output: rattler-build
+        # excludes from the carve any path a host dep already provides, and an
+        # empty package provides none. (A real host dep here silently ejected
+        # clang.exe & friends from every win package in run 31241929077.)
+        #
+        # It MUST name this lane's own major. A bare `acpp-llvm` resolves to
+        # the HIGHEST published major, which would have pinned the release
+        # lane to the nightly lane's mutex range — measured, not theorised.
+        - acpp-llvm ==${{ llvm_major }}
       run:
+        # Renders "acpp-llvm >=20,<21.0a0" — the whole major and nothing else.
+        # Spelled through the pin function so it cannot drift from the host
+        # spec above.
+        - ${{ pin_compatible('acpp-llvm') }}
         - llvm-openmp >=${{ llvm_major }}
         - if: linux
           then:
             - numactl
             - libstdcxx >=13
       run_exports:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        # EXPORT FLIP (phase-3 ruling [A]): a semver RANGE, not an exact pin.
+        # upper_bound 'x.x' renders ">=25.10.0,<25.11.0a0". Exact pins are
+        # nightly-only — a date-versioned lane carries no range semantics, so
+        # gen-nightly rewrites this line back to exact=True for that lane.
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+        # Re-exported EXPLICITLY. run_exports acquired from a host dependency
+        # do NOT transit to our own consumers, so without this line a package
+        # built against acpp-runtime would inherit the runtime range while
+        # saying nothing about which LLVM lane it needs — exactly the mismatch
+        # the mutex exists to prevent.
+        - ${{ pin_compatible('acpp-llvm') }}
       run_constraints:
+        # These two are already major-scoped BY NAME (libllvm20, not libllvm),
+        # so a blanket "must not exist" is the same-major window: it forbids
+        # the conda-forge build of OUR major, which would collide with the
+        # LLVM shared libraries we ship, while leaving every other major free.
+        # The unversioned-name cases below are the ones that needed widening.
         - libllvm${{ llvm_major }} <0.0a0
         - libclang-cpp${{ llvm_maj_min }} <0.0a0
         - cuda-cudart >=12,<13
@@ -328,6 +376,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       files:
         include:
           - if: linux
@@ -414,26 +464,47 @@ outputs:
               - Library/lib/acpp-frontend.lib
               - Library/lib/acpp-clang-cbs.lib
     requirements:
+      host:
+        # Lane mutex — see the note on acpp-runtime's host block.
+        - acpp-llvm ==${{ llvm_major }}
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+        - ${{ pin_compatible('acpp-llvm') }}
         - python >=3.9
         - if: linux
           then:
             - libgcc-devel_linux-64 >=13
             - libstdcxx-devel_linux-64 >=13
       run_exports:
+        # THE headline export (phase-3 ruling [A]). Anything compiled with this
+        # toolchain gets, with zero manifest text on the consumer's side:
+        #   acpp-runtime >=25.10.0,<25.11.0a0   (the runtime it links against)
+        #   acpp-llvm    >=20,<21.0a0           (the lane it was built for)
+        # The second line is what stops a consumer binary built against the
+        # llvm20 toolchain from being installed next to the llvm21 runtime.
         strong:
-          - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+          - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+          - ${{ pin_compatible('acpp-llvm') }}
       run_constraints:
-        - clang <0.0a0
-        - clangxx <0.0a0
-        - llvm <0.0a0
-        - llvm-tools <0.0a0
-        - lld <0.0a0
-        - llvmdev <0.0a0
-        - clangdev <0.0a0
+        # SAME-MAJOR WINDOWS, not blanket exclusions (phase-3 ruling [B]).
+        # These names are unversioned on conda-forge, so a bare "<0.0a0" said
+        # "this package may never be installed alongside us at ANY version" —
+        # which needlessly forbids, say, clang 19 or clang 21 tooling that
+        # cannot collide with our LLVM 20 files. The window forbids only the
+        # major we actually ship. compiler-rt below was already the model.
+        - clang <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangxx <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - lld <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvmdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Already major-scoped by name; blanket forbid IS the same-major window.
         - clang-${{ llvm_major }} <0.0a0
         - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Cross-lane exclusion. NOT made redundant by the mutex: the mutex only
+        # bites while the two lanes sit on different LLVM majors, and release
+        # catches up to nightly's major on every LLVM bump. Stays verbatim.
         - acpp-nightly <0.0a0
       ignore_run_exports:
         by_name:
@@ -488,6 +559,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       files:
         include:
           - if: linux
@@ -698,12 +771,18 @@ outputs:
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
     requirements:
+      host:
+        # Lane mutex — see the note on acpp-runtime's host block.
+        - acpp-llvm ==${{ llvm_major }}
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+        - ${{ pin_compatible('acpp-llvm') }}
       run_constraints:
-        - llvmdev <0.0a0
-        - clangdev <0.0a0
-        - llvm-tools <0.0a0
+        # Same-major windows (see acpp): these names are unversioned upstream,
+        # so a blanket forbid barred every major instead of just ours.
+        - llvmdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-llvm-dev-nightly <0.0a0
       ignore_run_exports:
         by_name:
@@ -751,6 +830,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       files:
         include:
           - if: linux
@@ -850,14 +931,23 @@ outputs:
               - Library/lib/libscanbuild/**
               - Library/libexec/**
     requirements:
+      host:
+        # Lane mutex — see the note on acpp-runtime's host block.
+        - acpp-llvm ==${{ llvm_major }}
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+        - ${{ pin_compatible('acpp-llvm') }}
         - python >=3.9
       run_constraints:
-        - clang-tools <0.0a0
-        - clang-format <0.0a0
+        # Same-major windows. This is the block the CPP Project Expert's
+        # item-7 question was about: the clang-format exclusion now bites ONLY
+        # a matching-major clang-format, so a project can keep its own
+        # different-major clang-format/clangd dev tooling in the same env.
+        - clang-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clang-format <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clang-scan-deps <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Already major-scoped by name; blanket forbid IS the same-major window.
         - clang-format-${{ llvm_major }} <0.0a0
-        - clang-scan-deps <0.0a0
         - acpp-tools-nightly <0.0a0
       ignore_run_exports:
         by_name:
@@ -891,6 +981,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
       skip:
         - win
@@ -901,10 +993,15 @@ outputs:
           # python bindings (lldb module)
           - lib/python*/**
     requirements:
+      host:
+        # Lane mutex — see the note on acpp-runtime's host block.
+        - acpp-llvm ==${{ llvm_major }}
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+        - ${{ pin_compatible('acpp-llvm') }}
       run_constraints:
-        - lldb <0.0a0
+        # Same-major window: a different-major lldb cannot collide with ours.
+        - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-lldb-nightly <0.0a0
       ignore_run_exports:
         by_name:
@@ -932,6 +1029,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
         - target_platform != "linux-64"
       script:
@@ -941,7 +1040,7 @@ outputs:
         - sed
         - shellcheck
       run:
-        - ${{ pin_subpackage('acpp', exact=True) }}
+        - ${{ pin_subpackage('acpp', upper_bound='x.x') }}
         - sysroot_linux-64 >=2.28
       run_exports:
         strong:
@@ -983,6 +1082,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
         - target_platform != "linux-64"
       script:
@@ -992,7 +1093,7 @@ outputs:
         - sed
         - shellcheck
       run:
-        - ${{ pin_subpackage('acpp-clang_linux-64', exact=True) }}
+        - ${{ pin_subpackage('acpp-clang_linux-64', upper_bound='x.x') }}
       run_exports:
         strong:
           - __glibc >=2.28
@@ -1036,6 +1137,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1045,7 +1148,7 @@ outputs:
       build:
         - nushell
       run:
-        - ${{ pin_subpackage('acpp', exact=True) }}
+        - ${{ pin_subpackage('acpp', upper_bound='x.x') }}
       run_exports:
         strong:
           - acpp-runtime >=${{ acpp_version }},<25.11
@@ -1072,6 +1175,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1083,7 +1188,7 @@ outputs:
       run:
         # clangxx activation reuses CPPFLAGS_USED that the clang script sets,
         # which is why the filenames force _z- to sort after _y-.
-        - ${{ pin_subpackage('acpp-clang_win-64', exact=True) }}
+        - ${{ pin_subpackage('acpp-clang_win-64', upper_bound='x.x') }}
       run_exports:
         strong:
           - acpp-runtime >=${{ acpp_version }},<25.11
@@ -1114,6 +1219,8 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
         - target_platform != "win-64"
       script:
@@ -1123,7 +1230,7 @@ outputs:
       build:
         - nushell
       run:
-        - ${{ pin_subpackage('acpp', exact=True) }}
+        - ${{ pin_subpackage('acpp', upper_bound='x.x') }}
       run_exports:
         strong:
           - acpp-runtime >=${{ acpp_version }},<25.11
@@ -1157,9 +1264,11 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
     requirements:
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
         - cuda-cudart >=12,<13
         - cuda-nvvm >=12,<13
       run_constraints:
@@ -1181,9 +1290,11 @@ outputs:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
     requirements:
       run:
-        - ${{ pin_subpackage('acpp-runtime', exact=True) }}
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
         - level-zero
         # The OpenCL ICD loader ships under a different name per platform:
         # ocl-icd is linux-only, Windows uses the Khronos loader.

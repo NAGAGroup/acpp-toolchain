@@ -16,6 +16,14 @@ const CHANNEL = "https://prefix.dev/jackm97/naga-labs"
 # src_cache/, which rattler-build also writes under --output-dir.
 const SUBDIRS = [linux-64 noarch win-64]
 
+# Turn a filesystem path into a file:// URL that is valid on both platforms.
+# Linux gives "/home/x" -> "file:///home/x"; Windows gives "C:/x" ->
+# "file:///C:/x". Emitting "file://C:/x" instead would make "C:" the URL host.
+def file-url [p: path] {
+  let abs = ($p | path expand | str replace --all '\' '/')
+  $"file:///($abs | str trim --left --char '/')"
+}
+
 def main [lane: string] {
   let recipe = ($lane | path join "recipe.yaml")
   if not ($recipe | path exists) { error make {msg: $"no recipe at ($recipe)"} }
@@ -31,10 +39,33 @@ def main [lane: string] {
   # copies). Local builds default to ./output as before.
   let outdir = ($env.ACPP_OUTPUT_DIR? | default "output")
 
+  # ── 1. The mutex, FIRST ───────────────────────────────────────────────────
+  # The lane outputs take `acpp-llvm ==<major>` as a host dependency, so the
+  # mutex has to be resolvable before the lane can be built. Building it here
+  # rather than requiring it to be published first means the whole thing
+  # bootstraps from a clean clone on a clean runner, and a brand-new major
+  # never needs a manual "publish the mutex, then build" round trip.
+  #
+  # It goes to its own indexed directory, NOT the lane output dir: the lane dir
+  # accumulates previous artifacts, and pointing a build's channel list at its
+  # own past outputs is how a stale package silently satisfies a fresh solve.
+  let mutexdir = ($outdir | path join "mutex-channel")
+  if ($mutexdir | path exists) { rm -rf $mutexdir }
+  (^rattler-build build
+    --recipe ("mutex" | path join "recipe.yaml")
+    --channel $CHANNEL
+    --variant-config ("mutex" | path join "variants.yaml")
+    --output-dir $mutexdir)
+  ^rattler-index fs $mutexdir
+
+  # ── 2. The lane, resolving the mutex it just built ────────────────────────
+  # Mutex channel first: it holds exactly one package name, so under strict
+  # channel priority everything else still falls through to naga-labs.
   (^rattler-build build
     --recipe $recipe
     --experimental          # staging outputs
     --no-build-id           # stable work dir => ccache hits across runs
+    --channel (file-url $mutexdir)
     --channel $CHANNEL
     --variant-config $variants
     --output-dir $outdir)
@@ -44,6 +75,18 @@ def main [lane: string] {
   for sub in $SUBDIRS {
     let src = ($outdir | path join $sub)
     if ($src | path exists) { cp -r $src ("local-channel" | path join $sub) }
+  }
+
+  # The mutex ships WITH the lane: a consumer resolving acpp-runtime needs
+  # acpp-llvm to exist in the same channel or the solve is unsatisfiable.
+  # Uploads use --skip-existing for this name, so republishing an unchanged
+  # mutex from every lane run is a no-op rather than a 409.
+  let mutex_noarch = ($mutexdir | path join "noarch")
+  if ($mutex_noarch | path exists) {
+    mkdir ("local-channel" | path join "noarch")
+    for f in (ls ($mutex_noarch | path join "*.conda") | get name) {
+      cp $f ("local-channel" | path join "noarch")
+    }
   }
 
   ^rattler-index fs ./local-channel

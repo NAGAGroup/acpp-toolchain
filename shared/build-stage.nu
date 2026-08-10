@@ -89,17 +89,73 @@ def conda-toolchain-args [] {
   }
   print $"compiler-rt runtimes toolchain: sysroot=($chosen) gcc-toolchain=($bp)"
 
-  # Both flags are needed and they do DIFFERENT jobs:
-  #   --sysroot      finds the C library headers (glibc 2.28)
-  #   --gcc-toolchain finds the C++ standard library headers (libstdc++)
-  # Only the second fixes the observed failure; only the first keeps the
-  # artifacts redistributable. Passed through RUNTIMES_CMAKE_ARGS because the
-  # runtimes are configured by a SEPARATE cmake invocation that does not
-  # inherit the outer flags.
+  # PSEUDO-CROSS, done the way LLVM 20's own machinery expects (verified
+  # against llvm/runtimes/CMakeLists.txt + LLVMExternalProjectUtils.cmake in
+  # the exact source tree we build):
+  #
+  #   * The runtimes are configured by a SEPARATE child cmake driven by the
+  #     just-built clang. That child receives compilers, LLVM paths and
+  #     LLVM_HOST_TRIPLE from the outer build — but NEVER the outer
+  #     CMAKE_{C,CXX}_FLAGS. Its flags are seeded from the ENVIRONMENT
+  #     (CFLAGS/CXXFLAGS), which carry conda's gcc-shaped flags. main()
+  #     therefore STRIPS those from the env and passes them to the OUTER
+  #     configure explicitly — outer build unchanged, child build clean.
+  #   * Everything the child needs beyond that goes through
+  #     RUNTIMES_CMAKE_ARGS, verbatim (llvm/runtimes/CMakeLists.txt:275):
+  #       --sysroot        finds the C library headers  (glibc 2.28 —
+  #                        redistributability floor)
+  #       --gcc-toolchain  finds the C++ stdlib headers (libstdc++)
+  #       COMPILER_TARGET  clang's --target; must match the sysroot triple
+  #                        (HowToCrossCompileLLVM), and is what makes the
+  #                        pseudo-cross EXPLICIT instead of accidental
+  #   * Deliberately NOT set here (escalation ladder if a red persists —
+  #     see the phase-3 session log): CMAKE_SYSTEM_NAME=Linux (flips the
+  #     child into full cross mode; confined here it cannot re-trigger the
+  #     outer double-build, but it also changes find semantics wholesale)
+  #     and CMAKE_FIND_ROOT_PATH_MODE_* (needs a FIND_ROOT_PATH value list,
+  #     which fights RUNTIMES_CMAKE_ARGS' semicolon list separator).
+  let triple = "x86_64-conda-linux-gnu"
   let flags = $"--sysroot=($chosen) --gcc-toolchain=($bp)"
   [
-    $"-DRUNTIMES_CMAKE_ARGS=-DCMAKE_SYSROOT=($chosen);-DCMAKE_C_FLAGS=($flags);-DCMAKE_CXX_FLAGS=($flags)"
+    ([
+      $"-DCMAKE_SYSROOT=($chosen)"
+      $"-DCMAKE_C_COMPILER_TARGET=($triple)"
+      $"-DCMAKE_CXX_COMPILER_TARGET=($triple)"
+      $"-DCMAKE_ASM_COMPILER_TARGET=($triple)"
+      $"-DCMAKE_C_FLAGS=($flags)"
+      $"-DCMAKE_CXX_FLAGS=($flags)"
+    ] | str join ";" | $"-DRUNTIMES_CMAKE_ARGS=($in)")
   ]
+}
+
+# The outer configure must receive the conda flags EXPLICITLY once main()
+# strips them from the env (see conda-toolchain-args). Replicates cmake's own
+# env-seeding semantics: CFLAGS->CMAKE_C_FLAGS, CXXFLAGS->CMAKE_CXX_FLAGS,
+# LDFLAGS->all three *_LINKER_FLAGS. The linux -pthread that previously rode
+# in via *_LINKER_FLAGS_INIT is folded in here (an explicit cache value
+# overrides _INIT, so keeping both would have silently dropped it).
+def outer-flag-args [] {
+  let cflags = ($env.CFLAGS? | default "")
+  let cxxflags = ($env.CXXFLAGS? | default "")
+  let base_ld = ($env.LDFLAGS? | default "")
+  let ldflags = (if (is-windows) { $base_ld } else { ([$base_ld "-pthread"] | str join " " | str trim) })
+  [
+    $"-DCMAKE_C_FLAGS=($cflags)"
+    $"-DCMAKE_CXX_FLAGS=($cxxflags)"
+    $"-DCMAKE_EXE_LINKER_FLAGS=($ldflags)"
+    $"-DCMAKE_SHARED_LINKER_FLAGS=($ldflags)"
+    $"-DCMAKE_MODULE_LINKER_FLAGS=($ldflags)"
+  ]
+}
+
+# Dump the runtimes child-configure's failure evidence into the CI log. The
+# console only ever shows "ABI info - failed"; the WHY lives in these files,
+# which no runner surfaces on its own (this cost us a blind red on win-64).
+def dump-runtimes-logs [build: string] {
+  for f in (glob ($build | path join "runtimes" "**" "CMakeError.log")) {
+    print $"===== runtimes configure evidence: ($f) ====="
+    open --raw $f | lines | last 120 | str join "\n" | print
+  }
 }
 
 def linux-args [src: string, prefix: string] {
@@ -134,14 +190,27 @@ def linux-args [src: string, prefix: string] {
     "-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib"
     "-DLLVM_HOST_TRIPLE=x86_64-conda-linux-gnu"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-conda-linux-gnu"
-    "-DCMAKE_EXE_LINKER_FLAGS_INIT=-pthread"
-    "-DCMAKE_SHARED_LINKER_FLAGS_INIT=-pthread"
-    "-DCMAKE_MODULE_LINKER_FLAGS_INIT=-pthread"
+    # -pthread now folded into outer-flag-args (explicit CMAKE_*_LINKER_FLAGS
+    # override *_INIT, so the old _INIT lines would have been silently dropped)
   ] ++ (conda-toolchain-args))
 }
 
-def windows-args [src: string, libprefix: string] {
+def windows-args [src: string, libprefix: string, build: string] {
   [
+    # The runtimes child-configure on win runs the just-built clang-cl
+    # (LLVMExternalProjectUtils.cmake:219 — deliberate upstream choice for
+    # msvc targets) but forwards NO linker: clang-cl's default link.exe
+    # discovery inside a bare child cmake was the leading suspect for the
+    # "Detecting C compiler ABI info - failed" -> empty-arch -> hollow
+    # acpp-compiler-rt failure (run 31346899644). Hand the child the
+    # just-built lld-link and llvm-mt explicitly; env flag hygiene is
+    # handled by main() stripping CFLAGS/CXXFLAGS (gnu-shaped flags from
+    # the plain-clang build dep would be rejected wholesale by clang-cl's
+    # MSVC-style CLI — every try-compile dies, which matches the log).
+    ([
+      $"-DCMAKE_LINKER=($build)/bin/lld-link.exe"
+      $"-DCMAKE_MT=($build)/bin/llvm-mt.exe"
+    ] | str join ";" | $"-DRUNTIMES_CMAKE_ARGS=($in)")
     # Mirrors AdaptiveCpp's own windows-acppllvm.yml: no lldb/bolt/polly.
     # clang-tools-extra is added on top (LLVM builds it fine on Windows and it
     # keeps acpp-tools at parity with the linux suite).
@@ -251,8 +320,20 @@ def main [] {
     hide-env --ignore-errors CMAKE_GENERATOR_TOOLSET
   }
 
+  # Capture the conda flags for the OUTER configure, then STRIP them from the
+  # environment: the runtimes child cmake (spawned mid-build by ninja) seeds
+  # its flags from env CFLAGS/CXXFLAGS — the pollution vector behind both the
+  # linux system-header failure and the win empty-arch failure. The outer
+  # build sees identical flags via outer-flag-args; the child starts clean and
+  # gets exactly what RUNTIMES_CMAKE_ARGS hands it.
+  let flag_args = (outer-flag-args)
+  for v in [CFLAGS CXXFLAGS CPPFLAGS LDFLAGS DEBUG_CFLAGS DEBUG_CXXFLAGS] {
+    hide-env --ignore-errors $v
+  }
+
   let args = ((common-args $src $prefix $build)
-    | append (if (is-windows) { (windows-args $src $prefix) } else { (linux-args $src $prefix) }))
+    | append $flag_args
+    | append (if (is-windows) { (windows-args $src $prefix $build) } else { (linux-args $src $prefix) }))
 
   ^cmake ($src | path join "llvm-project" "llvm") -G Ninja ...$args -B $build
 
@@ -269,6 +350,21 @@ def main [] {
 
   cd $build
   ^cmake --install $build
+
+  # HOLLOW-RUNTIMES GUARD: the runtimes child-configure fails SOFT — a broken
+  # child compiler yields "supported architectures: <empty>" and a technically
+  # green build that ships no clang_rt libs (caught only by the package
+  # content test, 8 minutes later, with zero evidence). Fail HERE instead,
+  # with the child's CMakeError.log dumped into the CI log.
+  let rt_glob = (if (is-windows) {
+    ($prefix | path join "lib" "clang" "**" "clang_rt.asan*")
+  } else {
+    ($prefix | path join "lib" "clang" "**" "libclang_rt.asan*")
+  })
+  if ((glob $rt_glob | length) == 0) {
+    dump-runtimes-logs $build
+    error make {msg: "compiler-rt runtimes are HOLLOW (no asan artifacts installed) — child configure evidence dumped above"}
+  }
 
   if not (is-windows) {
     # Unversioned .so symlinks are dev-package files elsewhere in conda; the

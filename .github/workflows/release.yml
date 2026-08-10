@@ -93,8 +93,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: output/build_cache
-          key: staging-release-${{ github.run_id }}
-          restore-keys: staging-release-
+          key: staging-release-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
+          restore-keys: staging-release-${{ hashFiles('shared/variants/linux-64.yaml') }}-
 
       - name: Build release lane -> indexed local channel
         run: pixi run -e dev build-release
@@ -113,7 +113,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: output/build_cache
-          key: staging-release-${{ github.run_id }}
+          key: staging-release-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
 
       - name: Save ccache
         if: always()
@@ -209,8 +209,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-release-${{ github.run_id }}
-          restore-keys: staging-win-release-
+          key: staging-win-release-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
+          restore-keys: staging-win-release-${{ hashFiles('shared/variants/win-64.yaml') }}-
 
       # GitHub's Windows runners ship a very long PATH; conda's vs activation
       # then calls vcvars64.bat, which appends more and blows cmd.exe's 8191
@@ -260,7 +260,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-release-${{ github.run_id }}
+          key: staging-win-release-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
 
       - name: Save ccache
         if: always()

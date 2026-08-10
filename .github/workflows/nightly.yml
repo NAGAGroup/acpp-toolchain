@@ -136,8 +136,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: output/build_cache
-          key: staging-nightly-${{ github.run_id }}
-          restore-keys: staging-nightly-
+          key: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
+          restore-keys: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-
 
       - name: Build nightly lane -> indexed local channel
         run: pixi run -e dev build-nightly
@@ -154,7 +154,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: output/build_cache
-          key: staging-nightly-${{ github.run_id }}
+          key: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
 
       - name: Save ccache
         if: always()
@@ -247,8 +247,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-nightly-${{ github.run_id }}
-          restore-keys: staging-win-nightly-
+          key: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
+          restore-keys: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-
 
       # Same PATH strip as the release build-win (cmd.exe 8191-char limit).
       - name: Build nightly lane (win-64) -> indexed local channel
@@ -294,7 +294,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-nightly-${{ github.run_id }}
+          key: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
 
       - name: Save ccache
         if: always()

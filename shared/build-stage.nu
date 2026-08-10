@@ -327,7 +327,14 @@ def main [] {
   # build sees identical flags via outer-flag-args; the child starts clean and
   # gets exactly what RUNTIMES_CMAKE_ARGS hands it.
   let flag_args = (outer-flag-args)
-  for v in [CFLAGS CXXFLAGS CPPFLAGS LDFLAGS DEBUG_CFLAGS DEBUG_CXXFLAGS] {
+  # LDFLAGS deliberately STAYS in the env: the SPIRV-translator inner
+  # ExternalProject env-seeds its linker flags and NEEDS conda's -L$PREFIX/lib
+  # to resolve libLLVM.so's NEEDED libs (libz/libzstd/libxml2) — stripping it
+  # broke that link (run 31349005069). Linker flags were never the poison;
+  # gcc-shaped COMPILE flags were, and those still get stripped below. The
+  # outer configure ignores env LDFLAGS because outer-flag-args passes
+  # explicit values.
+  for v in [CFLAGS CXXFLAGS CPPFLAGS DEBUG_CFLAGS DEBUG_CXXFLAGS] {
     hide-env --ignore-errors $v
   }
 

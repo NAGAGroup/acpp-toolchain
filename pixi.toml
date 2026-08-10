@@ -100,6 +100,10 @@ description = "C-11 gate: fail if any staged artifact name exists on conda-forge
 cmd = "nu shared/check-closure.nu"
 description = "Publish gate: every declared output is present, and every staged artifact freshly solves against the channel"
 
+[environments.dev.tasks.index-channel]
+cmd = "rattler-index fs ./local-channel"
+description = "Index local-channel so it is a real channel (subdir repodata), not just a pile of .conda files"
+
 [environments.dev.tasks.publish-channel]
 cmd = "nu shared/publish-channel.nu"
 description = "Upload the built local channel to prefix.dev (OIDC in CI), behind the publish gates"

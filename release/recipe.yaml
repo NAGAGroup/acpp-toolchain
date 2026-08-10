@@ -728,10 +728,17 @@ outputs:
             exists:
               - if: linux
                 then:
-                  # The archive every -fsanitize=address link needs. Named
-                  # explicitly rather than globbed: a glob that matches
-                  # nothing packages an empty directory and passes silently,
-                  # which is how blind partitions ship hollow packages.
+                  # The archives every -fsanitize=address / -fprofile link
+                  # needs. GLOBBED deliberately: the directory under lib/ is
+                  # named after the build triple, which is a build-config
+                  # detail, not a contract — spelling it exactly would make
+                  # this test a tripwire for the wrong thing.
+                  #
+                  # Safe to glob because `exists:` FAILS on a glob that matches
+                  # nothing ("No match for files glob") — verified, not
+                  # assumed. That is precisely the property needed here: if the
+                  # partition ever stops matching, this package ships hollow,
+                  # and the build must stop rather than certify it.
                   - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.asan*
                   - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.profile*
                 else:
@@ -1314,6 +1321,16 @@ outputs:
           - __glibc >=2.28
           - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
       run_constraints:
+        # DELIBERATELY BLANKET, not a same-major window — do not "fix" this to
+        # match the pattern used elsewhere in this recipe.
+        #
+        # The same-major windows exist for FILE collisions: two packages
+        # shipping lib/clang/20/**, which only conflict at a shared major. This
+        # is a different kind of conflict. An activation package's job is to
+        # own CC/CXX/AR/… in the environment's activate.d, and two packages
+        # both claiming that role fight regardless of which LLVM they point at.
+        # A different-major conda-forge clang_linux-64 is just as broken a
+        # roommate as a same-major one.
         - clang_linux-64 <0.0a0
         - acpp-clang-nightly_linux-64 <0.0a0
     tests:

@@ -27,6 +27,8 @@ The two suites ship the same file paths and are **mutually exclusive** in one en
 | `acpp-tools` | clang-format / clang-tidy / clangd / clang-tools-extra / BOLT, same LLVM as the compiler | dev envs |
 | `acpp-lldb` | LLDB (python scripting enabled), same LLVM | dev envs |
 | `acpp-llvm-dev` | LLVM/Clang C++ API headers, static libs, `LLVMConfig.cmake` | building against the LLVM API |
+| `acpp-compiler-rt` | compiler-rt sanitizer/profile runtimes — ASan, TSan, UBSan, profile, libFuzzer (plus XRay/MemProf/ORC on linux) | envs that build with `-fsanitize=…` or coverage |
+| `acpp-llvm` | the **lane mutex**: bare-major versions (`20`, `21`) naming which LLVM the toolchain was linked against | pulled automatically; pin it only to force a lane |
 | `acpp-runtime-cuda` | opt-in CUDA runtime pieces (cudart + libdevice — precisely those, nothing more) | consumer envs |
 | `acpp-runtime-intel` | opt-in Intel GPU pieces (Level Zero loader + OpenCL ICD loader) | consumer envs |
 
@@ -35,9 +37,17 @@ The two suites ship the same file paths and are **mutually exclusive** in one en
 ```toml
 # pixi.toml
 [workspace]
-channels = ["https://prefix.dev/jackm97/naga-labs", "conda-forge"]
+channels = ["https://prefix.dev/jackm97/naga-labs"]
 platforms = ["linux-64"]
+channel-priority = "strict"
 ```
+
+**One channel, deliberately.** `naga-labs` layers conda-forge server-side — its
+repodata declares conda-forge as its base — so everything conda-forge provides
+resolves through it. Listing `conda-forge` separately is unnecessary and works
+against the layering. `channel-priority` is stated explicitly rather than left
+to the default because this channel is overlay-first, and a setting that
+important should be visible in your manifest rather than inherited.
 
 ```sh
 pixi add acpp            # the compiler (runtime arrives via run-exports)
@@ -88,13 +98,50 @@ pixi add acpp-clang_linux-64 acpp-clangxx_linux-64
 Or select it as a compiler in pixi build-variants: `cxx_compiler = ["acpp-clangxx"]`.
 A CMake toolchain file ships at `$CONDA_PREFIX/share/acpp/toolchain/acpp-toolchain.cmake` for IDE/direct-cmake use.
 
+## Choosing an LLVM lane
+
+The toolchain version is the **AdaptiveCpp** version and nothing else, so an
+ordinary range works:
+
+```toml
+acpp = ">=25.10.0,<25.11.0a0"
+```
+
+Which LLVM it was linked against is a separate axis, selected through the
+`acpp-llvm` mutex — the same shape the ecosystem uses for `python_abi` and
+`cuda-version`:
+
+```toml
+acpp-llvm = "==20"      # pin the lane explicitly; optional
+```
+
+Versions of `acpp-llvm` are **bare majors** — `20`, `21`. There is no
+`acpp-llvm 20.1.8`: a release lane tracks one stable LLVM major at whatever its
+latest patch happens to be, so there is nothing for a third segment to say.
+
+You rarely need to write this. Anything compiled with the toolchain receives
+both the runtime range and its lane automatically through run-exports, which is
+what stops a binary built against the llvm20 toolchain from being installed
+next to an llvm21 runtime.
+
+> `acpp-llvm` is **not** `acpp-llvm-dev`. The latter ships the LLVM/Clang
+> development files and is never the pinning handle.
+
 ## Coexistence with conda-forge clang/llvm
 
-Deliberate and precise: the suite forbids only the **same-major** conda-forge
-LLVM ABI packages (`libllvm20`, `libclang-cpp20.1`) plus the unversioned
-bin-name owners (`clang`, `llvm-tools`, `lld`, …). Different-major conda-forge
-tooling (a newer `clang-tools`, `lldb`, numba's `libllvm`) co-installs cleanly.
-Same-version conda-forge dev tools can't coexist by construction (they link
+Deliberate and precise: the suite forbids conda-forge's LLVM family **only at
+the major we ship**. That covers the ABI packages (`libllvm20`,
+`libclang-cpp20.1`), which are major-scoped by name, and — as of the phase-3
+redesign — the unversioned bin-name owners (`clang`, `llvm-tools`, `lld`,
+`clang-format`, `lldb`, …), which are now constrained to a same-major *window*
+rather than forbidden outright.
+
+The practical difference: a **different-major** conda-forge `clang-format`,
+`clangd` or `lldb` co-installs cleanly, so a project can keep its own pinned
+dev tooling alongside this toolchain. Only a same-major one is refused, and
+there it is a genuine file collision rather than a matter of taste.
+
+Same-major conda-forge dev tools can't coexist by construction (they link
 `libclang-cpp`) — that's what `acpp-tools`/`acpp-lldb` are for.
 
 ## Consuming from source (pixi)

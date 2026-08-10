@@ -89,10 +89,18 @@ outputs:
         # "nushell" — staging builds reject build.variant.use_keys, so this
         # is the only available hook.
         - ${{ "nushell" ~ ("" if staging_inputs else "") }}
+        # A FUNCTIONAL FLOOR, not a pin: the build genuinely does not
+        # configure below this. Floors state a requirement of the software and
+        # stay in the recipe; choices about which version to ship against live
+        # in the variant config.
         - cmake >=3.24
         - ninja
         - ccache
-        - python >=3.9
+        # De-versioned so the single `python` variant key applies. This used to
+        # read ">=3.9" while host asked for a bare `python`: two independent
+        # solves that could pick different interpreters, with lldb's bindings
+        # compiled against the host one.
+        - python
         # swig is only needed for lldb's python bindings (linux-only build)
         - if: linux
           then: swig
@@ -110,11 +118,21 @@ outputs:
         - if: win
           then: clang
       host:
+        # DE-VERSIONED (phase-3 ruling [B]). Every version that used to be
+        # written here now lives in shared/variants/<platform>.yaml, which is
+        # this repo's pinning feedstock. Bare names are not "unpinned": a
+        # variant key matching the package name supplies the version, and the
+        # render annotates the resolved spec with (V) to prove it applied.
         - zlib
         - zstd
-        - cuda-cudart-dev >=12,<13
-        - cuda-nvvm >=12,<13
-        - cuda-nvcc-tools >=12,<13
+        # The single CUDA pin. cuda-version is what every other cuda-* package
+        # constrains itself against, so naming it once here — with the major
+        # coming from the variant config — aligns cudart, nvvm and the nvcc
+        # tools without a version literal on any of them.
+        - cuda-version
+        - cuda-cudart-dev
+        - cuda-nvvm
+        - cuda-nvcc-tools
         # Both platforms get Level Zero + OpenCL: level-zero{,-devel} and
         # opencl-headers all ship for win-64, so the Intel backends are not
         # linux-only. (Upstream's Windows CI disables OpenCL, but the docs
@@ -132,8 +150,8 @@ outputs:
           then:
             - libxml2-devel
             - python
-            - cuda-driver-dev >=12,<13
-            - cuda-crt-dev_linux-64 >=12,<13
+            - cuda-driver-dev
+            - cuda-crt-dev_linux-64
             - numactl
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
@@ -144,7 +162,7 @@ outputs:
             # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
             # hardcoded `vs2019_win-64` dependency and would drag the 2019
             # toolset into the host env.
-            - cuda-nvcc-impl >=12,<13
+            - cuda-nvcc-impl
             - libboost-devel
 
   - package:
@@ -282,18 +300,58 @@ outputs:
         # The unversioned-name cases below are the ones that needed widening.
         - libllvm${{ llvm_major }} <0.0a0
         - libclang-cpp${{ llvm_maj_min }} <0.0a0
-        - cuda-cudart >=12,<13
-        - cuda-nvvm >=12,<13
-        - __cuda >=12,<13
+        # DERIVED, not hand-written (phase-3 ruling [B]). The CUDA backend is
+        # dlopened, so cudart must stay OPTIONAL — a constraint, not a
+        # dependency, which is why the run_export is still ignored below. What
+        # changed is that the range now comes from the actual host solve
+        # instead of a guessed ">=12,<13": pin_compatible yields
+        # ">=12.9.79,<13.0a0", the same range cuda-cudart-dev itself exports.
+        # Ignoring an export and then hand-writing a LOOSER constraint in its
+        # place was the pattern this replaces.
+        - ${{ pin_compatible('cuda-cudart') }}
+        - ${{ pin_compatible('cuda-nvvm') }}
+        # __cuda: DELETED, deliberately, and not replaced here.
+        #
+        # It was written as "__cuda >=12,<13" — a CEILING on a driver virtual
+        # package, which is backwards: a 13.x driver runs CUDA 12 binaries
+        # fine, and the ceiling would refuse to install on any host that
+        # upgraded. The floor is also not ours to state: cuda-cudart depends on
+        # cuda-version, and cuda-version 12.9 constrains "__cuda >=12" —
+        # floor-only, verified against the installed package. So a consumer
+        # that actually pulls CUDA gets the correct floor through the chain,
+        # and a consumer of the bare CPU runtime is not asked for a GPU driver
+        # it does not need.
         - acpp-runtime <0.0a0
       ignore_run_exports:
-        by_name:
-          - cuda-cudart
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # acpp-runtime-nightly-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
           - cuda-nvvm
-          - cuda-cccl
-          - level-zero
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
           - ocl-icd
-          - python_abi
+          - khronos-opencl-icd-loader
           - python
     tests:
       - package_contents:
@@ -493,13 +551,35 @@ outputs:
         # catches up to nightly's major on every LLVM bump. Stays verbatim.
         - acpp <0.0a0
       ignore_run_exports:
-        by_name:
-          - cuda-cudart
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # acpp-runtime-nightly-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
           - cuda-nvvm
-          - cuda-cccl
-          - level-zero
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
           - ocl-icd
-          - python_abi
+          - khronos-opencl-icd-loader
           - python
     tests:
       - package_contents:
@@ -771,13 +851,35 @@ outputs:
         - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-llvm-dev <0.0a0
       ignore_run_exports:
-        by_name:
-          - cuda-cudart
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # acpp-runtime-nightly-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
           - cuda-nvvm
-          - cuda-cccl
-          - level-zero
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
           - ocl-icd
-          - python_abi
+          - khronos-opencl-icd-loader
           - python
     tests:
       - package_contents:
@@ -936,13 +1038,35 @@ outputs:
         - clang-format-${{ llvm_major }} <0.0a0
         - acpp-tools <0.0a0
       ignore_run_exports:
-        by_name:
-          - cuda-cudart
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # acpp-runtime-nightly-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
           - cuda-nvvm
-          - cuda-cccl
-          - level-zero
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
           - ocl-icd
-          - python_abi
+          - khronos-opencl-icd-loader
           - python
     tests:
       - package_contents:
@@ -985,17 +1109,34 @@ outputs:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
         - ${{ pin_compatible('acpp-llvm') }}
+        # POINT REPAIR: this package ships lib/python*/** — the lldb python
+        # bindings — so it needs an interpreter to be of any use, and it was
+        # not asking for one. python's own run_export supplies python_abi,
+        # which pins the interpreter's ABI *if* python is present but does not
+        # require python to be there at all, so the bindings could land in an
+        # environment with nothing able to import them.
+        - python
       run_constraints:
         # Same-major window: a different-major lldb cannot collide with ours.
         - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-lldb <0.0a0
       ignore_run_exports:
-        by_name:
-          - cuda-cudart
+        # By source package; see the note on acpp-runtime-nightly. NB python is NOT
+        # ignored here — unlike the other outputs, this one genuinely depends
+        # on the interpreter, so python_abi pinning it to the interpreter it
+        # was built against is exactly what we want.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
           - cuda-nvvm
-          - cuda-cccl
-          - level-zero
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
           - ocl-icd
+          - khronos-opencl-icd-loader
     tests:
       - package_contents:
           bin:
@@ -1028,10 +1169,18 @@ outputs:
       run:
         - ${{ pin_subpackage('acpp-nightly', exact=True) }}
         - sysroot_linux-64 >=2.28
+        # POINT REPAIR: the activation script sets AR, RANLIB, NM, STRIP, LD
+        # and friends to ${CHOST}-<tool>, which are binutils programs, not
+        # clang ones — conda-forge's own ctng compiler activation packages
+        # depend on binutils for exactly this reason. Without it the exported
+        # environment names tools that need not exist in the prefix, and the
+        # failure surfaces as a confusing link error inside someone else's
+        # build rather than as a missing dependency here.
+        - binutils_linux-64
       run_exports:
         strong:
           - __glibc >=2.28
-          - acpp-runtime-nightly >=${{ acpp_version }},<25.11
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
       run_constraints:
         - clang_linux-64 <0.0a0
         - acpp-clang_linux-64 <0.0a0
@@ -1083,7 +1232,7 @@ outputs:
       run_exports:
         strong:
           - __glibc >=2.28
-          - acpp-runtime-nightly >=${{ acpp_version }},<25.11
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
       run_constraints:
         - clangxx_linux-64 <0.0a0
         - acpp-clangxx_linux-64 <0.0a0
@@ -1137,7 +1286,7 @@ outputs:
         - ${{ pin_subpackage('acpp-nightly', exact=True) }}
       run_exports:
         strong:
-          - acpp-runtime-nightly >=${{ acpp_version }},<25.11
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
       run_constraints:
         - clang_win-64 <0.0a0
         - clang-cl_win-64 <0.0a0
@@ -1177,7 +1326,7 @@ outputs:
         - ${{ pin_subpackage('acpp-clang-nightly_win-64', exact=True) }}
       run_exports:
         strong:
-          - acpp-runtime-nightly >=${{ acpp_version }},<25.11
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
       run_constraints:
         - clangxx_win-64 <0.0a0
         - acpp-clangxx_win-64 <0.0a0
@@ -1219,7 +1368,7 @@ outputs:
         - ${{ pin_subpackage('acpp-nightly', exact=True) }}
       run_exports:
         strong:
-          - acpp-runtime-nightly >=${{ acpp_version }},<25.11
+          - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
       run_constraints:
         - clang-cl_win-64 <0.0a0
         - clang_win-64 <0.0a0
@@ -1253,12 +1402,24 @@ outputs:
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
     requirements:
+      # REAL host deps (phase-3 ruling [B]): this metapackage's whole job is to
+      # state which CUDA the runtime beside it was built against, so its floors
+      # must track the staging solve rather than being maintained by hand. They
+      # are host deps purely so pin_compatible below has something to resolve
+      # against — nothing is compiled here.
+      host:
+        - cuda-version
+        - cuda-cudart
+        - cuda-nvvm
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
-        - cuda-cudart >=12,<13
-        - cuda-nvvm >=12,<13
+        - ${{ pin_compatible('cuda-cudart') }}
+        - ${{ pin_compatible('cuda-nvvm') }}
       run_constraints:
-        - __cuda >=12,<13
+        # __cuda: DELETED. This is the package that legitimately needs a driver
+        # floor, and it gets one WITHOUT us writing it: cuda-cudart depends on
+        # cuda-version, which constrains "__cuda >=12" — a floor with no
+        # ceiling, unlike the "<13" we used to assert against a driver.
         - acpp-runtime-cuda <0.0a0
     about:
       summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
@@ -1279,11 +1440,19 @@ outputs:
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
     requirements:
+      # Real host deps so the floors below track the staging solve; see the
+      # CUDA metapackage. level-zero comes in via level-zero-devel, which is
+      # what the runtime was actually built against.
+      host:
+        - level-zero-devel
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}
-        - level-zero
+        - ${{ pin_compatible('level-zero') }}
         # The OpenCL ICD loader ships under a different name per platform:
-        # ocl-icd is linux-only, Windows uses the Khronos loader.
+        # ocl-icd is linux-only, Windows uses the Khronos loader. Left
+        # unpinned on purpose — an ICD loader's entire contract is a stable
+        # ABI across versions, so a floor derived from our build machine would
+        # be noise rather than information.
         - if: linux
           then: ocl-icd
           else: khronos-opencl-icd-loader

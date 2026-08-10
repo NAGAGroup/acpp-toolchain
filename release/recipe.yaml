@@ -134,8 +134,14 @@ outputs:
         # clang collides with the very files we install (clang.exe,
         # clang-cl.exe, clang-cpp.exe, lib/clang/**) — as a host dep it
         # silently ejected them from every package (run 31241929077).
+        # PINNED to the exact LLVM version we build (Jack, 2026-08-10):
+        # on win compiler-rt is built by THIS host clang-cl (projects mode,
+        # no runtimes bootstrap — see shared/build-stage.nu), so the
+        # building compiler matches the clang_rt sources and the shipped
+        # clang exactly. An unpinned clang would drift with conda-forge's
+        # default and silently skew the sanitizer-runtime build compiler.
         - if: win
-          then: clang
+          then: clang ==${{ llvm_version }}
       host:
         # DE-VERSIONED (phase-3 ruling [B]). Every version that used to be
         # written here now lives in shared/variants/<platform>.yaml, which is

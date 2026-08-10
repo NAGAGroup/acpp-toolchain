@@ -26,7 +26,13 @@ def common-args [src: string, prefix: string, build: string] {
     "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
     "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX"
-    "-DLLVM_ENABLE_RUNTIMES=compiler-rt"
+    # LLVM_ENABLE_RUNTIMES=compiler-rt is LINUX-ONLY (see linux-args): the
+    # runtimes bootstrap exists to keep conda's gcc from building the
+    # sanitizer runtimes (Jack's Option A). On win the host compiler is
+    # already clang-cl, so compiler-rt rides LLVM_ENABLE_PROJECTS there
+    # instead — the bootstrap child buys nothing and its second compiler
+    # discovery never worked (runs 31350122413/31351719706; upstream
+    # AdaptiveCpp's own windows-acppllvm.yml uses the projects path too).
     "-DLLVM_BUILD_TOOLS=ON"
     "-DCLANG_BUILD_TOOLS=ON"
     "-DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF"
@@ -191,6 +197,12 @@ def linux-args [src: string, prefix: string] {
   ([
     # lldb/bolt/polly/clang-tools-extra are linux-only in this suite
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;bolt;polly;openmp"
+    # Runtimes bootstrap (just-built clang builds compiler-rt) is the linux
+    # path ONLY — the host compiler here is conda gcc, which must not build
+    # the sanitizer runtimes (Jack's Option A; conda-forge's standalone-gcc
+    # shape is the approach LLVM needed many versions ago). Proven green
+    # with the pseudo-cross args below.
+    "-DLLVM_ENABLE_RUNTIMES=compiler-rt"
     # compiler-rt components that upstream supports on linux but not on
     # Windows. XRay has no Windows port at all; MemProf and ORC are
     # linux-first and not built by conda-forge's own Windows clang either.
@@ -226,25 +238,21 @@ def linux-args [src: string, prefix: string] {
 
 def windows-args [src: string, libprefix: string, build: string] {
   [
-    # NO RUNTIMES_CMAKE_ARGS linker/mt injection — that was tried (8a24d34)
-    # and DISPROVEN by run 31350122413: the builtins child, which receives no
-    # such args, passed ABI detection via default MSVC-env discovery
-    # (link.exe/mt.exe on PATH from the vs2026 activation), proving the
-    # env-strip of gnu-shaped CFLAGS/CXXFLAGS in main() was the whole fix for
-    # the original empty-arch failure (run 31346899644). Worse, the injection
-    # itself poisoned the runtimes child: CMake wraps EVERY MSVC-style exe
-    # link — try-compiles included — in `cmake -E vs_link_exe --mt=<CMAKE_MT>`
-    # (see cmake#24425 / ninja#2257 for the identical CMAKE_MT-NOTFOUND
-    # shape), and our -DCMAKE_MT pointed at build_dir/bin/llvm-mt.exe, which
-    # is only LINKED at build step ~5150 while the runtimes child configures
-    # at ~4351: every try-compile died against a nonexistent mt, ABI detection
-    # "failed", and the supported-arch list came out empty. The child gets the
-    # same MSVC activation env as the outer build and the builtins child; let
-    # it discover the toolchain the same, proven way.
-    # Mirrors AdaptiveCpp's own windows-acppllvm.yml: no lldb/bolt/polly.
-    # clang-tools-extra is added on top (LLVM builds it fine on Windows and it
-    # keeps acpp-tools at parity with the linux suite).
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp"
+    # compiler-rt rides LLVM_ENABLE_PROJECTS on win (Jack, 2026-08-10) — NOT
+    # the runtimes bootstrap. The bootstrap's purpose (keep a wrong-family
+    # host compiler from building the sanitizer runtimes) is vacuous here:
+    # the host compiler IS clang-cl, pinned in the recipe to the exact LLVM
+    # version being built, so projects-mode gives a version-matched clang_rt
+    # with zero child-cmake machinery. The runtimes child never configured
+    # on win (runs 31350122413 / 31351719706: every child try-compile failed
+    # while the outer configure and the builtins child were green — two
+    # generations of injected-arg fixes disproven; root-cause evidence
+    # archived in the naga-labs mechanics reference). This also mirrors
+    # upstream AdaptiveCpp's own windows-acppllvm.yml, which builds
+    # LLVM_ENABLE_PROJECTS="clang;openmp;lld;compiler-rt" and never uses the
+    # win runtimes bootstrap. lldb/bolt/polly stay linux-only;
+    # clang-tools-extra is added on top for acpp-tools parity.
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp;compiler-rt"
     # Windows has no libLLVM dylib — tools link the static libs instead, which
     # is why the win file partition differs from linux by construction.
     "-DLLVM_BUILD_LLVM_DYLIB=OFF"

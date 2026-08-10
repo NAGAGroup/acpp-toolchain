@@ -28,4 +28,17 @@
 # you are certain nothing pins it; there is no undelete.
 
 # --- keepers -----------------------------------------------------------------
-# (none yet — the first green set of 2026.08 will be appended here by CI)
+# NB the "appended by CI" claim above is currently FALSE — no implementation
+# exists (found 2026-08-10). Lines below were added by hand.
+
+# The template's acpp branch depends on these. Added 2026-08-10 so nothing the
+# branch references can be pruned while the branch redesign is in flight.
+#
+# Transitional: the branch's CURRENT committed lock names 5 outputs x 2
+# platforms from this set (all at build _10). Retire once the branch's lock no
+# longer references it.
+2026.08.09_llvm21.1.8
+# Permanent: the cadence the redesigned branch pins. linux-64 only for now —
+# no win-64 artifact exists at this date, which is why the branch's nightly env
+# is platform-restricted rather than carrying a known-red windows cell.
+2026.08.10_llvm21.1.8

@@ -15,10 +15,12 @@
 #
 #   2026.08.09_llvm21.1.8
 #
-# The publishing job appends a line automatically when it publishes the first
-# green set of a month. Add one by hand to promote a set on demand — for
-# example a nightly that a downstream project pinned, or one that reproduced a
-# bug worth keeping around.
+# EVERY LINE HERE IS ADDED BY HAND. Nothing in CI writes to this file: the
+# pruner is the only code that touches it, and it only reads. So the "first
+# green set of each month" policy above is enforced by a person remembering to
+# add the line, not by the publishing job. Add one to promote a set on demand —
+# the first green set of a month, a nightly a downstream project pinned, or one
+# that reproduced a bug worth keeping around.
 #
 # READ AT PRUNE TIME, never baked into a snapshot: the pruner re-reads this
 # file on every run, so a hand-added keeper protects a set immediately rather
@@ -28,17 +30,15 @@
 # you are certain nothing pins it; there is no undelete.
 
 # --- keepers -----------------------------------------------------------------
-# NB the "appended by CI" claim above is currently FALSE — no implementation
-# exists (found 2026-08-10). Lines below were added by hand.
 
-# The template's acpp branch depends on these. Added 2026-08-10 so nothing the
-# branch references can be pruned while the branch redesign is in flight.
-#
-# Transitional: the branch's CURRENT committed lock names 5 outputs x 2
-# platforms from this set (all at build _10). Retire once the branch's lock no
-# longer references it.
+# INERT, kept deliberately. This set is no longer on the channel — the legacy
+# artifacts were deleted by hand on 2026-08-10 — and nothing pins it: the
+# template's acpp branch lock names zero 08-09 artifacts (verified against the
+# committed lock, 2026-09-02). The line protects nothing that exists and costs
+# nothing to leave, so it stays rather than being removed for tidiness.
 2026.08.09_llvm21.1.8
-# Permanent: the cadence the redesigned branch pins. linux-64 only for now —
-# no win-64 artifact exists at this date, which is why the branch's nightly env
-# is platform-restricted rather than carrying a known-red windows cell.
+# LOAD-BEARING, both platforms. The template's acpp branch has this set in its
+# committed lock on linux-64 AND win-64 — 5 outputs each (acpp, acpp-runtime,
+# acpp-tools, acpp-clang_<plat>, acpp-clangxx_<plat>), all 10 present on the
+# channel. Retire only when that lock no longer references it.
 2026.08.10_llvm21.1.8

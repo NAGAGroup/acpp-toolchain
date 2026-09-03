@@ -111,6 +111,14 @@ description = "Upload the built local channel to prefix.dev (OIDC in CI), behind
 # they are unbypassable: publishing by hand still runs them.
 depends-on = ["check-no-collision", "check-closure"]
 
+[environments.dev.tasks.record-keeper]
+cmd = "nu shared/record-keeper.nu"
+description = "Keepers: append this month's first green nightly set to nightly/keepers.txt, if the month has none"
+
+[environments.dev.tasks.record-keeper-dry-run]
+cmd = "nu shared/record-keeper.nu --dry-run"
+description = "Show what the keeper recorder would append, without writing it"
+
 [environments.dev.tasks.prune-nightly]
 cmd = "nu shared/prune-nightly.nu"
 description = "Retention: drop nightly build-sets outside the newest-N window, honouring nightly/keepers.txt"

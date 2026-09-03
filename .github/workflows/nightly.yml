@@ -526,17 +526,62 @@ jobs:
   # `needs` both publishes, so a red or skipped publish on either platform
   # means no pruning at all — a broken streak must never eat the last known
   # good nightlies.
+  #
+  # It is also where the monthly keeper is recorded, for the same reason: a
+  # keeper names a set complete on BOTH platforms, and this is the only job that
+  # has seen both publishes succeed. The keeper step runs BEFORE the prune and
+  # is not `continue-on-error`, so a failure to record stops the job with
+  # nothing deleted — recording the keeper is what makes the prune safe.
   retention:
     needs: [publish-linux, publish-win]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # the keeper commit; deletion below uses OIDC, not this
       id-token: write # deletion goes through the same OIDC trusted publisher
     steps:
+      # Full history, unlike every other job here: this job COMMITS, and the
+      # `git pull --rebase` below needs a merge base. On the default depth-1
+      # checkout the rebase fails outright the moment origin/main has moved.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
           environments: dev
+
+      # Appends only when this calendar month has no keeper yet, so it is a
+      # no-op on all but the first green nightly of a month, and re-running it
+      # is safe. No paths-ignore guard on the push: nightly has no `push:`
+      # trigger and release only listens for `push: tags: ["v*"]`, so this
+      # commit triggers nothing and cannot loop.
+      - name: "Keepers: record this month's first green set"
+        id: keeper
+        run: pixi run -e dev record-keeper
+
+      # Split from the step above because a step cannot read its own outputs.
+      # The two signals — the recorded id and the actual file change — must
+      # agree: either both are present or neither is. A mismatch means the
+      # recorder wrote the file without reporting, or reported without writing,
+      # and either way committing blind would be worse than stopping.
+      - name: "Keepers: commit and push the new keeper"
+        run: |
+          changed="$(git diff --name-only -- nightly/keepers.txt)"
+          id="${{ steps.keeper.outputs.keeper }}"
+          if [ -z "$changed" ] && [ -z "$id" ]; then
+            echo "keepers: this month already has a keeper; nothing to commit"
+            exit 0
+          fi
+          if [ -z "$changed" ] || [ -z "$id" ]; then
+            echo "keepers: INCONSISTENT — changed file='$changed', recorded id='$id'"
+            exit 1
+          fi
+          git config user.name "Jack Myers"
+          git config user.email "jack@myersjack.dev"
+          git add nightly/keepers.txt
+          git commit -m "keepers: record $id as the first green set of its month"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
       - name: "Retention: prune old nightly build-sets"
         run: pixi run -e dev prune-nightly

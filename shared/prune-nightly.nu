@@ -24,75 +24,10 @@
 #   3. Never prune to empty. If the computation would leave no nightly sets,
 #      it aborts — that outcome always means a bug here, never intent.
 
-const CHANNEL = "jackm97/naga-labs"
-const MUTEX_NAME = "acpp-llvm"
-const KEEPERS_FILE = "nightly/keepers.txt"
-const PLATFORMS = ["linux-64" "win-64" "noarch"]
-
-def repodata [platform: string] {
-  let url = $"https://repo.prefix.dev/($CHANNEL)/($platform)/repodata.json"
-  try { http get --raw $url | from json } catch { null }
-}
-
-# Every artifact on the channel, flattened, tagged with its subdir.
-def channel-artifacts [] {
-  $PLATFORMS | each {|p|
-    let repo = (repodata $p)
-    if $repo == null { return [] }
-    let groups = [($repo | get -o packages | default {}), ($repo | get -o "packages.conda" | default {})]
-    $groups | each {|g|
-      $g | transpose fname meta | each {|e| {
-        platform: $p,
-        fname: $e.fname,
-        name: ($e.meta | get -o name),
-        version: ($e.meta | get -o version),
-        build: ($e.meta | get -o build)
-      }}
-    } | flatten
-  } | flatten
-}
-
-# Read keepers, ignoring comments and blank lines. Re-read every run.
-def read-keepers [] {
-  if not ($KEEPERS_FILE | path exists) { return [] }
-  open --raw $KEEPERS_FILE
-  | lines
-  | each {|l| $l | split row '#' | first | str trim }
-  | where {|l| $l != "" }
-}
-
-# The set id is "<date>_llvm<version>" — the SAME string a keeper line uses, so
-# the two can be compared directly and a keeper can never silently fail to
-# match the thing it is meant to protect.
-#
-# It has to be derived from two different layouts, because the channel holds
-# both during the cutover:
-#
-#   old scheme: version = "2026.08.09_llvm21.1.8", build = "h4ea4446_9"
-#   new scheme: version = "2026.08.09",            build = "llvm21_1_8_h62b9992_6"
-#
-# NB the unit is (date, llvm_version) and deliberately spans ALL build numbers
-# of that date: retention is "newest N DATED sets", and the keeper format names
-# no build number. Earlier this function derived the tag by splitting the build
-# string unconditionally, which on old-scheme artifacts left the whole build
-# string in the id — every individual build became its own "set" (46 of them
-# against a channel holding two dates), which would have pruned partial sets.
-def set-id [a: record] {
-  if ($a.version | str contains "_llvm") {
-    # Old scheme: the version IS the set id.
-    $a.version
-  } else {
-    let tag = ($a.build | split row '_h' | first)      # "llvm21_1_8"
-    if ($tag | str starts-with "llvm") {
-      $"($a.version)_($tag | str replace --all '_' '.')"   # -> "2026.08.09_llvm21.1.8"
-    } else {
-      # No lane tag anywhere: refuse to guess. Such an artifact is grouped
-      # under an id that matches no keeper and no window, and the caller
-      # treats unknown sets as ineligible for deletion.
-      $"($a.version)_UNKNOWN"
-    }
-  }
-}
+# The channel view — what a set IS, how it is identified, and how keepers are
+# read — lives in one place, shared with shared/record-keeper.nu. See the header
+# of that module for why this is not duplicated per caller.
+use channel-sets.nu [CHANNEL channel-artifacts nightly-artifacts read-keepers set-id]
 
 def main [--keep: int = 14, --dry-run, --channel: string = $CHANNEL] {
   let all = (channel-artifacts)
@@ -101,10 +36,8 @@ def main [--keep: int = 14, --dry-run, --channel: string = $CHANNEL] {
   }
 
   # Nightly artifacts only. The release lane is never pruned by this script,
-  # and the mutex is excluded by name before anything else looks at it.
-  let nightly = ($all | where {|a|
-    ($a.name != $MUTEX_NAME) and ($a.name | str contains "-nightly")
-  })
+  # and the mutex is excluded by name inside nightly-artifacts.
+  let nightly = (nightly-artifacts)
   if ($nightly | is-empty) {
     print "prune: no nightly artifacts on the channel; nothing to do"
     return

@@ -51,3 +51,5 @@
 # acpp-tools, acpp-clang_<plat>, acpp-clangxx_<plat>), all 10 present on the
 # channel. Retire only when that lock no longer references it.
 2026.08.10_llvm21.1.8
+# First green set of 2026.09, recorded automatically by the retention job (run 33706172179).
+2026.09.03_llvm21.1.8

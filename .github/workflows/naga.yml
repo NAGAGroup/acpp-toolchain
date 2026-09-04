@@ -1,0 +1,220 @@
+# naga lane — builds OUR FORK of AdaptiveCpp (NAGAGroup/AdaptiveCpp) for
+# internal development, linux-64 only.
+#
+# Deliberately unlike nightly in three ways:
+#
+#   * MANUAL ONLY, with an explicit fork SHA. The fork is not a moving branch
+#     the way develop is: we publish when we have landed something, and the
+#     published set names the commit it shipped. There is no schedule, no
+#     skip-check and no last-published bookkeeping to keep.
+#   * LINUX-64 ONLY. slabkit is linux-64, and the win leg costs 3-5x because
+#     Windows has no libLLVM dylib (346 separate link steps).
+#   * NO RETENTION. This lane is small and hand-driven; pruning it on a
+#     schedule would be pruning builds someone deliberately asked for.
+#
+# The GPU gate BLOCKS publishing, as in nightly: it is the only check that the
+# toolchain can compile and run a SYCL program at all, and a broken compiler
+# reaching slabkit surfaces as a far more confusing failure a layer up.
+name: naga
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Fork commit to build (NAGAGroup/AdaptiveCpp)"
+        required: true
+      build_number:
+        description: "Build number override (bump to re-publish the same date+SHA with fresh filenames)"
+        default: "0"
+
+concurrency:
+  group: naga
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      date: ${{ steps.resolve.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      # The generator chain is release -> nightly -> naga, so a stale link
+      # anywhere means this lane is built from a recipe nobody reviewed.
+      - name: nightly recipe is in sync with release
+        run: pixi run -e dev check-nightly
+      - name: naga recipe is in sync with nightly
+        run: pixi run -e dev check-naga
+      # Without this the staging cache silently reuses a build made from
+      # different patches/sources (rattler-build does not hash them).
+      - name: staging_inputs hash is current
+        run: pixi run -e dev check-staging-hash
+      # Invisible to --render-only; fails at build time on the big runner.
+      - name: pins are resolvable
+        run: pixi run -e dev check-pins
+      - name: Resolve the requested fork commit
+        id: resolve
+        run: |
+          # Accept a branch name or a short SHA and record the full one, so the
+          # published set always names an immutable commit.
+          SHA=$(git ls-remote https://github.com/NAGAGroup/AdaptiveCpp "${{ inputs.sha }}" | head -1 | cut -f1)
+          if [ -z "$SHA" ]; then SHA="${{ inputs.sha }}"; fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+          echo "::notice title=naga build::building NAGAGroup/AdaptiveCpp@$SHA"
+
+  build-linux:
+    needs: prepare
+    runs-on: Linux-x64-64
+    timeout-minutes: 240
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
+      ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 20G
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+
+      # Falls back to the nightly and release ccaches: this lane shares LLVM
+      # 21.1.8 with nightly, so a cold naga build still hits hard on LLVM
+      # objects and recompiles little more than AdaptiveCpp itself.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-naga-${{ github.run_id }}
+          restore-keys: |
+            ccache-naga-
+            ccache-nightly-
+            ccache-release-
+
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-naga-${{ github.run_id }}
+          restore-keys: rattler-naga-
+
+      # The staging cache (full LLVM+acpp build) lives under the rattler
+      # OUTPUT dir (<output>/build_cache), NOT the global rattler cache.
+      # Deliberately NOT sharing nightly's staging cache: the key does not
+      # include the source, so nightly's staging prefix would be reused for our
+      # fork and we would publish upstream's build under our names.
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: output/build_cache
+          key: staging-naga-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+          restore-keys: staging-naga-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-
+
+      - name: Build naga lane -> indexed local channel
+        run: pixi run -e dev build-naga
+
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd output/build_cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
+          du -sh . || true
+
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/build_cache
+          key: staging-naga-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-naga-${{ github.run_id }}
+
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-naga-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-naga
+          path: local-channel/
+          retention-days: 14
+
+  gpu-gate:
+    needs: [prepare, build-linux]
+    runs-on: Linux-x64-GPU
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-naga
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      - run: nvidia-smi
+      # The smoke manifest names release-lane packages; this lane ships the
+      # naga-* family, so point the same tasks at those. Also pin to this
+      # platform: pixi solves every platform in the manifest, and this
+      # artifact channel only carries linux-64.
+      - name: Retarget smoke manifest at the naga suite
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          sed -i 's/^acpp = /naga-acpp = /; s/^acpp-runtime-cuda = /naga-acpp-runtime-cuda = /; s/^acpp-compiler-rt = /naga-acpp-compiler-rt = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
+      # Install SEPARATELY from running, with a generous bound: a hung binary
+      # and a slow ~1GB cold download are otherwise indistinguishable, because
+      # the first `pixi run` silently carries the install.
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
+      - name: SYCL smoke on CPU backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on CUDA backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+      - name: Sanitizer smoke (naga-acpp-compiler-rt)
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run sanitizer-smoke
+
+  publish-linux:
+    needs: [prepare, build-linux, gpu-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-naga
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "C-11 gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Closure gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to prefix.dev
+        run: pixi run -e dev publish-channel

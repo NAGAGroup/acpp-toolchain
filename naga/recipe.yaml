@@ -1,0 +1,1648 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# naga lane — builds the NAGA fork of AdaptiveCpp for internal development.
+# GENERATED from nightly/recipe.yaml by shared/gen-naga.nu — DO NOT EDIT BY
+# HAND; edit the release recipe, run `pixi run gen-nightly`, then
+# `pixi run gen-naga`.
+# Version is date-injected (ACPP_NAGA_DATE) and the source is pinned to an
+# explicit fork SHA (ACPP_NAGA_SHA) — the fork is not a moving branch the way
+# develop is, so a publish names the commit it shipped.
+# These packages are DEV builds and are not peers of the release and nightly
+# families; they carry exclusions against both.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_major_next: "22"
+  llvm_maj_min: "21.1"
+  acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
+  # An explicit fork SHA; the branch default is for local builds only.
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="naga/retarget-context") }}
+  # Date-versioned, and like the release lane the LLVM major moves OUT of the
+  # version and into the build string. The date stays because the two lanes are
+  # separate package families with different contracts, and 2026.x sorting
+  # above 25.x is exactly what keeps a nightly from ever satisfying a release
+  # spec by accident.
+  version: ${{ acpp_version }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+recipe:
+  name: naga-acpp-toolchain
+  version: ${{ version }}
+
+# NB: no top-level source. The big source trees belong to the STAGING output
+# only; package outputs get just ../shared (50 files). rattler-build copies
+# every output's sources into a fresh work dir per output — handing all nine
+# outputs the ~150k-file LLVM tree cost ~21 minutes per Windows run.
+# License texts ship from shared/licenses/ (vendored, drift-checked against
+# the extracted trees by build-stage.nu at every staging build).
+
+outputs:
+  # ── Staging: ONE LLVM+AdaptiveCpp build shared by all outputs ──────────
+  - staging:
+      name: llvm-acpp-stage
+    build:
+      script:
+        interpreter: nu
+        file: ../shared/build-stage.nu
+        env:
+          # rattler-build builds with a sanitized env, so anything ccache needs
+          # must be forwarded explicitly. Empty => ccache defaults.
+          CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
+          CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
+          CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
+          CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
+          ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
+    source:
+      - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+        sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+        target_directory: llvm-project
+      - git: https://github.com/NAGAGroup/AdaptiveCpp.git
+        rev: ${{ acpp_commit }}
+        target_directory: AdaptiveCpp
+        # No patches: the fork branch is cut from the base these patches were
+        # written against and carries all three as commits.
+      - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
+        sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
+        target_directory: SPIRV-LLVM-Translator
+      - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+        sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+        target_directory: OpenCL-Headers
+      - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+        sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+        target_directory: OpenCL-CLHPP
+      - path: ../shared
+        target_directory: shared
+    requirements:
+      build:
+        - ${{ compiler('c') }}
+        - ${{ compiler('cxx') }}
+        - ${{ stdlib('c') }}
+        # The staging cache key hashes ONLY resolved requirements, the variant
+        # keys referenced IN THOSE REQUIREMENTS, and the platforms — never the
+        # sources, patches or build script (verified: adding a patch left the
+        # key byte-identical, so a stale toolchain was rebuilt silently).
+        # staging_inputs is a hash of those real inputs
+        # (shared/gen-staging-hash.nu, enforced by check-staging-hash in CI);
+        # mentioning it here is what pulls it into the key. Renders to plain
+        # "nushell" — staging builds reject build.variant.use_keys, so this
+        # is the only available hook.
+        - ${{ "nushell" ~ ("" if staging_inputs else "") }}
+        # A FUNCTIONAL FLOOR, not a pin: the build genuinely does not
+        # configure below this. Floors state a requirement of the software and
+        # stay in the recipe; choices about which version to ship against live
+        # in the variant config.
+        - cmake >=3.24
+        - ninja
+        - ccache
+        # De-versioned so the single `python` variant key applies. This used to
+        # read ">=3.9" while host asked for a bare `python`: two independent
+        # solves that could pick different interpreters, with lldb's bindings
+        # compiled against the host one.
+        - python
+        # swig is only needed for lldb's python bindings (linux-only build)
+        - if: linux
+          then: swig
+        # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
+        # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp
+        # itself must be compiled by a clang-family driver. We take the
+        # plain `clang` package (deps: vc >=14.3,<15 only) rather than the
+        # clang_win-64 ACTIVATION package, which is built solely against
+        # vs2022/vs2019 and would drag the VS year backwards.
+        # MUST be a build dep, NOT host: rattler-build's staging delta
+        # excludes any path a host dep already provides, and conda-forge's
+        # clang collides with the very files we install (clang.exe,
+        # clang-cl.exe, clang-cpp.exe, lib/clang/**) — as a host dep it
+        # silently ejected them from every package (run 31241929077).
+        # PINNED to the exact LLVM version we build (Jack, 2026-08-10):
+        # on win compiler-rt is built by THIS host clang-cl (projects mode,
+        # no runtimes bootstrap — see shared/build-stage.nu), so the
+        # building compiler matches the clang_rt sources and the shipped
+        # clang exactly. An unpinned clang would drift with conda-forge's
+        # default and silently skew the sanitizer-runtime build compiler.
+        - if: win
+          then: clang ==${{ llvm_version }}
+      host:
+        # DE-VERSIONED (phase-3 ruling [B]). Every version that used to be
+        # written here now lives in shared/variants/<platform>.yaml, which is
+        # this repo's pinning feedstock. Bare names are not "unpinned": a
+        # variant key matching the package name supplies the version, and the
+        # render annotates the resolved spec with (V) to prove it applied.
+        #
+        # THE LANE MUTEX LIVES HERE, on the staging output, not on the package
+        # outputs (run 31346371052: "Could not apply pin_compatible. The
+        # following package is not part of the solution: acpp-llvm").
+        #
+        # Outputs that `inherit:` this staging build do not get their own host
+        # environment solved — the staging one is what exists — so a host dep
+        # declared on an inheriting output never enters any solution. Declared
+        # here it does, and the mutex's own weak run_export then reaches every
+        # inheriting output automatically as
+        #   acpp-llvm >=20,<21.0a0   (RE of [host: acpp-llvm])
+        # which is the python_abi idiom working exactly as designed, and why
+        # none of those outputs names the mutex itself.
+        #
+        # Safe as a host dep specifically because the mutex is CONTENTLESS:
+        # rattler-build excludes from the carve any path a host dep provides,
+        # and an empty package provides none. (A real host dep here silently
+        # ejected clang.exe and friends from every win package, run
+        # 31241929077.)
+        #
+        # Names this lane's own major deliberately: a bare `acpp-llvm` resolves
+        # to the HIGHEST published major, which would pin the release lane to
+        # the nightly lane's range.
+        - acpp-llvm ==${{ llvm_major }}
+        - zlib
+        - zstd
+        # The single CUDA pin. cuda-version is what every other cuda-* package
+        # constrains itself against, so naming it once here — with the major
+        # coming from the variant config — aligns cudart, nvvm and the nvcc
+        # tools without a version literal on any of them.
+        - cuda-version
+        - cuda-cudart-dev
+        - cuda-nvvm
+        - cuda-nvcc-tools
+        # Both platforms get Level Zero + OpenCL: level-zero{,-devel} and
+        # opencl-headers all ship for win-64, so the Intel backends are not
+        # linux-only. (Upstream's Windows CI disables OpenCL, but the docs
+        # never say it cannot work — we build it and let CI adjudicate.)
+        - level-zero-devel
+        - opencl-headers
+        - if: linux
+          then:
+            - ocl-icd
+          else:
+            - khronos-opencl-icd-loader
+        # Linux-only: lldb needs python+swig; libxml2/numactl and the cudart
+        # CRT headers are linux packages.
+        - if: linux
+          then:
+            - libxml2-devel
+            - python
+            - cuda-driver-dev
+            - cuda-crt-dev_linux-64
+            - numactl
+        # AdaptiveCpp's Windows build links Boost (upstream builds it from
+        # source with the clang-win toolset; conda-forge ships it prebuilt).
+        # NB the clang compiler itself is a BUILD dep (see build: above).
+        - if: win
+          then:
+            # nvcc.exe is what the legacy FindCUDA module anchors detection on.
+            # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
+            # hardcoded `vs2019_win-64` dependency and would drag the 2019
+            # toolset into the host env.
+            - cuda-nvcc-impl
+            - libboost-devel
+
+  - package:
+      name: naga-acpp-runtime
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    source:
+      # A FRESH copy of shared/, under its own target dir. The staging restore
+      # brings the work dir back with the shared/ that existed when the cache
+      # was built, so reading activation scripts from there serves stale files
+      # (and re-fetching onto the same path collides with the restore).
+      - path: ../shared
+        target_directory: shared-fresh
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # Installed HERE rather than in the staging build: the staging cache is
+      # keyed on resolved requirements + variant vars and does NOT hash
+      # shared/, so staging-installed copies of these scripts go stale
+      # silently when we edit them. Output scripts always re-run.
+      script:
+        interpreter: nu
+        file: ../shared/install-runtime-activation.nu
+      files:
+        include:
+          - if: linux
+            then:
+              # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
+              # opt+llc+lld (verified in llvm-to-backend/{ptx,host}/*.cpp)
+              - bin/opt
+              - bin/llc
+              - bin/lld
+              - bin/ld.lld
+              # LLVM/Clang/acpp shared libraries (versioned sonames only)
+              - lib/*.so*
+              # JIT backend plugins, SSCP bitcode, pinned llvm-spirv
+              - lib/hipSYCL/**
+              # runtime JSON configs
+              - etc/AdaptiveCpp/**
+              # OMP debugger extension
+              - share/gdb/**
+            else:
+              # SSCP JIT tools: ptx JIT execs opt+llc; the host JIT drives the
+              # native COFF linker, so lld-link (and the lld driver) live here
+              # (the cross-flavors ld.lld/ld64.lld/wasm-ld belong to acpp)
+              - Library/bin/opt.exe
+              - Library/bin/llc.exe
+              - Library/bin/lld.exe
+              - Library/bin/lld-link.exe
+              # No LLVM dylib on Windows (tools link static): the shipped
+              # DLLs are the C-API/LTO/Remarks surface, libclang, and acpp's
+              # own runtime. Import .lib files travel with their DLL.
+              - Library/bin/LLVM-C.dll
+              - Library/bin/LTO.dll
+              - Library/bin/Remarks.dll
+              - Library/bin/libclang.dll
+              - Library/bin/acpp-rt.dll
+              - Library/bin/acpp-common.dll
+              - Library/lib/LLVM-C.lib
+              - Library/lib/LTO.lib
+              - Library/lib/Remarks.lib
+              - Library/lib/libclang.lib
+              - Library/lib/acpp-rt.lib
+              - Library/lib/acpp-common.lib
+              # JIT backend plugin DLLs + llvm-to-backend tools (DLLs are
+              # RUNTIME artifacts on win, so they land under bin)
+              - Library/bin/hipSYCL/**
+              # SSCP bitcode, backend import libs, pinned llvm-spirv
+              - Library/lib/hipSYCL/**
+              # runtime JSON configs
+              - Library/etc/AdaptiveCpp/**
+          # backend bitcode wiring on activation (opt-in, fail-soft;
+          # .sh on linux, .bat/.ps1/.sh triple on win)
+          - etc/conda/activate.d/acpp-runtime-activate.*
+        exclude:
+          - if: linux
+            then:
+              # libomp comes from conda-forge llvm-openmp (design §5)
+              - lib/libomp*
+              - lib/libarcher*
+              - lib/libompd*
+              # lldb's library belongs to naga-acpp-lldb
+              - lib/liblldb*
+            else:
+              # libomp comes from conda-forge llvm-openmp here too
+              - Library/bin/libomp.dll
+              - Library/lib/libomp.lib
+    requirements:
+      build:
+        - nushell
+      run:
+        # NB the lane mutex is deliberately absent from this list. It arrives
+        # automatically as a run_export of the staging output's host dep — see
+        # the long note there. Naming it here as well would be a second source
+        # of truth for the same range, and pin_compatible() cannot resolve it
+        # in an inheriting output anyway.
+        - llvm-openmp >=${{ llvm_major }}
+        - if: linux
+          then:
+            - numactl
+            - libstdcxx >=13
+      run_exports:
+        # EXPORT FLIP (phase-3 ruling [A]): a semver RANGE, not an exact pin.
+        # upper_bound 'x.x' renders ">=25.10.0,<25.11.0a0". Exact pins are
+        # nightly-only — a date-versioned lane carries no range semantics, so
+        # gen-nightly rewrites this line back to exact=True for that lane.
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+        # Re-exported EXPLICITLY. run_exports acquired from a host dependency
+        # do NOT transit to our own consumers, so without this line a package
+        # built against naga-acpp-runtime would inherit the runtime range while
+        # saying nothing about which LLVM lane it needs — exactly the mismatch
+        # the mutex exists to prevent.
+        #
+        # Spelled out rather than via pin_compatible(): the mutex lives only in
+        # the STAGING solution, and pin_compatible cannot see it from here
+        # (run 31346371052). Still derived rather than literal — both bounds
+        # come from the context vars, so a lane bump moves them together. Same
+        # carve-out the ratified doctrine already makes for exclusion windows
+        # on packages absent from the build env.
+        - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+      run_constraints:
+        # These two are already major-scoped BY NAME (libllvm20, not libllvm),
+        # so a blanket "must not exist" is the same-major window: it forbids
+        # the conda-forge build of OUR major, which would collide with the
+        # LLVM shared libraries we ship, while leaving every other major free.
+        # The unversioned-name cases below are the ones that needed widening.
+        - libllvm${{ llvm_major }} <0.0a0
+        - libclang-cpp${{ llvm_maj_min }} <0.0a0
+        # THE BASE RUNTIME HAS ZERO CUDA SURFACE. This is a ruling, not an
+        # oversight, and not a consequence of any build limitation: the base
+        # runtime must not constrain CUDA AT ALL.
+        #
+        # Every CUDA constraint belongs to naga-acpp-runtime-cuda's dependency
+        # chain, which already carries the correct ones — cudart pins the
+        # runtime library, cudart depends on cuda-version, and cuda-version
+        # supplies the "__cuda >=12" driver floor. Restating any part of that
+        # here would duplicate a contract we do not own, and duplicated
+        # constraints drift.
+        #
+        # The CUDA backend is dlopened and fails SOFT — a mismatched or absent
+        # cudart disables the backend rather than breaking the process — so
+        # solver-level protection is the metapackage's job, and asking for it
+        # in the base runtime would make a CPU-only environment carry GPU
+        # constraints it can never need.
+        #
+        # Previous revisions had "cuda-cudart >=12,<13" here (a guess), then
+        # pin_compatible (derived, but unresolvable in a staging-inheriting
+        # output). Both were answering a question this package should not be
+        # asking.
+        # __cuda: DELETED, deliberately, and not replaced here.
+        #
+        # It was written as "__cuda >=12,<13" — a CEILING on a driver virtual
+        # package, which is backwards: a 13.x driver runs CUDA 12 binaries
+        # fine, and the ceiling would refuse to install on any host that
+        # upgraded. The floor is also not ours to state: cuda-cudart depends on
+        # cuda-version, and cuda-version 12.9 constrains "__cuda >=12" —
+        # floor-only, verified against the installed package. So a consumer
+        # that actually pulls CUDA gets the correct floor through the chain,
+        # and a consumer of the bare CPU runtime is not asked for a GPU driver
+        # it does not need.
+        - acpp-runtime <0.0a0
+        - acpp-runtime-nightly <0.0a0
+      ignore_run_exports:
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # naga-acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          lib:
+            # win has no LLVM/clang dylibs (tools link static); the acpp
+            # runtime pair exists on both platforms
+            - if: linux
+              then:
+                - LLVM
+                - clang
+                - clang-cpp
+            - acpp-rt
+            - acpp-common
+          bin:
+            - opt
+            - llc
+            - lld
+          files:
+            exists:
+              - if: linux
+                then:
+                  - lib/hipSYCL/librt-backend-omp.so
+                  - lib/hipSYCL/librt-backend-cuda.so
+                  - lib/hipSYCL/librt-backend-ze.so
+                  - lib/hipSYCL/librt-backend-ocl.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
+                  - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
+                  - etc/AdaptiveCpp/acpp-core.json
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
+                else:
+                  # backend plugins are RUNTIME artifacts -> bin on win;
+                  # llvm-to-backend is linked statically into per-target
+                  # tools (no llvm-to-*.dll exists)
+                  - Library/bin/hipSYCL/rt-backend-omp.dll
+                  - Library/bin/hipSYCL/rt-backend-cuda.dll
+                  - Library/bin/hipSYCL/rt-backend-ze.dll
+                  - Library/bin/hipSYCL/rt-backend-ocl.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
+                  - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
+                  - Library/etc/AdaptiveCpp/acpp-core.json
+                  - etc/conda/activate.d/acpp-runtime-activate.bat
+                  - etc/conda/activate.d/acpp-runtime-activate.ps1
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
+            not_exists:
+              - if: linux
+                then:
+                  - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
+                  - lib/libomp.so
+                  - lib/liblldb.so
+                else:
+                  - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off (design §4)
+                  - Library/bin/libomp.dll
+  - package:
+      name: naga-acpp
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      files:
+        include:
+          - if: linux
+            then:
+              - bin/acpp*
+              - bin/clang
+              - bin/clang++
+              - bin/clang-cl
+              - bin/clang-cpp
+              - bin/clang-${{ llvm_major }}
+              - bin/ld64.lld
+              - bin/lld-link
+              - bin/wasm-ld
+              - bin/llvm-ar
+              - bin/llvm-nm
+              - bin/llvm-ranlib
+              - bin/llvm-strip
+              - bin/llvm-objcopy
+              - bin/llvm-objdump
+              - bin/llvm-readelf
+              - bin/llvm-readobj
+              - bin/llvm-size
+              - bin/llvm-strings
+              - bin/llvm-symbolizer
+              - bin/llvm-cxxfilt
+              - bin/llvm-addr2line
+              - bin/llvm-dwarfdump
+              - bin/llvm-dlltool
+              - bin/llvm-lib
+              - bin/llvm-rc
+              - bin/llvm-mt
+              - bin/llvm-windres
+              - bin/llvm-cov
+              - bin/llvm-profdata
+              - bin/llvm-profgen
+              - bin/x86_64-conda-linux-gnu-clang
+              - bin/x86_64-conda-linux-gnu-clang++
+              - bin/x86_64-conda-linux-gnu-clang-cpp
+              - include/AdaptiveCpp/**
+              - lib/clang/**
+              - lib/cmake/AdaptiveCpp/**
+            else:
+              # clang.exe is the real binary on win (no clang-NN.exe); the
+              # others are install-time alias copies. NB: a bare acpp* glob
+              # would also swallow runtime's acpp-rt.dll/acpp-common.dll
+              - Library/bin/acpp
+              - Library/bin/acpp*.exe
+              - Library/bin/clang.exe
+              - Library/bin/clang++.exe
+              - Library/bin/clang-cl.exe
+              - Library/bin/clang-cpp.exe
+              # cross-flavor linkers (native COFF lld-link is runtime's)
+              - Library/bin/ld.lld.exe
+              - Library/bin/ld64.lld.exe
+              - Library/bin/wasm-ld.exe
+              - Library/bin/llvm-ar.exe
+              - Library/bin/llvm-nm.exe
+              - Library/bin/llvm-ranlib.exe
+              - Library/bin/llvm-strip.exe
+              - Library/bin/llvm-objcopy.exe
+              - Library/bin/llvm-objdump.exe
+              - Library/bin/llvm-readelf.exe
+              - Library/bin/llvm-readobj.exe
+              - Library/bin/llvm-size.exe
+              - Library/bin/llvm-strings.exe
+              - Library/bin/llvm-symbolizer.exe
+              - Library/bin/llvm-cxxfilt.exe
+              - Library/bin/llvm-addr2line.exe
+              - Library/bin/llvm-dwarfdump.exe
+              - Library/bin/llvm-dlltool.exe
+              - Library/bin/llvm-lib.exe
+              - Library/bin/llvm-rc.exe
+              - Library/bin/llvm-mt.exe
+              - Library/bin/llvm-windres.exe
+              - Library/bin/llvm-cov.exe
+              - Library/bin/llvm-profdata.exe
+              - Library/bin/llvm-profgen.exe
+              - Library/include/AdaptiveCpp/**
+              - Library/lib/clang/**
+              - Library/lib/cmake/AdaptiveCpp/**
+              # compile/link-time acpp components (static libs; the runtime
+              # DLL import libs acpp-rt/acpp-common live with the runtime)
+              - Library/lib/AdaptiveCpp.lib
+              - Library/lib/acpp-frontend.lib
+              - Library/lib/acpp-clang-cbs.lib
+        exclude:
+          # The clang resource dir is claimed above as lib/clang/**, but its
+          # lib/ and share/ subtrees are the compiler-rt runtimes and belong to
+          # naga-acpp-compiler-rt. Two outputs claiming one path is a clobber, and
+          # the partition audit fails the build on it — so the split is stated
+          # here rather than discovered in CI.
+          - if: linux
+            then:
+              - lib/clang/${{ llvm_major }}/lib/**
+              - lib/clang/${{ llvm_major }}/share/**
+            else:
+              - Library/lib/clang/${{ llvm_major }}/lib/**
+              - Library/lib/clang/${{ llvm_major }}/share/**
+    requirements:
+      run:
+        # Mutex omitted deliberately — it arrives as a run_export of the
+        # staging host dep. See the note on the staging output.
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+        - python >=3.9
+        - if: linux
+          then:
+            - libgcc-devel_linux-64 >=13
+            - libstdcxx-devel_linux-64 >=13
+      run_exports:
+        # THE headline export (phase-3 ruling [A]). Anything compiled with this
+        # toolchain gets, with zero manifest text on the consumer's side:
+        #   naga-acpp-runtime >=25.10.0,<25.11.0a0   (the runtime it links against)
+        #   acpp-llvm    >=20,<21.0a0           (the lane it was built for)
+        # The second line is what stops a consumer binary built against the
+        # llvm20 toolchain from being installed next to the llvm21 runtime.
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          # Spelled out, not pin_compatible(): the mutex exists only in the
+          # staging solution and pin_compatible cannot resolve it from an
+          # inheriting output. Both bounds still come from context vars.
+          - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+      run_constraints:
+        # SAME-MAJOR WINDOWS, not blanket exclusions (phase-3 ruling [B]).
+        # These names are unversioned on conda-forge, so a bare "<0.0a0" said
+        # "this package may never be installed alongside us at ANY version" —
+        # which needlessly forbids, say, clang 19 or clang 21 tooling that
+        # cannot collide with our LLVM 20 files. The window forbids only the
+        # major we actually ship. compiler-rt below was already the model.
+        - clang <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangxx <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - lld <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvmdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Already major-scoped by name; blanket forbid IS the same-major window.
+        - clang-${{ llvm_major }} <0.0a0
+        - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Cross-lane exclusion. NOT made redundant by the mutex: the mutex only
+        # bites while the two lanes sit on different LLVM majors, and release
+        # catches up to nightly's major on every LLVM bump. Stays verbatim.
+        - acpp <0.0a0
+        - acpp-nightly <0.0a0
+      ignore_run_exports:
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # naga-acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          bin:
+            # bin: expansion includes the bare name on win, so the
+            # extensionless acpp python driver matches on both platforms
+            - clang
+            - acpp
+            - acpp-info
+            - llvm-ar
+          files:
+            exists:
+              - if: linux
+                then:
+                  - include/AdaptiveCpp/sycl/sycl.hpp
+                  - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+                  - lib/clang/${{ llvm_major }}/include/omp.h
+                else:
+                  # win nests the SYCL headers one level deeper than linux
+                  # (AdaptiveCpp/{AdaptiveCpp,hipSYCL}/sycl/sycl.hpp)
+                  - Library/include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp
+                  - Library/include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
+                  - Library/lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+                  - Library/lib/clang/${{ llvm_major }}/include/omp.h
+            not_exists:
+              - if: linux
+                then:
+                  - bin/clang-tidy
+                  - bin/lldb
+                  - bin/llvm-config
+                else:
+                  - Library/bin/clang-tidy.exe
+                  - Library/bin/lldb.exe
+                  - Library/bin/llvm-config.exe
+
+  # ── compiler-rt: the sanitizer/profile runtimes ─────────────────────────
+  # NEW in phase 3. These components were built OFF, which quietly made the
+  # toolchain a NON-drop-in replacement: `clang -fsanitize=address` would fail
+  # to link against a runtime that was never built. Since standing in for a
+  # conda-forge clang is the toolchain's whole promise, they now ship.
+  #
+  # SEPARATE OUTPUT rather than folded into acpp, matching conda-forge, which
+  # ships compiler-rt as its own package: the runtimes are large and only
+  # wanted by people who actually instrument builds.
+  #
+  # Run-dep target settled from conda-forge's own artifact rather than argued
+  # (the ruling said to look it up): conda-forge's compiler-rt 20.1.8 depends
+  # on `clang 20.1.8.*` — the COMPILER, not the runtime — so this hangs off
+  # acpp. Deltas from their layout, for the record: they split into
+  # compiler-rt + compiler-rt_linux-64 (a front package plus the platform
+  # payload) because of their cross-compilation matrix, which we do not have,
+  # so we ship one output; and they pin the exact clang version where we use
+  # the lane range plus the mutex.
+  - package:
+      name: naga-acpp-compiler-rt
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      files:
+        include:
+          # The clang resource directory splits cleanly: include/ holds the
+          # compiler's own headers and belongs to acpp; lib/ and share/ hold
+          # the compiler-rt archives, shared objects and sanitizer ignorelists
+          # and belong here. acpp excludes exactly these two, so the partition
+          # stays a partition (the zero-clobber audit enforces it).
+          - if: linux
+            then:
+              - lib/clang/${{ llvm_major }}/lib/**
+              - lib/clang/${{ llvm_major }}/share/**
+            else:
+              - Library/lib/clang/${{ llvm_major }}/lib/**
+              - Library/lib/clang/${{ llvm_major }}/share/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+
+      run_constraints:
+        # conda-forge's compiler-rt of OUR major installs into the same
+        # lib/clang/<major>/lib path, so it is a genuine file collision, not
+        # just a version disagreement. A different major is fine.
+        - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # BOTH platform payload packages. conda-forge splits compiler-rt into a
+        # front package plus a per-platform one, and it publishes the Windows
+        # half too (compiler-rt_win-64 20.1.8 exists — checked, not assumed),
+        # so constraining only the linux name would have left the Windows
+        # collision wide open on the one platform this output is newest on.
+        - compiler-rt_linux-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - compiler-rt_win-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - acpp-compiler-rt <0.0a0
+        - acpp-compiler-rt-nightly <0.0a0
+      ignore_run_exports:
+        # By source package; see the note on naga-acpp-runtime.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: linux
+                then:
+                  # The archives every -fsanitize=address / -fprofile link
+                  # needs. GLOBBED deliberately: the directory under lib/ is
+                  # named after the build triple, which is a build-config
+                  # detail, not a contract — spelling it exactly would make
+                  # this test a tripwire for the wrong thing.
+                  #
+                  # Safe to glob because `exists:` FAILS on a glob that matches
+                  # nothing ("No match for files glob") — verified, not
+                  # assumed. That is precisely the property needed here: if the
+                  # partition ever stops matching, this package ships hollow,
+                  # and the build must stop rather than certify it.
+                  - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.asan*
+                  - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.profile*
+                else:
+                  - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.asan*
+            not_exists:
+              # The resource HEADERS belong to acpp, not here.
+              - if: linux
+                then:
+                  - lib/clang/${{ llvm_major }}/include/omp.h
+                  - bin/clang
+                else:
+                  - Library/lib/clang/${{ llvm_major }}/include/omp.h
+                  - Library/bin/clang.exe
+
+  - package:
+      name: naga-acpp-llvm-dev
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      files:
+        include:
+          - if: linux
+            then:
+              - bin/**
+              - include/**
+              - lib/**/*.a
+              - lib/cmake/**
+              - share/man/**
+            else:
+              # win analogue of lib/**/*.a: LLVM/clang ship as static .lib
+              # (plus tablegen/testing import libs); everything claimed by
+              # siblings is excluded below
+              - Library/bin/**
+              - Library/include/**
+              - Library/lib/**/*.lib
+              - Library/lib/cmake/**
+              - Library/share/man/**
+        exclude:
+          - if: linux
+            then:
+              # claimed by acpp
+              - bin/acpp*
+              - bin/clang
+              - bin/clang++
+              - bin/clang-cl
+              - bin/clang-cpp
+              - bin/clang-${{ llvm_major }}
+              - bin/lld
+              - bin/ld.lld
+              - bin/ld64.lld
+              - bin/lld-link
+              - bin/wasm-ld
+              - bin/llvm-ar
+              - bin/llvm-nm
+              - bin/llvm-ranlib
+              - bin/llvm-strip
+              - bin/llvm-objcopy
+              - bin/llvm-objdump
+              - bin/llvm-readelf
+              - bin/llvm-readobj
+              - bin/llvm-size
+              - bin/llvm-strings
+              - bin/llvm-symbolizer
+              - bin/llvm-cxxfilt
+              - bin/llvm-addr2line
+              - bin/llvm-dwarfdump
+              - bin/llvm-dlltool
+              - bin/llvm-lib
+              - bin/llvm-rc
+              - bin/llvm-mt
+              - bin/llvm-windres
+              - bin/llvm-cov
+              - bin/llvm-profdata
+              - bin/llvm-profgen
+              - bin/x86_64-conda-linux-gnu-clang
+              - bin/x86_64-conda-linux-gnu-clang++
+              - bin/x86_64-conda-linux-gnu-clang-cpp
+              - include/AdaptiveCpp/**
+              - lib/cmake/AdaptiveCpp/**
+              # claimed by naga-acpp-tools
+              - bin/amdgpu-arch
+              - bin/clang-apply-replacements
+              - bin/clang-change-namespace
+              - bin/clang-check
+              - bin/clang-doc
+              - bin/clang-extdef-mapping
+              - bin/clang-format
+              - bin/clang-include-cleaner
+              - bin/clang-include-fixer
+              - bin/clang-installapi
+              - bin/clang-linker-wrapper
+              - bin/clang-move
+              - bin/clang-nvlink-wrapper
+              - bin/clang-offload-bundler
+              - bin/clang-offload-packager
+              - bin/clang-query
+              - bin/clang-refactor
+              - bin/clang-reorder-fields
+              - bin/clang-repl
+              - bin/clang-scan-deps
+              - bin/clang-sycl-linker
+              - bin/clang-tidy
+              - bin/clangd
+              - bin/diagtool
+              - bin/find-all-symbols
+              - bin/git-clang-format
+              - bin/hmaptool
+              - bin/modularize
+              - bin/nvptx-arch
+              - bin/offload-arch
+              - bin/pp-trace
+              - bin/run-clang-tidy
+              - bin/scan-build
+              - bin/scan-build-py
+              - bin/scan-view
+              - bin/llvm-bolt
+              - bin/llvm-bolt-heatmap
+              - bin/perf2bolt
+              - bin/merge-fdata
+              # claimed by naga-acpp-lldb
+              - bin/lldb*
+              # claimed by naga-acpp-runtime (SSCP JIT tools)
+              - bin/opt
+              - bin/llc
+              - bin/lld
+              - bin/ld.lld
+            else:
+              # claimed by acpp
+              - Library/bin/acpp
+              - Library/bin/acpp*.exe
+              - Library/bin/clang.exe
+              - Library/bin/clang++.exe
+              - Library/bin/clang-cl.exe
+              - Library/bin/clang-cpp.exe
+              - Library/bin/ld.lld.exe
+              - Library/bin/ld64.lld.exe
+              - Library/bin/wasm-ld.exe
+              - Library/bin/llvm-ar.exe
+              - Library/bin/llvm-nm.exe
+              - Library/bin/llvm-ranlib.exe
+              - Library/bin/llvm-strip.exe
+              - Library/bin/llvm-objcopy.exe
+              - Library/bin/llvm-objdump.exe
+              - Library/bin/llvm-readelf.exe
+              - Library/bin/llvm-readobj.exe
+              - Library/bin/llvm-size.exe
+              - Library/bin/llvm-strings.exe
+              - Library/bin/llvm-symbolizer.exe
+              - Library/bin/llvm-cxxfilt.exe
+              - Library/bin/llvm-addr2line.exe
+              - Library/bin/llvm-dwarfdump.exe
+              - Library/bin/llvm-dlltool.exe
+              - Library/bin/llvm-lib.exe
+              - Library/bin/llvm-rc.exe
+              - Library/bin/llvm-mt.exe
+              - Library/bin/llvm-windres.exe
+              - Library/bin/llvm-cov.exe
+              - Library/bin/llvm-profdata.exe
+              - Library/bin/llvm-profgen.exe
+              - Library/include/AdaptiveCpp/**
+              - Library/lib/cmake/AdaptiveCpp/**
+              - Library/lib/clang/**
+              - Library/lib/AdaptiveCpp.lib
+              - Library/lib/acpp-frontend.lib
+              - Library/lib/acpp-clang-cbs.lib
+              # claimed by naga-acpp-tools
+              - Library/bin/amdgpu-arch.exe
+              - Library/bin/analyze-build
+              - Library/bin/clang-apply-replacements.exe
+              - Library/bin/clang-change-namespace.exe
+              - Library/bin/clang-check.exe
+              - Library/bin/clang-doc.exe
+              - Library/bin/clang-extdef-mapping.exe
+              - Library/bin/clang-format.exe
+              - Library/bin/clang-include-cleaner.exe
+              - Library/bin/clang-include-fixer.exe
+              - Library/bin/clang-installapi.exe
+              - Library/bin/clang-linker-wrapper.exe
+              - Library/bin/clang-move.exe
+              - Library/bin/clang-nvlink-wrapper.exe
+              - Library/bin/clang-offload-bundler.exe
+              - Library/bin/clang-offload-packager.exe
+              - Library/bin/clang-query.exe
+              - Library/bin/clang-refactor.exe
+              - Library/bin/clang-reorder-fields.exe
+              - Library/bin/clang-repl.exe
+              - Library/bin/clang-scan-deps.exe
+              - Library/bin/clang-sycl-linker.exe
+              - Library/bin/clang-tidy.exe
+              - Library/bin/clangd.exe
+              - Library/bin/diagtool.exe
+              - Library/bin/find-all-symbols.exe
+              - Library/bin/git-clang-format
+              - Library/bin/git-clang-format.bat
+              - Library/bin/hmaptool
+              - Library/bin/intercept-build
+              - Library/bin/modularize.exe
+              - Library/bin/nvptx-arch.exe
+              - Library/bin/pp-trace.exe
+              - Library/bin/run-clang-tidy
+              - Library/bin/scan-build
+              - Library/bin/scan-build.bat
+              - Library/bin/scan-build-py
+              - Library/bin/scan-view
+              - Library/lib/libear/**
+              - Library/lib/libscanbuild/**
+              # claimed by naga-acpp-runtime (SSCP JIT tools + DLL surface)
+              - Library/bin/opt.exe
+              - Library/bin/llc.exe
+              - Library/bin/lld.exe
+              - Library/bin/lld-link.exe
+              - Library/bin/LLVM-C.dll
+              - Library/bin/LTO.dll
+              - Library/bin/Remarks.dll
+              - Library/bin/libclang.dll
+              - Library/bin/acpp-rt.dll
+              - Library/bin/acpp-common.dll
+              - Library/lib/LLVM-C.lib
+              - Library/lib/LTO.lib
+              - Library/lib/Remarks.lib
+              - Library/lib/libclang.lib
+              - Library/lib/acpp-rt.lib
+              - Library/lib/acpp-common.lib
+              - Library/bin/hipSYCL/**
+              - Library/lib/hipSYCL/**
+              # unpackaged: libomp comes from conda-forge llvm-openmp
+              - Library/bin/libomp.dll
+              - Library/lib/libomp.lib
+    requirements:
+      run:
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+
+      run_constraints:
+        # Same-major windows (see acpp): these names are unversioned upstream,
+        # so a blanket forbid barred every major instead of just ours.
+        - llvmdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clangdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - acpp-llvm-dev <0.0a0
+        - acpp-llvm-dev-nightly <0.0a0
+      ignore_run_exports:
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # naga-acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          bin:
+            - llvm-config
+            - llvm-as
+          files:
+            exists:
+              - if: linux
+                then:
+                  - lib/cmake/llvm/LLVMConfig.cmake
+                  - lib/cmake/clang/ClangConfig.cmake
+                else:
+                  - Library/lib/cmake/llvm/LLVMConfig.cmake
+                  - Library/lib/cmake/clang/ClangConfig.cmake
+            not_exists:
+              - if: linux
+                then:
+                  - bin/clang
+                  - bin/acpp
+                  - bin/clangd
+                  - bin/lldb
+                else:
+                  - Library/bin/clang.exe
+                  - Library/bin/acpp
+                  - Library/bin/clangd.exe
+                  - Library/bin/lldb.exe
+  - package:
+      name: naga-acpp-tools
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      files:
+        include:
+          - if: linux
+            then:
+              - bin/amdgpu-arch
+              - bin/clang-apply-replacements
+              - bin/clang-change-namespace
+              - bin/clang-check
+              - bin/clang-doc
+              - bin/clang-extdef-mapping
+              - bin/clang-format
+              - bin/clang-include-cleaner
+              - bin/clang-include-fixer
+              - bin/clang-installapi
+              - bin/clang-linker-wrapper
+              - bin/clang-move
+              - bin/clang-nvlink-wrapper
+              - bin/clang-offload-bundler
+              - bin/clang-offload-packager
+              - bin/clang-query
+              - bin/clang-refactor
+              - bin/clang-reorder-fields
+              - bin/clang-repl
+              - bin/clang-scan-deps
+              - bin/clang-sycl-linker
+              - bin/clang-tidy
+              - bin/clangd
+              - bin/diagtool
+              - bin/find-all-symbols
+              - bin/git-clang-format
+              - bin/hmaptool
+              - bin/modularize
+              - bin/nvptx-arch
+              - bin/offload-arch
+              - bin/pp-trace
+              - bin/run-clang-tidy
+              - bin/scan-build
+              - bin/scan-build-py
+              - bin/scan-view
+              - bin/llvm-bolt
+              - bin/llvm-bolt-heatmap
+              - bin/perf2bolt
+              - bin/merge-fdata
+              - share/clang/**
+              - share/scan-build/**
+              - share/scan-view/**
+              - share/opt-viewer/**
+              - lib/libear/**
+              - lib/libscanbuild/**
+              - libexec/**
+            else:
+              # no bolt on win (ELF-only); scan-build ships extra .bat
+              # drivers and the python analyzers land in bin
+              - Library/bin/amdgpu-arch.exe
+              - Library/bin/analyze-build
+              - Library/bin/clang-apply-replacements.exe
+              - Library/bin/clang-change-namespace.exe
+              - Library/bin/clang-check.exe
+              - Library/bin/clang-doc.exe
+              - Library/bin/clang-extdef-mapping.exe
+              - Library/bin/clang-format.exe
+              - Library/bin/clang-include-cleaner.exe
+              - Library/bin/clang-include-fixer.exe
+              - Library/bin/clang-installapi.exe
+              - Library/bin/clang-linker-wrapper.exe
+              - Library/bin/clang-move.exe
+              - Library/bin/clang-nvlink-wrapper.exe
+              - Library/bin/clang-offload-bundler.exe
+              - Library/bin/clang-offload-packager.exe
+              - Library/bin/clang-query.exe
+              - Library/bin/clang-refactor.exe
+              - Library/bin/clang-reorder-fields.exe
+              - Library/bin/clang-repl.exe
+              - Library/bin/clang-scan-deps.exe
+              - Library/bin/clang-sycl-linker.exe
+              - Library/bin/clang-tidy.exe
+              - Library/bin/clangd.exe
+              - Library/bin/diagtool.exe
+              - Library/bin/find-all-symbols.exe
+              - Library/bin/git-clang-format
+              - Library/bin/git-clang-format.bat
+              - Library/bin/hmaptool
+              - Library/bin/intercept-build
+              - Library/bin/modularize.exe
+              - Library/bin/nvptx-arch.exe
+              - Library/bin/pp-trace.exe
+              - Library/bin/run-clang-tidy
+              - Library/bin/scan-build
+              - Library/bin/scan-build.bat
+              - Library/bin/scan-build-py
+              - Library/bin/scan-view
+              - Library/share/clang/**
+              - Library/share/scan-build/**
+              - Library/share/scan-view/**
+              - Library/share/opt-viewer/**
+              - Library/lib/libear/**
+              - Library/lib/libscanbuild/**
+              - Library/libexec/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+
+        - python >=3.9
+      run_constraints:
+        # Same-major windows. This is the block the CPP Project Expert's
+        # item-7 question was about: the clang-format exclusion now bites ONLY
+        # a matching-major clang-format, so a project can keep its own
+        # different-major clang-format/clangd dev tooling in the same env.
+        - clang-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clang-format <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - clang-scan-deps <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        # Already major-scoped by name; blanket forbid IS the same-major window.
+        - clang-format-${{ llvm_major }} <0.0a0
+        - acpp-tools <0.0a0
+        - acpp-tools-nightly <0.0a0
+      ignore_run_exports:
+        # By SOURCE PACKAGE, not by exported name (phase-3 ruling [B]).
+        #
+        # A name list must be extended every time an upstream feedstock adds an
+        # export, and it fails SILENTLY when it is not — which is how the
+        # Windows OpenCL loader leaked into packages that never link it.
+        # Naming the source package ignores whatever that package exports,
+        # this release and the next.
+        #
+        # Written unconditionally, covering both platforms' package names:
+        # ignoring exports from a package that is not in this platform's host
+        # env is a verified no-op, so a per-platform conditional would add
+        # fragility for nothing.
+        #
+        # All of these are build-time-only for us. The backends are dlopened at
+        # runtime, and their real dependencies are declared by the
+        # naga-acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # install the CPU runtime without dragging in CUDA.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          bin:
+            - clang-format
+            - clang-tidy
+            - clangd
+            - run-clang-tidy
+            - scan-build
+            # bolt is ELF-only; it does not build on win
+            - if: linux
+              then:
+                - llvm-bolt
+  - package:
+      name: naga-acpp-lldb
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
+      skip:
+        - win
+      files:
+        include:
+          - bin/lldb*
+          - lib/liblldb*
+          # python bindings (lldb module)
+          - lib/python*/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+
+        # POINT REPAIR: this package ships lib/python*/** — the lldb python
+        # bindings — so it needs an interpreter to be of any use, and it was
+        # not asking for one. python's own run_export supplies python_abi,
+        # which pins the interpreter's ABI *if* python is present but does not
+        # require python to be there at all, so the bindings could land in an
+        # environment with nothing able to import them.
+        - python
+      run_constraints:
+        # Same-major window: a different-major lldb cannot collide with ours.
+        - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - acpp-lldb <0.0a0
+        - acpp-lldb-nightly <0.0a0
+      ignore_run_exports:
+        # By source package; see the note on naga-acpp-runtime. NB python is NOT
+        # ignored here — unlike the other outputs, this one genuinely depends
+        # on the interpreter, so python_abi pinning it to the interpreter it
+        # was built against is exactly what we want.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+    tests:
+      - package_contents:
+          bin:
+            - lldb
+            - lldb-server
+
+  # ── Compiler activation packages (canonical family split, design §D2) ──
+  - package:
+      name: naga-acpp-clang_linux-64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "linux-64"
+      script:
+        content: bash shared/activation/render-install.sh clang
+    requirements:
+      build:
+        - sed
+        - shellcheck
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - sysroot_linux-64 >=2.28
+        # POINT REPAIR: the activation script sets AR, RANLIB, NM, STRIP, LD
+        # and friends to ${CHOST}-<tool>, which are binutils programs, not
+        # clang ones — conda-forge's own ctng compiler activation packages
+        # depend on binutils for exactly this reason. Without it the exported
+        # environment names tools that need not exist in the prefix, and the
+        # failure surfaces as a confusing link error inside someone else's
+        # build rather than as a missing dependency here.
+        - binutils_linux-64
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        # DELIBERATELY BLANKET, not a same-major window — do not "fix" this to
+        # match the pattern used elsewhere in this recipe.
+        #
+        # The same-major windows exist for FILE collisions: two packages
+        # shipping lib/clang/20/**, which only conflict at a shared major. This
+        # is a different kind of conflict. An activation package's job is to
+        # own CC/CXX/AR/… in the environment's activate.d, and two packages
+        # both claiming that role fight regardless of which LLVM they point at.
+        # A different-major conda-forge clang_linux-64 is just as broken a
+        # roommate as a same-major one.
+        - clang_linux-64 <0.0a0
+        - acpp-clang_linux-64 <0.0a0
+        - acpp-clang-nightly_linux-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clang_linux-64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clang_linux-64.sh
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CC:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clang_linux-64.sh"
+            test -n "${CC}" || (echo "CC not set" && exit 1)
+            echo "${CC}" | grep -q "x86_64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clang_linux-64.sh"
+            after="${CC:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CC not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+
+  - package:
+      name: naga-acpp-clangxx_linux-64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "linux-64"
+      script:
+        content: bash shared/activation/render-install.sh clangxx
+    requirements:
+      build:
+        - sed
+        - shellcheck
+      run:
+        - ${{ pin_subpackage('naga-acpp-clang_linux-64', exact=True) }}
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clangxx_linux-64 <0.0a0
+        - acpp-clangxx_linux-64 <0.0a0
+        - acpp-clangxx-nightly_linux-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clangxx_linux-64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_linux-64.sh
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CXX:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clangxx_linux-64.sh"
+            test -n "${CXX}" || (echo "CXX not set" && exit 1)
+            echo "${CXX}" | grep -q "x86_64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_linux-64.sh"
+            after="${CXX:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+
+  # ── Windows compiler activation (design v3 §D2) ───────────────────────────
+  # Ported from conda-forge clang-win-activation (a different lineage from the
+  # linux ctng one: .bat/.ps1/.sh triples, ordering encoded in the FILENAME).
+  - package:
+      name: naga-acpp-clang_win-64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clang_win-64 <0.0a0
+        - clang-cl_win-64 <0.0a0
+        - acpp-clang_win-64 <0.0a0
+        - acpp-clang-nightly_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_y-naga-acpp-clang_win-64.bat
+              - etc/conda/activate.d/vs2022_y-naga-acpp-clang_win-64.ps1
+
+  - package:
+      name: naga-acpp-clangxx_win-64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clangxx ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        # clangxx activation reuses CPPFLAGS_USED that the clang script sets,
+        # which is why the filenames force _z- to sort after _y-.
+        - ${{ pin_subpackage('naga-acpp-clang_win-64', exact=True) }}
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clangxx_win-64 <0.0a0
+        - acpp-clangxx_win-64 <0.0a0
+        - acpp-clangxx-nightly_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_z-naga-acpp-clangxx_win-64.bat
+              - etc/conda/activate.d/vs2022_z-naga-acpp-clangxx_win-64.ps1
+
+  # clang-cl driver: the MSVC-CLI-compatible front end most existing Windows
+  # build systems expect. Upstream ships clang-cl_win-64 as an ALTERNATIVE to
+  # clang_win-64 (they intentionally conflict), so ours conflicts with our own
+  # clang/clangxx activation pair for the same reason: both would install a
+  # vs2022_y-* script and fight over CC/CXX.
+  - package:
+      name: naga-acpp-clang-cl_win-64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang-cl ${{ llvm_major }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clang-cl_win-64 <0.0a0
+        - clang_win-64 <0.0a0
+        - naga-acpp-clang_win-64 <0.0a0
+        - naga-acpp-clangxx_win-64 <0.0a0
+        - acpp-clang-cl_win-64 <0.0a0
+        - acpp-clang-cl-nightly_win-64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.bat
+              - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.ps1
+
+  # ── Backend metapackages (precise runtime deps, design §5) ────────────────
+  # One-package install path: `naga-acpp-runtime-cuda` PULLS IN the lane runtime,
+  # so a CUDA user installs exactly one thing (and still gets the omp backend,
+  # which ships in the runtime). Lane-bound + exactly pinned so the pair can
+  # never drift; the nightly lane carries `-nightly` twins.
+  - package:
+      name: naga-acpp-runtime-cuda
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+    requirements:
+      # REAL host deps (phase-3 ruling [B]): this metapackage's whole job is to
+      # state which CUDA the runtime beside it was built against, so its floors
+      # must track the staging solve rather than being maintained by hand. They
+      # are host deps purely so pin_compatible below has something to resolve
+      # against — nothing is compiled here.
+      host:
+        - cuda-version
+        - cuda-cudart
+        - cuda-nvvm
+      run:
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+        - ${{ pin_compatible('cuda-cudart') }}
+        - ${{ pin_compatible('cuda-nvvm') }}
+      run_constraints:
+        # __cuda: DELETED. This is the package that legitimately needs a driver
+        # floor, and it gets one WITHOUT us writing it: cuda-cudart depends on
+        # cuda-version, which constrains "__cuda >=12" — a floor with no
+        # ceiling, unlike the "<13" we used to assert against a driver.
+        - acpp-runtime-cuda <0.0a0
+        - acpp-runtime-cuda-nightly <0.0a0
+    about:
+      summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
+      license: BSD-3-Clause
+
+  - package:
+      name: naga-acpp-runtime-intel
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+    requirements:
+      # Real host deps so the floors below track the staging solve; see the
+      # CUDA metapackage. level-zero comes in via level-zero-devel, which is
+      # what the runtime was actually built against.
+      host:
+        - level-zero-devel
+      run:
+        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+        - ${{ pin_compatible('level-zero') }}
+        # The OpenCL ICD loader ships under a different name per platform:
+        # ocl-icd is linux-only, Windows uses the Khronos loader. Left
+        # unpinned on purpose — an ICD loader's entire contract is a stable
+        # ABI across versions, so a floor derived from our build machine would
+        # be noise rather than information.
+        - if: linux
+          then: ocl-icd
+          else: khronos-opencl-icd-loader
+      run_constraints:
+        - acpp-runtime-intel <0.0a0
+        - acpp-runtime-intel-nightly <0.0a0
+    about:
+      summary: acpp SYCL runtime with Intel GPU (Level Zero / OpenCL) backend dependencies
+      license: BSD-3-Clause
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: Apache-2.0 WITH LLVM-exception
+  # Vendored copies (package outputs no longer carry the source trees);
+  # build-stage.nu hard-fails if these ever differ from the extracted trees.
+  license_file:
+    - shared/licenses/llvm-LICENSE.TXT
+    - shared/licenses/AdaptiveCpp-LICENSE
+  summary: AdaptiveCpp SYCL toolchain nightly (develop @ LLVM ${{ llvm_major }}, generic SSCP)
+  repository: https://github.com/NAGAGroup/acpp-toolchain

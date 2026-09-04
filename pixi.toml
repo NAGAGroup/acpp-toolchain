@@ -57,6 +57,14 @@ description = "Regenerate nightly/recipe.yaml from release/recipe.yaml"
 cmd = "nu shared/gen-nightly.nu --check"
 description = "Fail if nightly/recipe.yaml is stale w.r.t. the release recipe"
 
+[environments.dev.tasks.gen-naga]
+cmd = "nu shared/gen-naga.nu"
+description = "Regenerate naga/recipe.yaml from nightly/recipe.yaml"
+
+[environments.dev.tasks.check-naga]
+cmd = "nu shared/gen-naga.nu --check"
+description = "Fail if naga/recipe.yaml is stale w.r.t. the nightly recipe"
+
 [environments.dev.tasks.gen-staging-hash]
 cmd = "nu shared/gen-staging-hash.nu"
 description = "Refresh the staging_inputs hash (patches/build script/sources) in the variant configs"
@@ -138,3 +146,7 @@ description = "Build the release lane into the indexed local channel"
 [environments.dev.tasks.build-nightly]
 cmd = "nu shared/build-lane.nu nightly"
 description = "Build the nightly lane into the indexed local channel"
+
+[environments.dev.tasks.build-naga]
+cmd = "nu shared/build-lane.nu naga"
+description = "Build the naga fork lane into the indexed local channel"

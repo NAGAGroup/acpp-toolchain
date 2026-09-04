@@ -1,0 +1,26 @@
+# Package manifest for the NAGA lane (package-only; the sole [workspace] is
+# the repo root). Exists so `pixi publish` can build this lane through the
+# pixi-build-rattler-build backend and emit an indexed local channel or upload
+# straight to prefix.dev.
+#
+# recipe.yaml is GENERATED (shared/gen-naga.nu) and is the source of truth for
+# name/version/dependencies of all 14 outputs — the fields below are
+# identifiers for pixi only.
+#
+# These are internal dev builds of our AdaptiveCpp fork. They are not peers of
+# the release and nightly families and every output excludes both.
+[package]
+name = "naga-acpp"
+version = "0.0.0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*", channels = [
+  "https://prefix.dev/jackm97/naga-labs",
+] }
+
+[package.build.config]
+# REQUIRED for staging (`staging:`/`inherit:`) outputs. Root level only —
+# the backend rejects this in target-specific config.
+experimental = true
+recipe = "recipe.yaml"

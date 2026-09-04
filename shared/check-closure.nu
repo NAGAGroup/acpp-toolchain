@@ -108,10 +108,11 @@ def main [channel_dir: string = "local-channel", --remote: string = $REMOTE] {
   # fails completeness against names it never claimed to ship.
   let has_nightly = ($staged | any {|a| $a.name | str contains "-nightly" })
   let has_naga = ($staged | any {|a| $a.name | str starts-with "naga-" })
-  let has_release = ($staged | any {|a|
+  let has_release = ($staged | any {|a| (
     (not ($a.name | str contains "-nightly")) and
-    (not ($a.name | str starts-with "naga-")) and ($a.name != "acpp-llvm")
-  })
+    (not ($a.name | str starts-with "naga-")) and
+    ($a.name != "acpp-llvm")
+  ) })
   let lanes = ([
     (if $has_release { "release" }),
     (if $has_nightly { "nightly" }),

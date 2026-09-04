@@ -101,13 +101,22 @@ def main [channel_dir: string = "local-channel", --remote: string = $REMOTE] {
   mut results = []
 
   # Which lanes are in this upload? A nightly package is exactly one whose name
-  # carries the -nightly infix; the two lanes are separate package families, so
-  # this is a naming fact rather than a heuristic.
+  # carries the -nightly infix, and a naga package one whose name starts with
+  # naga-; the lanes are separate package families, so this is a naming fact
+  # rather than a heuristic. Release is what is left over — which is why naga
+  # has to be subtracted explicitly, or a naga-only upload reads as release and
+  # fails completeness against names it never claimed to ship.
   let has_nightly = ($staged | any {|a| $a.name | str contains "-nightly" })
+  let has_naga = ($staged | any {|a| $a.name | str starts-with "naga-" })
   let has_release = ($staged | any {|a|
-    (not ($a.name | str contains "-nightly")) and ($a.name != "acpp-llvm")
+    (not ($a.name | str contains "-nightly")) and
+    (not ($a.name | str starts-with "naga-")) and ($a.name != "acpp-llvm")
   })
-  let lanes = ([(if $has_release { "release" }), (if $has_nightly { "nightly" })] | compact)
+  let lanes = ([
+    (if $has_release { "release" }),
+    (if $has_nightly { "nightly" }),
+    (if $has_naga { "naga" })
+  ] | compact)
   print $"closure: lanes in this upload = ($lanes | str join ', ')"
 
   # ── 1. completeness ──────────────────────────────────────────────────────

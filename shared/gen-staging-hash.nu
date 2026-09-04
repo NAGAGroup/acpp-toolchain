@@ -40,7 +40,12 @@ def compute [] {
   }
   # the staging build script itself
   $parts = ($parts | append (open --raw ($root | path join "shared" "build-stage.nu")))
-  # both lanes' source specs
+  # both PUBLISHED lanes' source specs. naga is deliberately absent: this hash
+  # lands in the shared variants file, so including a lane whose source rev
+  # moves per dispatch would rotate release's and nightly's staging caches
+  # every time the fork is rebuilt. It loses nothing — the naga lane applies no
+  # patches, and its rev is rendered into the source spec, which rattler's own
+  # staging key does cover.
   for r in [[release recipe.yaml] [nightly recipe.yaml]] {
     let p = ($root | path join $r.0 $r.1)
     if ($p | path exists) { $parts = ($parts | append (source-block $p)) }

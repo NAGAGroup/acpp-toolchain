@@ -23,7 +23,7 @@
 # Non-inheriting outputs (the backend metapackages) may use pin_compatible
 # freely, and do — that is where derived floors belong.
 
-const RECIPES = ["release/recipe.yaml" "nightly/recipe.yaml"]
+const RECIPES = ["release/recipe.yaml" "nightly/recipe.yaml" "naga/recipe.yaml"]
 
 def check-recipe [path: string] {
   let lines = (open --raw $path | lines)

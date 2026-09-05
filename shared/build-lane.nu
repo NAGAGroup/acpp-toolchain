@@ -14,7 +14,7 @@
 const CHANNEL = "https://prefix.dev/jackm97/naga-labs"
 # Package subdirs to lift into the channel — deliberately NOT bld/ or
 # src_cache/, which rattler-build also writes under --output-dir.
-const SUBDIRS = [linux-64 noarch win-64]
+const SUBDIRS = [linux-64 noarch win-64 linux-aarch64 osx-arm64 win-arm64]
 
 # Turn a filesystem path into a file:// URL that is valid on both platforms.
 # Linux gives "/home/x" -> "file:///home/x"; Windows gives "C:/x" ->
@@ -83,6 +83,13 @@ def main [lane: string] {
   for sub in $SUBDIRS {
     let src = ($outdir | path join $sub)
     if ($src | path exists) { cp -r $src ("local-channel" | path join $sub) }
+  }
+  # An empty channel here means the platform subdir list above fell behind
+  # the platform set — fail HERE, not at the publish gate three jobs later
+  # (an empty staged set passes every per-artifact gate vacuously; that is
+  # exactly how run 33955587720 reached the uploader with nothing).
+  if ((glob "local-channel/**/*.conda" | length) == 0) {
+    error make {msg: $"local-channel is EMPTY after the copy — nothing under ($outdir) matched ($SUBDIRS | str join ', ')"}
   }
 
   # The mutex ships WITH the lane: a consumer resolving acpp-runtime needs

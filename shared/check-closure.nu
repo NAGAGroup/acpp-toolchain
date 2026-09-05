@@ -98,6 +98,14 @@ def main [channel_dir: string = "local-channel", --remote: string = $REMOTE] {
   let platforms = ($staged | get subdir | uniq | where {|s| $s != "noarch" } | sort)
   print $"closure: ($staged | length) staged artifacts across ($platforms | str join ', ')"
 
+  # An empty (or mutex-only) staged set passes every per-artifact check
+  # VACUOUSLY — zero checks, zero failures — and reaches the uploader with
+  # nothing (run 33955587720). A publish gate that can pass on emptiness is
+  # not a gate.
+  if ($platforms | is-empty) {
+    error make {msg: "closure gate: no platform artifacts staged — an empty upload set must never publish"}
+  }
+
   mut results = []
 
   # Which lanes are in this upload? A nightly package is exactly one whose name

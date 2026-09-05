@@ -28,6 +28,15 @@ jobs:
           xcrun -sdk macosx metal --version 2>&1 || true
           echo "--- would-be reclaim: everything except the selected Xcode ---"
           ls -d /Applications/Xcode*.app 2>/dev/null || true
+          echo "--- SDK guard around PRIO_DARWIN_* (the mac-trial red) ---"
+          SDKP=$(xcrun --show-sdk-path)
+          echo "SDK: $SDKP"
+          grep -n -B8 'define PRIO_DARWIN_THREAD' "$SDKP/usr/include/sys/resource.h" | head -40 || true
+          grep -n -B4 -A2 'define PRIO_DARWIN_BG' "$SDKP/usr/include/sys/resource.h" | head -20 || true
+          echo "--- __DARWIN_C_LEVEL computation ---"
+          grep -n -B2 -A12 'define __DARWIN_C_LEVEL' "$SDKP/usr/include/sys/cdefs.h" | head -50 || true
+          echo "--- compiler predefines under strict c++17 ---"
+          echo | clang++ -x c++ -std=c++17 -dM -E - | grep -E '_POSIX_C_SOURCE|DARWIN_C|STRICT_ANSI' || true
 
   probe-linux-arm:
     runs-on: linux-arm64-v32

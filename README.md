@@ -97,15 +97,21 @@ OpenCL implementation does not ingest SPIR-V, so on NVIDIA hardware use
 `acpp-runtime-cuda` — the OpenCL backend lights up on Intel (Level Zero or
 OpenCL), Mesa's rusticl, and pocl.
 
-### AMD / ROCm status — honest version
+### AMD / ROCm
 
-Currently **not shipped**. The generic JIT requires acpp's LLVM ≤ ROCm's LLVM
-(the JIT hands LLVM bitcode to ROCm's compiler), and conda-forge's HIP runtime
-is still ROCm 6.3 (LLVM 18) — there is no installable configuration in which
-AMD dispatch works with this toolchain's LLVM. The moment conda-forge lands
-`hip-runtime-amd >= 7.2` (built on LLVM 22), the ROCm backend and an
-`acpp-runtime-rocm` metapackage ship in a rebuild. Track:
-[conda-forge ROCm migration](https://github.com/conda-forge/rocm-device-libs-feedstock).
+```sh
+pixi add acpp-runtime-rocm    # AMD: needs the AMDGPU driver on the host
+```
+
+`acpp-runtime-rocm` is the deliberate exception to "metapackages over
+conda-forge": conda-forge's ROCm is generations behind the LLVM this
+toolchain needs (the generic JIT requires acpp's LLVM ≤ ROCm's LLVM), so the
+package carries the ROCm runtime subset acpp actually loads — hiprtc, HIP and
+HSA runtimes, comgr, and the amdgcn device bitcode — taken from
+[TheRock](https://github.com/ROCm/TheRock)'s stable core tarball (ROCm 10.0).
+That subset is GPU-family-independent; the AMDGPU kernel driver comes from
+your system, like every GPU driver. Compile-tested in CI; run-tested on real
+AMD hardware only as it becomes available.
 
 ## Compiling
 

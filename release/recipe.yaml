@@ -96,6 +96,18 @@ outputs:
       - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
         sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
         target_directory: OpenCL-CLHPP
+      # ROCm, linux-only: TheRock's stable core tarball is the BUILD input —
+      # ROCM_PATH points here at configure time and the staging build deploys
+      # the runtime subset into the prefix (carved into acpp-runtime-rocm).
+      # gfx1150 is the SMALLEST family tarball (1.7 GB): the pieces acpp's
+      # hip manifest deploys (hiprtc, amdhip64, hsa-runtime64, amd_comgr,
+      # device-lib bitcode) are family-INDEPENDENT — the .kpack difference
+      # between families is ROCm's own math-library kernels, never deployed.
+      - if: linux
+        then:
+          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
+            sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
+            target_directory: rocm-dist
       - path: ../shared
         target_directory: shared
     requirements:
@@ -299,6 +311,14 @@ outputs:
               - lib/libompd*
               # lldb's library belongs to acpp-lldb
               - lib/liblldb*
+              # ROCm runtime subset (deployed from the TheRock tarball by the
+              # staging build) belongs to acpp-runtime-rocm
+              - lib/libhiprtc*
+              - lib/libamdhip64*
+              - lib/libhsa*
+              - lib/libamd_comgr*
+              - lib/libroc*
+              - lib/hipSYCL/ext/bitcode/amdgcn/**
             else:
               # libomp comes from conda-forge llvm-openmp here too
               - Library/bin/libomp.dll
@@ -430,9 +450,11 @@ outputs:
                   - lib/hipSYCL/librt-backend-cuda.so
                   - lib/hipSYCL/librt-backend-ze.so
                   - lib/hipSYCL/librt-backend-ocl.so
+                  - lib/hipSYCL/librt-backend-hip.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
                   - etc/AdaptiveCpp/acpp-core.json
@@ -452,14 +474,16 @@ outputs:
             not_exists:
               - if: linux
                 then:
-                  - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
+                  # the ROCm runtime subset is acpp-runtime-rocm's, not ours
+                  - lib/libamdhip64.so
+                  - lib/libhsa-runtime64.so
                   - lib/libomp.so
                   - lib/liblldb.so
                   # base packages ship NO activation; the CUDA bitcode wiring
                   # moved to acpp-runtime-cuda, whose install brings libdevice
                   - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
-                  - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off (design §4)
+                  - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off on win
                   - Library/bin/libomp.dll
                   - etc/conda/activate.d/acpp-runtime-activate.sh
   - package:
@@ -1699,6 +1723,57 @@ outputs:
     about:
       summary: acpp SYCL runtime with OpenCL backend dependencies (ICD loader)
       license: BSD-3-Clause
+
+  # ROCm is the deliberate exception to "metapackages over conda-forge":
+  # conda-forge's ROCm is generations behind the LLVM this toolchain needs
+  # (the generic JIT requires acpp's LLVM <= ROCm's LLVM), so the runtime
+  # subset is deployed from TheRock's stable core tarball by the staging
+  # build and CARVED here — real files, not dependencies. Named for rocm,
+  # not hip.
+  - package:
+      name: acpp-runtime-rocm
+      version: ${{ version }}
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching ../shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "linux-64"
+      files:
+        include:
+          # The subset acpp's own hip deployment manifest names, deployed by
+          # the staging build from the TheRock tarball. Family-independent:
+          # no .kpack, no math libraries.
+          - lib/libhiprtc*
+          - lib/libamdhip64*
+          - lib/libhsa*
+          - lib/libamd_comgr*
+          - lib/libroc*
+          - lib/hipSYCL/ext/bitcode/amdgcn/**
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
+      run_constraints:
+        - acpp-runtime-rocm-nightly <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - lib/libamdhip64.so*
+              - lib/libhsa-runtime64.so*
+              - lib/libamd_comgr.so*
+              - lib/hipSYCL/ext/bitcode/amdgcn/ockl.bc
+    about:
+      summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
+      # TODO(phase-1 exit): per-component licence sweep of the carved subset;
+      # ROCm core components are MIT/NCSA-family
+      license: LicenseRef-ROCm-Core-Subset
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

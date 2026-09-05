@@ -225,6 +225,15 @@ def linux-args [src: string, prefix: string] {
     "-DLLVM_DYLIB_SYMBOL_VERSIONING=ON"
     "-DWITH_LEVEL_ZERO_BACKEND=ON"
     "-DWITH_OPENCL_BACKEND=ON"
+    # ROCm (linux-only for now): the TheRock core tarball is a BUILD input —
+    # ROCM_PATH points into the extracted source tree so acpp's find_* succeed;
+    # the runtime subset is deployed into the prefix post-install (see the
+    # rocm-deploy step) and carved into acpp-runtime-rocm. Overrides the
+    # common-args OFF (cmake: last -D wins) and widens the LLVM target list —
+    # llvm-to-amdgpu JITs through libLLVM's AMDGPU backend.
+    "-DWITH_ROCM_BACKEND=ON"
+    $"-DROCM_PATH=($src)/rocm-dist"
+    "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
     $"-DOpenCL_INCLUDE_DIR=($prefix)/include"
@@ -461,6 +470,49 @@ def main [] {
     print $"acpp-core.json: default-cpu-cxx -> ($cpu_cxx)"
   } else {
     error make {msg: $"acpp-core.json not found at ($core_json)"}
+  }
+
+  # ROCm runtime deploy (linux): acpp's OWN hip deployment manifest names
+  # exactly what the backend needs at runtime. The ROCm tree is a BUILD
+  # input (the TheRock tarball source), so those pieces are deployed into
+  # the prefix here and carved into acpp-runtime-rocm. Entries already
+  # inside the prefix ($ACPP_* placeholders — the backend's own files) are
+  # installed normally and skipped. Symlink families are preserved: the
+  # manifest names find_library's answer (the unversioned dev name) while
+  # DT_NEEDED resolves the SONAME, so both must exist.
+  if not (is-windows) {
+    let manifest = ($prefix | path join "etc" "AdaptiveCpp" "deploy" "acpp-deployment-manifest-hip.json")
+    if not ($manifest | path exists) {
+      error make {msg: $"hip deployment manifest missing: ($manifest)"}
+    }
+    let libdir = ($prefix | path join "lib")
+    for e in (open --raw $manifest | from json | transpose src dest) {
+      if ($e.src | str contains "$ACPP_") { continue }
+      if ($e.src | str starts-with $prefix) { continue }
+      # optional components acpp probes without REQUIRED (hsakmt was folded
+      # into hsa-runtime; rocprofiler-register is optional) render as
+      # <VAR>-NOTFOUND when the tarball does not carry them
+      if ($e.src | str contains "-NOTFOUND") { continue }
+      let destdir = ([$libdir, ($e.dest | str trim -c '/')] | path join)
+      mkdir $destdir
+      let pattern = (if ($e.src | str ends-with "/*") {
+        $e.src
+      } else {
+        ($e.src | path dirname) + "/" + ($e.src | path basename | str replace -r '\.so.*$' '.so') + "*"
+      })
+      let matches = (glob $pattern)
+      if ($matches | is-empty) { error make {msg: $"rocm deploy: nothing matches ($pattern)"} }
+      for f in $matches {
+        let name = ($f | path basename)
+        let info = (ls -l $f | get 0)
+        if $info.type == "symlink" {
+          ^ln -sf ($info.target | path basename) ($destdir | path join $name)
+        } else {
+          cp $f ($destdir | path join $name)
+        }
+      }
+      print $"rocm deploy: ($pattern) -> ($destdir), (($matches | length)) files"
+    }
   }
 
   ^ccache --show-stats

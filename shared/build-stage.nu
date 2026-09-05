@@ -447,6 +447,17 @@ def main [] {
   # linux system-header failure and the win empty-arch failure. The outer
   # build sees identical flags via outer-flag-args; the child starts clean and
   # gets exactly what RUNTIMES_CMAKE_ARGS hands it.
+  if (is-darwin) {
+    # The macOS 26 SDK guards PRIO_DARWIN_THREAD/PRIO_DARWIN_BG behind the
+    # full Darwin symbol level, which strict -std=c++17 + the SDK's
+    # _POSIX_C_SOURCE handling drop (measured: CrashRecoveryContext.cpp,
+    # "use of undeclared identifier 'PRIO_DARWIN_THREAD'" — setpriority
+    # itself resolved, so the header was present and the macros guarded
+    # out). _DARWIN_C_SOURCE is Apple's own switch for exactly this; it is
+    # additive and standard practice under strict language modes.
+    $env.CFLAGS = (($env.CFLAGS? | default "") + " -D_DARWIN_C_SOURCE")
+    $env.CXXFLAGS = (($env.CXXFLAGS? | default "") + " -D_DARWIN_C_SOURCE")
+  }
   let flag_args = (outer-flag-args)
   # LDFLAGS deliberately STAYS in the env: the SPIRV-translator inner
   # ExternalProject env-seeds its linker flags and NEEDS conda's -L$PREFIX/lib

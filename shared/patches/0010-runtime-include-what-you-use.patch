@@ -1,0 +1,572 @@
+AdaptiveCpp 25.10: include what you use in the runtime.
+
+The Xcode 26 toolchain's libc++ removes transitive includes even under
+-std=c++17, exposing every runtime file that uses std::vector/atomic/
+memory/... without including the header (measured: rt-backend-omp fails
+with "no template named 'atomic' in namespace 'std'" and friends;
+libstdc++ provided these transitively on linux). Mechanically generated:
+for each runtime-core/omp/generic file using a std symbol whose header it
+does not include, the include is appended after the file's last existing
+include. GPU-backend subdirectories are untouched (not built on macOS;
+transitively fine with libstdc++ on linux). Upstream develop has the same
+gaps; an include-hygiene PR there is the durable fix.
+
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/adaptivity_engine.hpp
+index 7eefe42..9ccc6a3 100644
+--- a/include/hipSYCL/runtime/adaptivity_engine.hpp
++++ b/include/hipSYCL/runtime/adaptivity_engine.hpp
+@@ -16,6 +16,8 @@
+ #include "hipSYCL/runtime/kernel_configuration.hpp"
+ #include "hipSYCL/runtime/util.hpp"
+ #include "hipSYCL/runtime/kernel_cache.hpp"
++#include <vector>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/code_object_invoker.hpp
+index 45008ff..b699e3a 100644
+--- a/include/hipSYCL/runtime/code_object_invoker.hpp
++++ b/include/hipSYCL/runtime/code_object_invoker.hpp
+@@ -18,6 +18,7 @@
+ #include "util.hpp"
+ #include "kernel_cache.hpp"
+ #include "operations.hpp"
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/dag_manager.hpp
+index 4e105f3..87b9e16 100644
+--- a/include/hipSYCL/runtime/dag_manager.hpp
++++ b/include/hipSYCL/runtime/dag_manager.hpp
+@@ -18,6 +18,7 @@
+ #include "dag_direct_scheduler.hpp"
+ #include "dag_unbound_scheduler.hpp"
+ #include "dag_submitted_ops.hpp"
++#include <memory>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/dag_node.hpp
+index 6e9bbee..cdbec2f 100644
+--- a/include/hipSYCL/runtime/dag_node.hpp
++++ b/include/hipSYCL/runtime/dag_node.hpp
+@@ -17,6 +17,7 @@
+ #include "hints.hpp"
+ #include "event.hpp"
+ #include "hipSYCL/common/small_vector.hpp"
++#include <functional>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/dag_unbound_scheduler.hpp
+index ff5f552..7e935cb 100644
+--- a/include/hipSYCL/runtime/dag_unbound_scheduler.hpp
++++ b/include/hipSYCL/runtime/dag_unbound_scheduler.hpp
+@@ -13,6 +13,7 @@
+ 
+ #include "dag_node.hpp"
+ #include "dag_direct_scheduler.hpp"
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/data.hpp
+index 6879e50..c0b7ee9 100644
+--- a/include/hipSYCL/runtime/data.hpp
++++ b/include/hipSYCL/runtime/data.hpp
+@@ -24,6 +24,8 @@
+ #include "device_id.hpp"
+ #include "util.hpp"
+ #include "allocator.hpp"
++#include <functional>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/generic/host_timestamped_event.hpp
+index 044b709..49894d4 100644
+--- a/include/hipSYCL/runtime/generic/host_timestamped_event.hpp
++++ b/include/hipSYCL/runtime/generic/host_timestamped_event.hpp
+@@ -14,6 +14,7 @@
+ #include "hipSYCL/runtime/inorder_queue.hpp"
+ #include "hipSYCL/runtime/instrumentation.hpp"
+ #include "hipSYCL/runtime/event.hpp"
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/generic/timestamp_delta_instrumentation.hpp
+index 42d41e2..673f0d4 100644
+--- a/include/hipSYCL/runtime/generic/timestamp_delta_instrumentation.hpp
++++ b/include/hipSYCL/runtime/generic/timestamp_delta_instrumentation.hpp
+@@ -13,6 +13,7 @@
+ 
+ #include "../event.hpp"
+ #include "host_timestamped_event.hpp"
++#include <memory>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/hardware.hpp
+index 460b679..77224ec 100644
+--- a/include/hipSYCL/runtime/hardware.hpp
++++ b/include/hipSYCL/runtime/hardware.hpp
+@@ -14,6 +14,7 @@
+ #include <string>
+ 
+ #include "device_id.hpp"
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/inorder_executor.hpp
+index d287130..0bfe2e2 100644
+--- a/include/hipSYCL/runtime/inorder_executor.hpp
++++ b/include/hipSYCL/runtime/inorder_executor.hpp
+@@ -16,6 +16,7 @@
+ #include "executor.hpp"
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "inorder_queue.hpp"
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/instrumentation.hpp
+index 5f3740d..bff4dfe 100644
+--- a/include/hipSYCL/runtime/instrumentation.hpp
++++ b/include/hipSYCL/runtime/instrumentation.hpp
+@@ -20,6 +20,8 @@
+ #include <type_traits>
+ 
+ #include "signal_channel.hpp"
++#include <atomic>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/kernel_cache.hpp
+index 689d9a2..be9af30 100644
+--- a/include/hipSYCL/runtime/kernel_cache.hpp
++++ b/include/hipSYCL/runtime/kernel_cache.hpp
+@@ -24,6 +24,7 @@
+ #include "hipSYCL/runtime/device_id.hpp"
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/kernel_configuration.hpp"
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/multi_queue_executor.hpp
+index 3829d79..12902fa 100644
+--- a/include/hipSYCL/runtime/multi_queue_executor.hpp
++++ b/include/hipSYCL/runtime/multi_queue_executor.hpp
+@@ -23,6 +23,8 @@
+ #include "hipSYCL/runtime/hints.hpp"
+ #include "inorder_executor.hpp"
+ #include "generic/multi_event.hpp"
++#include <vector>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/omp/omp_backend.hpp
+index 2fb7eed..4e21b36 100644
+--- a/include/hipSYCL/runtime/omp/omp_backend.hpp
++++ b/include/hipSYCL/runtime/omp/omp_backend.hpp
+@@ -15,6 +15,8 @@
+ #include "../multi_queue_executor.hpp"
+ #include "omp_allocator.hpp"
+ #include "omp_hardware_manager.hpp"
++#include <memory>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/omp/omp_code_object.hpp
+index 5764957..10a4718 100644
+--- a/include/hipSYCL/runtime/omp/omp_code_object.hpp
++++ b/include/hipSYCL/runtime/omp/omp_code_object.hpp
+@@ -19,6 +19,7 @@
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/kernel_cache.hpp"
+ #include "hipSYCL/runtime/util.hpp"
++#include <unordered_map>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/omp/omp_hardware_manager.hpp
+index e385477..77bbd05 100644
+--- a/include/hipSYCL/runtime/omp/omp_hardware_manager.hpp
++++ b/include/hipSYCL/runtime/omp/omp_hardware_manager.hpp
+@@ -12,6 +12,8 @@
+ #define HIPSYCL_OMP_HARDWARE_MANAGER_HPP
+ 
+ #include "../hardware.hpp"
++#include <vector>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/omp/omp_queue.hpp
+index 59b0506..02420a7 100644
+--- a/include/hipSYCL/runtime/omp/omp_queue.hpp
++++ b/include/hipSYCL/runtime/omp/omp_queue.hpp
+@@ -18,6 +18,7 @@
+ #include "hipSYCL/common/spin_lock.hpp"
+ #include "hipSYCL/glue/llvm-sscp/jit.hpp"
+ #include "hipSYCL/glue/llvm-sscp/jit-reflection/reflection_map.hpp"
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/queue_completion_event.hpp
+index 47d02ae..6cbb7ee 100644
+--- a/include/hipSYCL/runtime/queue_completion_event.hpp
++++ b/include/hipSYCL/runtime/queue_completion_event.hpp
+@@ -16,6 +16,8 @@
+ #include "hipSYCL/runtime/event.hpp"
+ #include "inorder_queue_event.hpp"
+ #include "inorder_queue.hpp"
++#include <atomic>
++#include <memory>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/serialization/serialization.hpp
+index 51414b7..9dbeef6 100644
+--- a/include/hipSYCL/runtime/serialization/serialization.hpp
++++ b/include/hipSYCL/runtime/serialization/serialization.hpp
+@@ -18,6 +18,7 @@
+ #include <ostream>
+ #include <sstream>
+ #include <map>
++#include <string>
+ 
+ namespace hipsycl::rt {
+ std::ostream &operator<<(std::ostream &out, const hardware_platform value);
+diff --git a/PLACEHOLDER b/include/hipSYCL/runtime/signal_channel.hpp
+index 72906a7..059a1e1 100644
+--- a/include/hipSYCL/runtime/signal_channel.hpp
++++ b/include/hipSYCL/runtime/signal_channel.hpp
+@@ -13,6 +13,7 @@
+ 
+ #include <future>
+ #include <chrono>
++#include <atomic>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/src/runtime/adaptivity_engine.cpp
+index 5a31411..3ae478f 100644
+--- a/src/runtime/adaptivity_engine.cpp
++++ b/src/runtime/adaptivity_engine.cpp
+@@ -20,6 +20,8 @@
+ #include "hipSYCL/runtime/runtime_event_handlers.hpp"
+ #include <cstdint>
+ #include <limits>
++#include <vector>
++#include <string>
+ 
+ 
+ namespace hipsycl {
+@@ -403,4 +405,4 @@ std::string kernel_adaptivity_engine::select_image_and_kernels(
+ }
+ 
+ }
+-}
+\ No newline at end of file
++}
+diff --git a/PLACEHOLDER b/src/runtime/backend.cpp
+index 127a981..a2fef74 100644
+--- a/src/runtime/backend.cpp
++++ b/src/runtime/backend.cpp
+@@ -17,6 +17,8 @@
+ #include "hipSYCL/runtime/kernel_cache.hpp"
+ 
+ #include <algorithm>
++#include <exception>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/backend_loader.cpp
+index 634954f..f5443e7 100644
+--- a/src/runtime/backend_loader.cpp
++++ b/src/runtime/backend_loader.cpp
+@@ -25,6 +25,8 @@
+ #endif
+ 
+ #include HIPSYCL_CXX_FILESYSTEM_HEADER
++#include <vector>
++#include <string>
+ namespace fs = HIPSYCL_CXX_FILESYSTEM_NAMESPACE;
+ 
+ namespace {
+diff --git a/PLACEHOLDER b/src/runtime/dag.cpp
+index 1c45818..6d6223f 100644
+--- a/src/runtime/dag.cpp
++++ b/src/runtime/dag.cpp
+@@ -16,6 +16,7 @@
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "hipSYCL/runtime/util.hpp"
+ #include "hipSYCL/runtime/dag.hpp"
++#include <functional>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/dag_builder.cpp
+index 50f073e..d7eeb61 100644
+--- a/src/runtime/dag_builder.cpp
++++ b/src/runtime/dag_builder.cpp
+@@ -18,6 +18,7 @@
+ 
+ #include <mutex>
+ #include <utility>
++#include <memory>
+ 
+ // TODO: Implement the following optimization:
+ // - Reorder requirements such that larger accesses come first. This will cause
+diff --git a/PLACEHOLDER b/src/runtime/dag_direct_scheduler.cpp
+index ce7d6e9..6628dc9 100644
+--- a/src/runtime/dag_direct_scheduler.cpp
++++ b/src/runtime/dag_direct_scheduler.cpp
+@@ -22,6 +22,9 @@
+ #include "hipSYCL/runtime/generic/multi_event.hpp"
+ #include "hipSYCL/runtime/serialization/serialization.hpp"
+ #include "hipSYCL/runtime/allocator.hpp"
++#include <vector>
++#include <functional>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/dag_node.cpp
+index 972ac3a..59a17fa 100644
+--- a/src/runtime/dag_node.cpp
++++ b/src/runtime/dag_node.cpp
+@@ -17,6 +17,9 @@
+ #include "hipSYCL/runtime/hints.hpp"
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "hipSYCL/runtime/generic/multi_event.hpp"
++#include <vector>
++#include <functional>
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/dag_submitted_ops.cpp
+index 0ed84fd..1e5eccc 100644
+--- a/src/runtime/dag_submitted_ops.cpp
++++ b/src/runtime/dag_submitted_ops.cpp
+@@ -14,6 +14,8 @@
+ #include "hipSYCL/runtime/dag_submitted_ops.hpp"
+ #include "hipSYCL/runtime/dag_node.hpp"
+ #include "hipSYCL/runtime/hints.hpp"
++#include <vector>
++#include <mutex>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/dag_unbound_scheduler.cpp
+index 4903dcb..6219032 100644
+--- a/src/runtime/dag_unbound_scheduler.cpp
++++ b/src/runtime/dag_unbound_scheduler.cpp
+@@ -16,6 +16,7 @@
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/hints.hpp"
+ #include "hipSYCL/runtime/hardware.hpp"
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/data.cpp
+index 3b7603c..d297657 100644
+--- a/src/runtime/data.cpp
++++ b/src/runtime/data.cpp
+@@ -14,6 +14,8 @@
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "hipSYCL/runtime/application.hpp"
+ #include "hipSYCL/runtime/allocator.hpp"
++#include <vector>
++#include <mutex>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/error.cpp
+index 765dd16..38c59c6 100644
+--- a/src/runtime/error.cpp
++++ b/src/runtime/error.cpp
+@@ -11,6 +11,8 @@
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/application.hpp"
+ #include "hipSYCL/runtime/async_errors.hpp"
++#include <memory>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+@@ -88,4 +90,4 @@ void register_error(const result &err) {
+ }
+ 
+ }
+-}
+\ No newline at end of file
++}
+diff --git a/PLACEHOLDER b/src/runtime/hw_model/memcpy.cpp
+index dde6c3e..91a8480 100644
+--- a/src/runtime/hw_model/memcpy.cpp
++++ b/src/runtime/hw_model/memcpy.cpp
+@@ -10,6 +10,7 @@
+ // SPDX-License-Identifier: BSD-2-Clause
+ #include "hipSYCL/runtime/hw_model/memcpy.hpp"
+ #include <limits>
++#include <vector>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/src/runtime/inorder_executor.cpp
+index d9761de..30caa76 100644
+--- a/src/runtime/inorder_executor.cpp
++++ b/src/runtime/inorder_executor.cpp
+@@ -14,6 +14,7 @@
+ #include "hipSYCL/runtime/inorder_queue.hpp"
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "hipSYCL/runtime/serialization/serialization.hpp"
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+@@ -204,4 +205,4 @@ result inorder_executor::wait() {
+ }
+ 
+ }
+-}
+\ No newline at end of file
++}
+diff --git a/PLACEHOLDER b/src/runtime/kernel_cache.cpp
+index dd915f4..a0653a7 100644
+--- a/src/runtime/kernel_cache.cpp
++++ b/src/runtime/kernel_cache.cpp
+@@ -19,6 +19,8 @@
+ #include <fstream>
+ #include <memory>
+ #include <mutex>
++#include <vector>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/kernel_configuration.cpp
+index 5946c08..d85a7f0 100644
+--- a/src/runtime/kernel_configuration.cpp
++++ b/src/runtime/kernel_configuration.cpp
+@@ -9,6 +9,8 @@
+  */
+ // SPDX-License-Identifier: BSD-2-Clause
+ #include "hipSYCL/runtime/kernel_configuration.hpp"
++#include <unordered_map>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/omp/omp_backend.cpp
+index 1b59f97..77b1727 100644
+--- a/src/runtime/omp/omp_backend.cpp
++++ b/src/runtime/omp/omp_backend.cpp
+@@ -18,6 +18,7 @@
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/multi_queue_executor.hpp"
+ #include <memory>
++#include <string>
+ 
+ 
+ HIPSYCL_PLUGIN_API_EXPORT
+diff --git a/PLACEHOLDER b/src/runtime/omp/omp_code_object.cpp
+index 5748d0d..8656144 100644
+--- a/src/runtime/omp/omp_code_object.cpp
++++ b/src/runtime/omp/omp_code_object.cpp
+@@ -25,6 +25,7 @@
+ #include "hipSYCL/runtime/kernel_configuration.hpp"
+ #include "hipSYCL/runtime/device_id.hpp"
+ #include "hipSYCL/runtime/error.hpp"
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/omp/omp_event.cpp
+index b2c674b..f07c846 100644
+--- a/src/runtime/omp/omp_event.cpp
++++ b/src/runtime/omp/omp_event.cpp
+@@ -9,6 +9,7 @@
+  */
+ // SPDX-License-Identifier: BSD-2-Clause
+ #include "hipSYCL/runtime/omp/omp_event.hpp"
++#include <memory>
+ 
+ 
+ namespace hipsycl {
+diff --git a/PLACEHOLDER b/src/runtime/omp/omp_hardware_manager.cpp
+index 94fe4e9..5b16709 100644
+--- a/src/runtime/omp/omp_hardware_manager.cpp
++++ b/src/runtime/omp/omp_hardware_manager.cpp
+@@ -15,6 +15,9 @@
+ #include "hipSYCL/runtime/error.hpp"
+ #include "hipSYCL/runtime/device_id.hpp"
+ #include "hipSYCL/runtime/omp/omp_phys_mem.hpp"
++#include <vector>
++#include <exception>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/omp/omp_queue.cpp
+index fc0271d..782e91c 100644
+--- a/src/runtime/omp/omp_queue.cpp
++++ b/src/runtime/omp/omp_queue.cpp
+@@ -50,6 +50,8 @@
+ #include <omp.h>
+ 
+ #include <memory>
++#include <vector>
++#include <string>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/operations.cpp
+index 0439a09..8591c80 100644
+--- a/src/runtime/operations.cpp
++++ b/src/runtime/operations.cpp
+@@ -11,6 +11,7 @@
+ #include "hipSYCL/runtime/operations.hpp"
+ #include "hipSYCL/runtime/dag_node.hpp"
+ #include "hipSYCL/runtime/instrumentation.hpp"
++#include <memory>
+ 
+ namespace hipsycl {
+ namespace rt {
+diff --git a/PLACEHOLDER b/src/runtime/serialization/serialization.cpp
+index 17efa8b..d4c629d 100644
+--- a/src/runtime/serialization/serialization.cpp
++++ b/src/runtime/serialization/serialization.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include <map>
+ #include <ostream>
++#include <string>
+ 
+ namespace hipsycl::rt {
+ 
+diff --git a/PLACEHOLDER b/src/runtime/settings.cpp
+index 1767e6c..5168352 100644
+--- a/src/runtime/settings.cpp
++++ b/src/runtime/settings.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <string>
+ #include <fstream>
++#include <vector>
+ 
+ namespace hipsycl {
+ namespace rt {

@@ -92,6 +92,11 @@ outputs:
           # which does not exist on user machines, and lld has no default
           # search paths. Nightly-only: 25.10 has no vector-math code at all.
           # [nightly-only] - ../shared/patches/0008-host-jit-find-libmvec-via-loader.patch
+          # [release-only] Xcode 26 libc++ drops transitive includes even at
+          # [release-only] c++17; mechanically generated include-what-you-use
+          # [release-only] for the runtime core/omp files. Develop drifted, so
+          # [release-only] its copy of this fix goes upstream as a PR instead.
+          - ../shared/patches/0010-runtime-include-what-you-use.patch # [release-only]
       - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
         sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
         target_directory: SPIRV-LLVM-Translator

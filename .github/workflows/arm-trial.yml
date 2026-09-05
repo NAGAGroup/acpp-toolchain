@@ -1,6 +1,12 @@
-# linux-aarch64 TRIAL: build the release lane natively on the arm runner,
-# publish OFF. Proves the OMP-only lane end-to-end (staging build, carve,
-# package tests) before an aarch64 leg joins release.yml and publishes.
+# linux-aarch64 lane: build natively on the arm runner and publish the set.
+# OMP-only by design (see shared/variants/linux-aarch64.yaml). Publishing
+# rides THIS workflow (a trusted publisher on the channel) until the platform
+# joins the atomic release pipeline — that integration is a reviewed change,
+# not a side effect of a trial.
+#
+# No GPU/run gate: there is nothing to run against on this platform yet, the
+# same compile-only stance the ROCm outputs ship under. The closure and
+# collision gates still block publishing.
 name: arm-trial
 on:
   workflow_dispatch:
@@ -8,6 +14,10 @@ on:
       build_number:
         description: "Build number override"
         default: "0"
+      publish:
+        description: "Publish to the channel on green"
+        type: boolean
+        default: true
 
 concurrency:
   group: arm-trial
@@ -29,17 +39,59 @@ jobs:
         with:
           cache: true
           environments: dev
-      - name: ccache
-        uses: actions/cache@v4
+      # Explicit restore/save: the actions/cache post-step only saves on job
+      # SUCCESS, which starves iteration on exactly the runs that need warmth.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: ccache-arm-release-${{ github.run_id }}
           restore-keys: ccache-arm-release-
-      - name: staging cache
-        uses: actions/cache@v4
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
         with:
           path: output-staging
           key: staging-arm-release-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ github.run_id }}
           restore-keys: staging-arm-release-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-
-      - name: Build release lane (no publish)
+      - name: Build release lane
         run: pixi run -e dev build-release
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-arm-release-${{ github.run_id }}
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output-staging
+          key: staging-arm-release-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-arm
+          path: local-channel/
+          retention-days: 14
+
+  publish-linux-aarch64:
+    needs: build-linux-aarch64
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-arm
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "C-11 gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Closure gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to prefix.dev
+        run: pixi run -e dev publish-channel

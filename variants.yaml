@@ -1,0 +1,194 @@
+# variants.yaml — THE pinning file for this workspace, referenced from
+# [workspace] build-variants-files in the root pixi.toml.
+#
+# It replaces shared/variants/{linux-64,win-64,osx-arm64,linux-aarch64}.yaml:
+# four files that had to be kept in step by hand and drifted (the osx one was
+# a "first cut" with different compiler versions and no backend keys at all).
+# One file with platform SELECTORS is the conda-forge pinning-feedstock shape,
+# and in pixi it is the only route to zip_keys — inline
+# [workspace.build-variants] has no zipping.
+#
+# HOW VARIANT PINNING WORKS (verified in the old lanes, not assumed):
+# rattler-build applies an entry to any BARE requirement whose package name
+# matches the key — `zstd` in a recipe becomes `zstd 1.5.*`. A requirement
+# that carries its own version is NOT touched. Keys that match no requirement
+# are plain variables the recipe can read, and every key a build actually USES
+# enters that build's variant hash.
+#
+# WHAT BELONGS HERE: pins that are a CHOICE. Functional floors ("the build
+# genuinely does not work below this", e.g. cmake >=3.24) stay in the recipe.
+# The distinction is pin-vs-floor, not versioned-vs-bare.
+#
+# Values are BARE and EXACT ("1.5" prefix-matches the series) — dependency
+# SPECS carry real bounds; variant VALUES never do.
+
+# ---- round-1 constants -----------------------------------------------------
+# LLVM 21: the top of AdaptiveCpp's supported range (its CMake guards
+# LLVM_VERSION_MAJOR > 21) and conda-forge's default macOS compiler major.
+llvm_major:
+  - "21"
+llvm_version:
+  - "21.1.8"
+
+# AdaptiveCpp is pinned to a CONSTANT develop commit for the whole of round 1.
+# The reason is NOT feature freezing: dynamically detecting develop HEAD
+# invalidates ccache on every upstream commit. Pinned once, left alone.
+# 6df52d7 = AdaptiveCpp/AdaptiveCpp develop, 2026-09-04, "Missing free in
+# empty_kernel_submission SYCL test (#2220)".
+acpp_rev:
+  - "6df52d7ea8540e6683ab733c6458c9d5a1c2195c"
+
+# ---- compilers + stdlib ----------------------------------------------------
+# Explicit on every platform. A stale default that happens to work is
+# indistinguishable from a deliberate choice until the day it stops working —
+# which is exactly why win pins the VS year rather than inheriting vs2022.
+c_compiler:
+  - if: linux
+    then: gcc
+  - if: win
+    then: vs2026
+  - if: osx
+    then: clang
+cxx_compiler:
+  - if: linux
+    then: gxx
+  - if: win
+    then: vs2026
+  - if: osx
+    then: clangxx
+
+# Compiler versions exist on the two platforms that have a version axis; win's
+# year IS its version and is carried by the c_compiler value itself.
+#
+# osx moves to 21 (was 23 in the ad-hoc mac lane, chosen as "newest"):
+# conda-forge's own default for osx is clang 21, and AdaptiveCpp guards
+# LLVM_VERSION_MAJOR > 21 — so 21 is simultaneously the ecosystem default and
+# inside acpp's supported range. It also drops the libcxx run-export floor
+# from >=23 to >=21 automatically. NEVER hand-pin libcxx: the floor is a
+# lower bound published by the compiler activation, and the C++ runtime is a
+# separate axis from the LLVM we SHIP.
+c_compiler_version:
+  - if: linux
+    then: "14"
+  - if: osx
+    then: "21"
+cxx_compiler_version:
+  - if: linux
+    then: "14"
+  - if: osx
+    then: "21"
+
+c_stdlib:
+  - if: linux
+    then: sysroot
+  - if: win
+    then: vs
+  - if: osx
+    then: macosx_deployment_target
+c_stdlib_version:
+  - if: linux
+    then: "2.28"
+  # conda-forge scopes c_stdlib_version to unix. We set it on win deliberately
+  # so the VS year is pinned in ONE place; vs2026_win-64 already constrains
+  # vs_win-64 ==2026.1, this only makes it explicit.
+  - if: win
+    then: "2026.*"
+  - if: osx
+    then: "11.0"
+
+# THE macOS SDK PIN — the root cause of the entire ad-hoc mac patch sequence.
+# osx-sysroot's sdkroot_env falls back to `export SDKROOT="$(xcrun
+# --show-sdk-path)"` when nothing is preset, so with no pin we built against
+# whatever Xcode the runner carried (macOS 26 SDK), which is what surfaced
+# LLVM's missing sys/resource.h and acpp's reliance on libc++ transitive
+# includes. conda-forge CI downloads a PINNED SDK instead.
+#
+# THE NUMBER IS OPEN, not settled. Measured 2026-09-05: two upstream sources
+# disagree, and neither is the "conda-forge pins MACOSX_SDK_VERSION 11.0" this
+# was written from.
+#   * conda-forge-pinning-feedstock's conda_build_config.yaml defines NO
+#     MACOSX_SDK_VERSION key at all. What it pins at 11.0 is c_stdlib_version,
+#     i.e. the DEPLOYMENT TARGET — a different axis. The "SDK 11.0" claim comes
+#     from the knowledge base and describes conda-forge CI DOWNLOADING a pinned
+#     SDK, not a variant key anyone can inherit.
+#   * ctng-compiler-activation-feedstock — the activation feedstock we fork —
+#     sets MACOSX_SDK_VERSION: 14.5 in its own recipe/conda_build_config.yaml.
+# Both are self-consistent, since the SDK need only be at least the deployment
+# target. 11.0 stands here because it is what the ratified plan says; 14.5 (the
+# SDK the forked activation was written against) is the other defensible
+# value. Decide it deliberately, not by drift.
+MACOSX_SDK_VERSION:
+  - if: osx
+    then: "11.0"
+
+# Keys move in lockstep. Each group is inert on a platform where its keys are
+# undefined (win defines neither compiler-version key), which is how one file
+# serves three platforms.
+zip_keys:
+  - [c_compiler, cxx_compiler]
+  - [c_compiler_version, cxx_compiler_version]
+  - [c_stdlib, c_stdlib_version]
+
+# ---- CUDA ------------------------------------------------------------------
+# conda-forge's pinning keys (cuda_compiler_version and _min are theirs; _max
+# is ours). The core recipe hard-pins the BUILD with
+# `cuda-version ==${{ cuda_compiler_version }}` and states the CUDA runtime
+# metapackage's run range as `>=${{ _min }},<${{ _max }}` — one declaration to
+# move the whole CUDA line.
+#
+# The CEILING is load-bearing: libcudart's SONAME is major-versioned
+# (libcudart.so.12 vs .so.13, measured from the packages), the backend records
+# it in DT_NEEDED, and dlopen resolves filenames, not versions — a CUDA-13
+# runtime silently removes the GPU. The DRIVER needs no ceiling: cuda-version
+# constrains `__cuda >=12`, a floor, and newer drivers run older CUDA.
+#
+# QUOTED on purpose: unquoted 12.10 is the YAML float 12.1.
+cuda_compiler_version:
+  - if: not osx
+    then: "12.9"
+cuda_compiler_version_min:
+  - if: not osx
+    then: "12.9"
+cuda_compiler_version_max:
+  - if: not osx
+    then: "13"
+
+# ---- ABI-sensitive libraries ----------------------------------------------
+# Pinned at soname granularity, conda-forge pinning-feedstock style. These
+# must not contradict conda-forge's global pins (libxml2 2.15, zstd 1.5,
+# zlib 1) — checked against the pinning feedstock, they do not.
+zlib:
+  - "1.3"
+zstd:
+  - "1.5"
+libxml2-devel:
+  - if: linux
+    then: "2.15"
+numactl:
+  - if: linux
+    then: "2.0"
+# AdaptiveCpp's Windows build links Boost. Upstream builds it from source with
+# the clang-win toolset; conda-forge ships it prebuilt, so we pin the release.
+libboost-devel:
+  - if: win
+    then: "1.91"
+
+# ---- backends --------------------------------------------------------------
+# level-zero and opencl-headers both ship for win-64, so the Intel backends
+# are not linux-only. The OpenCL packages are deliberately NOT pinned:
+# opencl-headers is header-only and date-versioned (no ABI surface), and
+# ocl-icd is a loader whose whole purpose is a stable ABI across versions.
+level-zero-devel:
+  - if: not osx
+    then: "1.29"
+khronos-opencl-icd-loader:
+  - if: win
+    then: "2024.10"
+
+# ---- python ----------------------------------------------------------------
+# ONE python for the whole build. The old recipe asked for `python >=3.9` in
+# build and a bare `python` in host — two independent solves that may pick
+# different interpreters, and lldb's python bindings are compiled against
+# whichever one host resolved, so a mismatch ships a module that cannot import.
+python:
+  - "3.14"

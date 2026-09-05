@@ -30,7 +30,8 @@ The two suites ship the same file paths and are **mutually exclusive** in one en
 | `acpp-compiler-rt` | compiler-rt sanitizer/profile runtimes — ASan, TSan, UBSan, profile, libFuzzer (plus XRay/MemProf/ORC on linux) | envs that build with `-fsanitize=…` or coverage |
 | `acpp-llvm` | the **lane mutex**: bare-major versions (`20`, `21`) naming which LLVM the toolchain was linked against | pulled automatically; pin it only to force a lane |
 | `acpp-runtime-cuda` | opt-in CUDA runtime pieces (cudart + libdevice — precisely those, nothing more) | consumer envs |
-| `acpp-runtime-intel` | opt-in Intel GPU pieces (Level Zero loader + OpenCL ICD loader) | consumer envs |
+| `acpp-runtime-level-zero` | opt-in Level Zero loader (Intel GPUs) | consumer envs |
+| `acpp-runtime-ocl` | opt-in OpenCL ICD loader | consumer envs |
 
 ## Install
 
@@ -59,11 +60,42 @@ pixi add acpp-tools      # formatter/LSP/tidy matching your compiler
 CPU (OpenMP) works out of the box. GPU backends are **opt-in** — add the runtime metapackage; the JIT discovers what's present at runtime:
 
 ```sh
-pixi add acpp-runtime-cuda    # NVIDIA: needs a CUDA 12 driver on the host
-pixi add acpp-runtime-intel   # Intel GPUs: needs Intel compute drivers on the host
+pixi add acpp-runtime-cuda        # NVIDIA: needs a CUDA 12 driver on the host
+pixi add acpp-runtime-level-zero  # Intel GPUs: needs Intel compute drivers on the host
+pixi add acpp-runtime-ocl         # OpenCL: any ICD that ingests SPIR-V
 ```
 
 Check what the runtime sees with `acpp-info`.
+
+### OpenCL: where the ICDs come from
+
+`acpp-runtime-ocl` installs the loader, not a driver. The loader looks in
+`$CONDA_PREFIX/etc/OpenCL/vendors`, so any conda-packaged ICD registers
+itself by being installed — `intel-compute-runtime`, `pocl`, and friends.
+Prefer that route when a conda package covers your hardware: the environment
+stays self-contained.
+
+To use the **system's** ICDs instead, `ocl-icd-system` (installed alongside)
+links them into the environment on activation — via a **post-link script,
+which pixi does not run by default**:
+
+```toml
+# pixi.toml
+[workspace]
+run-post-link-scripts = "insecure"
+```
+
+The default is protection against the general mechanism, not against this
+package: a post-link script is arbitrary code from whatever package carries
+it, and any malicious package could use one to inject code into your
+environment. `ocl-icd-system` itself is a well-known single-purpose package
+and safe in practice — enable the setting if you need system ICDs, leave it
+off if conda-forge covers your OpenCL needs.
+
+One capability caveat: acpp's OpenCL backend feeds devices SPIR-V. NVIDIA's
+OpenCL implementation does not ingest SPIR-V, so on NVIDIA hardware use
+`acpp-runtime-cuda` — the OpenCL backend lights up on Intel (Level Zero or
+OpenCL), Mesa's rusticl, and pocl.
 
 ### AMD / ROCm status — honest version
 

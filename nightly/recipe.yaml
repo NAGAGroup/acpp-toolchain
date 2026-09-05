@@ -1663,13 +1663,18 @@ outputs:
         # purpose — an ICD loader's entire contract is a stable ABI across
         # versions, so a floor derived from our build machine would be noise
         # rather than information. ICDs come from the environment
-        # (intel-compute-runtime, pocl, …) or, via ocl-icd-system, from the
-        # host system. NB the SPIR-V ingestion caveat: NVIDIA's OpenCL cannot
-        # consume acpp's SPIR-V; this backend lights up on Intel, Mesa
-        # rusticl, and pocl.
+        # (intel-compute-runtime, pocl, …) or from the host system via
+        # ocl-icd-system — whose post-link script pixi disables by default;
+        # see the README for the opt-in and why the default is what it is.
+        # NB the SPIR-V ingestion caveat: NVIDIA's OpenCL cannot consume
+        # acpp's SPIR-V; this backend lights up on Intel, Mesa rusticl, and
+        # pocl.
         - if: linux
-          then: ocl-icd
-          else: khronos-opencl-icd-loader
+          then:
+            - ocl-icd
+            - ocl-icd-system
+          else:
+            - khronos-opencl-icd-loader
       run_constraints:
         - acpp-runtime-ocl <0.0a0
     about:

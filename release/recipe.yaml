@@ -1860,9 +1860,18 @@ outputs:
               - lib/hipSYCL/ext/bitcode/amdgcn/ockl.bc
     about:
       summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
-      # TODO(phase-1 exit): per-component licence sweep of the carved subset;
-      # ROCm core components are MIT/NCSA-family
-      license: LicenseRef-ROCm-Core-Subset
+      # Per-component sweep, read from the tarball's own share/doc texts:
+      # HIP runtime + hiprtc + rocprofiler-register are MIT, hsa-runtime64
+      # (ROCR) is NCSA, amd_comgr and the amdgcn device libraries are
+      # Apache-2.0 WITH LLVM-exception. Texts vendored beside the other
+      # licenses; drift-checked against the extracted tarball at every
+      # staging build.
+      license: MIT AND NCSA AND Apache-2.0 WITH LLVM-exception
+      license_file:
+        - shared/licenses/rocm/hip-LICENSE.md
+        - shared/licenses/rocm/rocr-LICENSE.md
+        - shared/licenses/rocm/amd_comgr-LICENSE.txt
+        - shared/licenses/rocm/rocprofiler-register-LICENSE.md
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

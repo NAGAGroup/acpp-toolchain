@@ -410,10 +410,19 @@ def main [] {
   # the vendored copies are byte-identical to the licenses in the actually
   # extracted sources. A pin bump that changes a license fails HERE, loudly,
   # instead of silently shipping stale text.
-  for pair in [
+  for pair in ([
     [($src | path join "shared" "licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
     [($src | path join "shared" "licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
-  ] {
+  ] ++ (if (($src | path join "rocm-dist") | path exists) {
+    # ROCm subset licences (linux-64 only — the tarball is that platform's
+    # build input); vendored for acpp-runtime-rocm's license_file
+    [
+      [($src | path join "shared" "licenses" "rocm" "hip-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "hip" "LICENSE.md")]
+      [($src | path join "shared" "licenses" "rocm" "rocr-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocr" "LICENSE.md")]
+      [($src | path join "shared" "licenses" "rocm" "amd_comgr-LICENSE.txt"), ($src | path join "rocm-dist" "share" "doc" "amd_comgr" "LICENSE.txt")]
+      [($src | path join "shared" "licenses" "rocm" "rocprofiler-register-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocprofiler-register" "LICENSE.md")]
+    ]
+  } else { [] })) {
     if ((open --raw $pair.0 | str replace --all "\r" "") != (open --raw $pair.1 | str replace --all "\r" "")) {
       error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update shared/licenses/"}
     }

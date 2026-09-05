@@ -1,0 +1,61 @@
+# One-shot probes of the new platform runners (macOS-26-xlarge,
+# linux-arm64-v32, win-arm64-v32) ahead of their lanes. Reports the facts the
+# lane design needs: arch, cores, memory, free disk — and on macOS the Xcode
+# and simulator-runtime inventory, because reclaiming unused ones is the
+# planned answer to that runner's disk ceiling.
+name: probe-runners
+on:
+  workflow_dispatch: {}
+
+jobs:
+  probe-macos:
+    runs-on: macOS-26-xlarge
+    timeout-minutes: 15
+    steps:
+      - name: system
+        run: |
+          uname -a
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          echo "--- disk ---"
+          df -h /
+          echo "--- Xcode installations (size) ---"
+          du -sh /Applications/Xcode*.app 2>/dev/null || true
+          xcode-select -p
+          echo "--- simulator runtimes ---"
+          xcrun simctl runtime list 2>/dev/null || true
+          du -sh /Library/Developer/CoreSimulator/Volumes/* 2>/dev/null || true
+          echo "--- metal toolchain present? ---"
+          xcrun -sdk macosx metal --version 2>&1 || true
+          echo "--- would-be reclaim: everything except the selected Xcode ---"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+
+  probe-linux-arm:
+    runs-on: linux-arm64-v32
+    timeout-minutes: 15
+    steps:
+      - name: system
+        run: |
+          uname -a
+          nproc
+          free -h || true
+          echo "--- disk ---"
+          df -h /
+          echo "--- glibc ---"
+          ldd --version | head -1
+
+  probe-win-arm:
+    runs-on: win-arm64-v32
+    timeout-minutes: 15
+    steps:
+      - name: system
+        shell: pwsh
+        run: |
+          echo $env:PROCESSOR_ARCHITECTURE
+          echo "cores: $env:NUMBER_OF_PROCESSORS"
+          Get-CimInstance Win32_OperatingSystem | Select-Object Caption, TotalVisibleMemorySize, FreePhysicalMemory | Format-List
+          echo "--- disk ---"
+          Get-PSDrive C | Select-Object Used, Free | Format-List
+          echo "--- visual studio? ---"
+          if (Test-Path "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe") {
+            & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -all -property displayName
+          } else { echo "no vswhere" }

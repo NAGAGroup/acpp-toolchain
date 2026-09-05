@@ -730,9 +730,17 @@ outputs:
             - llvm-ar
           files:
             exists:
-              - if: unix
+              - if: linux
                 then:
                   - include/AdaptiveCpp/sycl/sycl.hpp
+                  - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+                  - lib/clang/${{ llvm_major }}/include/omp.h
+              - if: osx
+                then:
+                  # component mode is (APPLE OR WIN32): mac nests the SYCL
+                  # headers one level deeper, exactly like win minus Library/
+                  - include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp
+                  - include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
                   - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
                   - lib/clang/${{ llvm_major }}/include/omp.h
               - if: win

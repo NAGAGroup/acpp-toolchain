@@ -114,14 +114,20 @@ def conda-toolchain-args [] {
   #       COMPILER_TARGET  clang's --target; must match the sysroot triple
   #                        (HowToCrossCompileLLVM), and is what makes the
   #                        pseudo-cross EXPLICIT instead of accidental
-  #   * Deliberately NOT set here (escalation ladder if a red persists —
-  #     see the phase-3 session log): CMAKE_SYSTEM_NAME=Linux (flips the
-  #     child into full cross mode; confined here it cannot re-trigger the
-  #     outer double-build, but it also changes find semantics wholesale)
-  #     and CMAKE_FIND_ROOT_PATH_MODE_* (needs a FIND_ROOT_PATH value list,
-  #     which fights RUNTIMES_CMAKE_ARGS' semicolon list separator).
+  #   * CMAKE_FIND_ROOT_PATH* mirrors the compiler activation package's own
+  #     CMAKE_ARGS (which the child cannot inherit: its compiler is the
+  #     just-built clang, and env CFLAGS/CXXFLAGS are stripped), so the
+  #     child's find_library/find_path see the sysroot the same way the
+  #     outer configure does. The embedded list separator is `|`: the child
+  #     ExternalProject declares LIST_SEPARATOR | and LLVM's own forwarding
+  #     rewrites `;` to `|` for exactly this case
+  #     (LLVMExternalProjectUtils.cmake).
+  #   * Deliberately NOT set: CMAKE_SYSTEM_NAME=Linux — it flips the child
+  #     into full cross mode and changes find semantics wholesale, which the
+  #     explicit FIND_ROOT settings above make unnecessary.
   let triple = "x86_64-conda-linux-gnu"
   let flags = $"--sysroot=($chosen) --gcc-toolchain=($bp)"
+  let host_prefix = ($env.PREFIX? | default "")
   [
     ([
       $"-DCMAKE_SYSROOT=($chosen)"
@@ -130,6 +136,10 @@ def conda-toolchain-args [] {
       $"-DCMAKE_ASM_COMPILER_TARGET=($triple)"
       $"-DCMAKE_C_FLAGS=($flags)"
       $"-DCMAKE_CXX_FLAGS=($flags)"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
+      $"-DCMAKE_FIND_ROOT_PATH=($host_prefix)|($chosen)"
     ] | str join ";" | $"-DRUNTIMES_CMAKE_ARGS=($in)")
   ]
 }
@@ -376,7 +386,19 @@ def main [] {
     hide-env --ignore-errors $v
   }
 
-  let args = ((common-args $src $prefix $build)
+  # The compiler activation package's own cmake argument set: triplet
+  # binutils, install layout, and CMAKE_FIND_ROOT_PATH* carrying the sysroot.
+  # Authoritative — passed verbatim, first, with nothing added beside it.
+  # cmake only searches the sysroot when told, so without this every bare
+  # find_library() misses it (acpp's vector-math detection among them).
+  # Linux only: the win leg drives clang-cl + Ninja by hand, and the VS
+  # activation's CMAKE_ARGS is aimed at MSVC generators.
+  let activation_args = (if (is-windows) { [] } else {
+    $env.CMAKE_ARGS? | default "" | split row -r '\s+' | where {|a| $a != "" }
+  })
+
+  let args = ($activation_args
+    | append (common-args $src $prefix $build)
     | append $flag_args
     | append (if (is-windows) { (windows-args $src $prefix $build) } else { (linux-args $src $prefix) }))
 

@@ -233,6 +233,19 @@ def linux-args [src: string, prefix: string] {
     # llvm-to-amdgpu JITs through libLLVM's AMDGPU backend.
     "-DWITH_ROCM_BACKEND=ON"
     $"-DROCM_PATH=($src)/rocm-dist"
+    # PRESET, not searched: the activation's CMAKE_ARGS confines find_library
+    # and find_path to the prefix + sysroot (FIND_ROOT_PATH_MODE_*=ONLY), and
+    # the ROCm tree is a work-dir input outside both roots, so its HINTS are
+    # discarded (measured: "Could not find AMDHIP64_LIBRARY"). A preset cache
+    # variable skips the search entirely. hsakmt is deliberately NOT preset —
+    # TheRock ships it static-only (folded into hsa-runtime), so it must stay
+    # NOTFOUND and the deploy skips it.
+    $"-DAMDHIP64_LIBRARY=($src)/rocm-dist/lib/libamdhip64.so"
+    $"-DHSARUNTIME64_LIBRARY=($src)/rocm-dist/lib/libhsa-runtime64.so"
+    $"-DAMDCOMGR_LIBRARY=($src)/rocm-dist/lib/libamd_comgr.so"
+    $"-DROCPROFILERREGISTER_LIBRARY=($src)/rocm-dist/lib/librocprofiler-register.so"
+    $"-DHIPRTC_LIBRARY=($src)/rocm-dist/lib/libhiprtc.so"
+    $"-DROCM_DEVICE_LIBS_PATH=($src)/rocm-dist/lib/llvm/amdgcn/bitcode"
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
@@ -495,10 +508,12 @@ def main [] {
       if ($e.src | str contains "-NOTFOUND") { continue }
       let destdir = ([$libdir, ($e.dest | str trim -c '/')] | path join)
       mkdir $destdir
+      # Stem glob, not name glob: libhiprtc.so's loader dependency is
+      # libhiprtc-builtins.so.7, which only a stem-wide pattern catches.
       let pattern = (if ($e.src | str ends-with "/*") {
         $e.src
       } else {
-        ($e.src | path dirname) + "/" + ($e.src | path basename | str replace -r '\.so.*$' '.so') + "*"
+        ($e.src | path dirname) + "/" + ($e.src | path basename | str replace -r '\.so.*$' '') + "*"
       })
       let matches = (glob $pattern)
       if ($matches | is-empty) { error make {msg: $"rocm deploy: nothing matches ($pattern)"} }

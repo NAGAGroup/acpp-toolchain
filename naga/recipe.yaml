@@ -727,12 +727,13 @@ outputs:
             - llvm-ar
           files:
             exists:
-              - if: linux
+              - if: unix
                 then:
                   - include/AdaptiveCpp/sycl/sycl.hpp
                   - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
                   - lib/clang/${{ llvm_major }}/include/omp.h
-                else:
+              - if: win
+                then:
                   # win nests the SYCL headers one level deeper than linux
                   # (AdaptiveCpp/{AdaptiveCpp,hipSYCL}/sycl/sycl.hpp)
                   - Library/include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp

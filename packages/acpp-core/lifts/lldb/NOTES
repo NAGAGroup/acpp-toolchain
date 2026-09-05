@@ -1,0 +1,24 @@
+# lldb — lift-source
+
+Upstream: https://github.com/conda-forge/lldb-feedstock
+Fork:     https://github.com/NAGAGroup/lldb-feedstock
+Pinned:   b81da2d5cfaadc78b8997d335a5ff2c5e0ebb9a1 (conda-forge main, 2026-07-21)
+
+LIFT, NOT SUBMODULE: we do not build this feedstock. Its content is copied
+into our own core recipe, because acpp forces LLVM+clang into ONE cmake
+configure and conda-forge's per-component split cannot carry it.
+
+The debugger. WHAT WE LIFT: build flags, and specifically its python-binding
+wiring — the bindings are compiled against whichever python HOST resolved, so
+the single `python` pin in variants.yaml is load-bearing here.
+
+SCOPE CORRECTION (Jack, 2026-09-05): acpp-lldb is CORE on EVERY platform,
+Windows included. "lldb is absent from Windows' LLVM_ENABLE_PROJECTS" was OUR
+build's omission, not upstream's — conda-forge ships lldb on Windows. Two
+reasons it must be there: it is a strong debugger Windows users want, and our
+run_constraints would otherwise PREVENT a Windows user from getting lldb from
+conda-forge at all.
+
+TO DIFF AGAINST UPSTREAM:
+    git clone https://github.com/NAGAGroup/lldb-feedstock
+    git -C lldb-feedstock diff b81da2d5cfaadc78b8997d335a5ff2c5e0ebb9a1..origin/main

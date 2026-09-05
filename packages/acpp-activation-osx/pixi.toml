@@ -1,0 +1,44 @@
+# acpp-activation-osx — the macOS compiler-activation packages
+# (acpp-clang_osx-arm64, acpp-clangxx_osx-arm64), built from our fork of
+# conda-forge's clang-compiler-activation-feedstock.
+#
+# THIS ONE IS NEW. We have never vendored the osx activation, and that absence
+# is precisely why the mac lane went ad-hoc: with no activation contract to
+# match, the mac lane inherited whatever the runner's Xcode provided and every
+# platform assumption was re-derived by hand.
+#
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+#
+# TWO PIECES OF WORK, not one: this feedstock is still conda-build
+# `meta.yaml`, so it needs a FORMAT CONVERSION to rattler `recipe.yaml` on top
+# of the rename to acpp-*. Budget for it.
+#
+# WHAT THE OSX ACTIVATION MUST DO DIFFERENTLY FROM LINUX — the find model is
+# platform-specific and copying linux's onto mac would be wrong. Linux (from
+# ctng's activate-gcc.sh, under CONDA_BUILD=1, in the NON-Darwin branch) sets
+# CMAKE_FIND_ROOT_PATH_MODE_{PROGRAM=NEVER,LIBRARY=ONLY,INCLUDE=ONLY} plus
+# CMAKE_FIND_ROOT_PATH. macOS achieves the same isolation by entirely
+# different means: CMAKE_OSX_SYSROOT, CMAKE_FIND_FRAMEWORK=LAST,
+# CMAKE_FIND_APPBUNDLE=LAST. There is no CMAKE_FIND_ROOT_PATH* in the osx
+# activation at all.
+#
+# THE SDK PIN IS THE POINT. sdkroot_env falls back to
+# `export SDKROOT="$(xcrun --show-sdk-path)"`, so nothing pins the SDK unless
+# we do — that fallback is the root cause of the whole mac patch sequence.
+# MACOSX_SDK_VERSION is pinned in ../../variants.yaml.
+#
+# STATUS (round 1, step 2): fork vendored and pinned; out of the publish set
+# until conversion + rename land. See ../../vendor/PROVENANCE.md.
+[package]
+name = "acpp-activation-osx"
+version = "0.1.0"
+publish = false
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+[package.build.config]
+# NOTE: this path does not exist yet — upstream ships recipe/meta.yaml here.
+# It is written as the TARGET of the conversion, so the wrapper does not have
+# to be edited twice.
+recipe = "../../vendor/clang-compiler-activation-feedstock/recipe/recipe.yaml"

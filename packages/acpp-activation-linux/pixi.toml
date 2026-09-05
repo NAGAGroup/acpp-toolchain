@@ -1,0 +1,35 @@
+# acpp-activation-linux — the linux compiler-activation packages
+# (acpp-clang_linux-64 / acpp-clangxx_linux-64), built from our fork of
+# conda-forge's ctng-compiler-activation-feedstock.
+#
+# PACKAGE-ONLY manifest. The single workspace at the repo root owns the
+# environments, the tasks and the variant matrix.
+#
+# WHY THE MANIFEST LIVES HERE AND NOT IN THE SUBMODULE: `pixi publish` skips
+# any subdirectory that contains its own [workspace], and conda-forge
+# feedstocks do ship pixi.toml files. package.build.config.recipe takes a
+# PATH, so the wrapper sits outside the fork and points into it — which also
+# keeps our packaging metadata out of the diff we take against upstream.
+#
+# WHY THIS FEEDSTOCK FOR LINUX: the clang_linux-* / clangxx_linux-* family is
+# produced by ctng-compiler-activation, NOT by clang-compiler-activation
+# (which owns osx) and not by clangdev (which owns the NATIVE clang_impl_*).
+# The linux clang activation is literally `cp activate-gcc.sh
+# activate-clang.sh` plus a sed, which is why it lives in the gcc lineage.
+#
+# STATUS (round 1, step 2): the fork is vendored and pinned; the recipe is
+# still upstream's and still publishes upstream NAMES. Renaming every output
+# to acpp-* is mandatory before this can be published — a transitive
+# requirement for a name our channel provides is EXCLUDED by strict channel
+# priority, a hard solve failure, not a fall-through. That port is the next
+# step, and until it lands this package stays out of the publish set.
+[package]
+name = "acpp-activation-linux"
+version = "0.1.0"
+publish = false
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+[package.build.config]
+recipe = "../../vendor/ctng-compiler-activation-feedstock/recipe/recipe.yaml"

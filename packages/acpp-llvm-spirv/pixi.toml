@@ -1,0 +1,40 @@
+# acpp-llvm-spirv — the SPIRV-LLVM-Translator, taken OUT of the core monolith
+# and built as its own source package from our fork of conda-forge's
+# llvm-spirv-feedstock.
+#
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+#
+# WHY THIS SPLIT IS SAFE — verified, no circularity. acpp does NOT link the
+# translator. It builds it via ExternalProject_Add(LLVMSpirvTranslator) with
+# -DLLVM_SPIRV_BUILD_EXTERNAL=YES -DLLVM_DIR=... — i.e. against LLVM, not
+# against acpp — bakes in HIPSYCL_LLVMSPIRV_NAME and
+# HIPSYCL_RELATIVE_LLVMSPIRV_PATH, and then invokes llvm-spirv AS A SUBPROCESS
+# at runtime. add_dependencies() is build ordering only. The chain is strictly
+# LLVM -> llvm-spirv; acpp needs nothing but a path string.
+#
+# TWO EDITS THIS REQUIRES (both belong to the port, not to the skeleton):
+#   1. acpp hardcodes lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv. Set
+#      LLVMSPIRV_RELATIVE_INSTALLDIR so the baked compile definition points at
+#      bin/ — both packages land in the same conda prefix.
+#   2. The forked feedstock's source pin moves to the revision acpp expects,
+#      and stays locked to our LLVM major (acpp defaults the translator branch
+#      to llvm_release_${LLVM_VERSION_MAJOR}0).
+#
+# Like the osx activation, this feedstock is still conda-build `meta.yaml` and
+# needs a format conversion to rattler `recipe.yaml` before the backend can
+# consume it.
+#
+# STATUS (round 1, step 2): fork vendored and pinned; out of the publish set
+# until conversion + rename land. See ../../vendor/PROVENANCE.md.
+[package]
+name = "acpp-llvm-spirv"
+version = "0.1.0"
+publish = false
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+[package.build.config]
+# NOTE: this path does not exist yet — upstream ships recipe/meta.yaml here.
+# Written as the TARGET of the conversion so the wrapper is edited once.
+recipe = "../../vendor/llvm-spirv-feedstock/recipe/recipe.yaml"

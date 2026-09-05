@@ -1,0 +1,27 @@
+# clangdev — lift-source
+
+Upstream: https://github.com/conda-forge/clangdev-feedstock
+Fork:     https://github.com/NAGAGroup/clangdev-feedstock
+Pinned:   28ab51758156090b64f141cb7080164e57dbed08 (conda-forge main, 2026-08-29)
+
+LIFT, NOT SUBMODULE: we do not build this feedstock. Its content is copied
+into our own core recipe, because acpp forces LLVM+clang into ONE cmake
+configure and conda-forge's per-component split cannot carry it.
+
+THE most valuable lift. WHAT WE LIFT: the nine conda-integration patches this
+feedstock has carried for years and our from-scratch recipe never had —
+conda gcc detection; linux sysroot detection; CONDA_BUILD_SYSROOT env-var
+support; normalizeProgramName dot handling; libclang SOVERSION; PIE default
+on macOS; ROCm device library in conda layout; conda mingw paths; versioned
+libLTO.dylib ResourceDir. Several map directly onto bugs we hit and worked
+around badly.
+
+It is also where the NATIVE clang_impl_<plat> output lives (not in the
+activation feedstocks), and it is production proof of two idioms we adopt:
+`package_contents: strict: true` and `down_prioritize_variant`.
+
+NOTE: this feedstock ALSO owns clang-tools-extra (see ../clang-tools-extra).
+
+TO DIFF AGAINST UPSTREAM:
+    git clone https://github.com/NAGAGroup/clangdev-feedstock
+    git -C clangdev-feedstock diff 28ab51758156090b64f141cb7080164e57dbed08..origin/main

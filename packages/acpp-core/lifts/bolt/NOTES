@@ -1,0 +1,22 @@
+# bolt — NOT A LIFT-SOURCE: there is nothing upstream to lift
+
+No PINNED_REF file exists here on purpose. There is nothing to pin.
+
+MEASURED, 2026-09-05:
+  * `gh api repos/conda-forge/bolt-feedstock` -> 404.
+  * A repo search of the conda-forge org for `bolt` returns boltons,
+    boltztrap2, slack-bolt, boltzmannclean, lightning-bolts, bolt-python and
+    sherlockml-boltzmannclean. None is LLVM BOLT.
+  * `llvmdev-feedstock/recipe/build.sh` and `bld.bat` contain no `bolt`, no
+    LLVM_ENABLE_PROJECTS and no LLVM_ENABLE_RUNTIMES at all — llvmdev builds
+    only llvm, so BOLT is not riding along there either.
+  * `clangdev-feedstock/recipe/recipe.yaml` mentions bolt nowhere.
+
+CONSEQUENCE: conda-forge packages no LLVM BOLT. If we want it, it is an
+LLVM_ENABLE_PROJECTS entry in OUR core build, with no upstream recipe,
+patches or flags to inherit — i.e. exactly the from-scratch situation this
+whole rebuild exists to get away from. It is also pure post-link optimization
+tooling: nothing in the acpp compile path needs it.
+
+RECOMMENDATION: leave BOLT out of round 1 and decide it on its own merits
+later. Flagged to the Research Lead 2026-09-05 rather than silently dropped.

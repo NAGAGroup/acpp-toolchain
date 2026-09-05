@@ -57,6 +57,11 @@ outputs:
       - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
         sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
         target_directory: llvm-project
+        patches:
+          # Xcode 26 toolchain: <sys/resource.h> is no longer a transitive
+          # include, so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1;
+          # applies to 20.1.8 and 21.1.8 alike)
+          - ../shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

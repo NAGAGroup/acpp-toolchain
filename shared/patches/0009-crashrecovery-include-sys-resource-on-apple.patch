@@ -1,0 +1,25 @@
+Backport of llvm/llvm-project 585f04f2bf1 ([Support] Add missing include
+for MacOS defines, #208065).
+
+CrashRecoveryContext.cpp uses setpriority(PRIO_DARWIN_THREAD, ...) under
+__APPLE__ without including <sys/resource.h>; the declaration and the
+PRIO_DARWIN_* macros only ever arrived transitively through other LLVM and
+libc++ headers. The Xcode 26 toolchain's libc++ no longer includes
+<sys/resource.h> transitively, so the file stops compiling on macOS:
+
+    error: use of undeclared identifier 'PRIO_DARWIN_THREAD'
+
+Applies identically to LLVM 20.1.8 and 21.1.8 (the include block is the
+same in both); upstream fixed it on main in July 2026.
+
+--- a/llvm/lib/Support/CrashRecoveryContext.cpp
++++ b/llvm/lib/Support/CrashRecoveryContext.cpp
+@@ -15,5 +15,8 @@
+ #include <cassert>
+ #include <mutex>
+ #include <setjmp.h>
++#ifdef __APPLE__
++#include <sys/resource.h>
++#endif
+ 
+ using namespace llvm;

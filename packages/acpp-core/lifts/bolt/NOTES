@@ -1,22 +1,38 @@
-# bolt — NOT A LIFT-SOURCE: there is nothing upstream to lift
+# bolt — lift-source, and the source is OUR OWN main
 
-No PINNED_REF file exists here on purpose. There is nothing to pin.
+Upstream: NONE. conda-forge packages no LLVM BOLT.
+Lift from:  NAGAGroup/acpp-toolchain, branch main
+Pinned:     22bf38e00d9f66688f560ef995852c3c35bd4b40
 
-MEASURED, 2026-09-05:
-  * `gh api repos/conda-forge/bolt-feedstock` -> 404.
-  * A repo search of the conda-forge org for `bolt` returns boltons,
-    boltztrap2, slack-bolt, boltzmannclean, lightning-bolts, bolt-python and
-    sherlockml-boltzmannclean. None is LLVM BOLT.
-  * `llvmdev-feedstock/recipe/build.sh` and `bld.bat` contain no `bolt`, no
-    LLVM_ENABLE_PROJECTS and no LLVM_ENABLE_RUNTIMES at all — llvmdev builds
-    only llvm, so BOLT is not riding along there either.
-  * `clangdev-feedstock/recipe/recipe.yaml` mentions bolt nowhere.
+RULING (Research Lead, 2026-09-05, overruling my recommendation to drop it):
+BOLT is not merely built today, it is SHIPPED. Dropping a currently-shipped
+binary because conda-forge has no feedstock for it would let packaging
+convenience decide product shape, which is precisely the failure this rebuild
+exists to end.
 
-CONSEQUENCE: conda-forge packages no LLVM BOLT. If we want it, it is an
-LLVM_ENABLE_PROJECTS entry in OUR core build, with no upstream recipe,
-patches or flags to inherit — i.e. exactly the from-scratch situation this
-whole rebuild exists to get away from. It is also pure post-link optimization
-tooling: nothing in the acpp compile path needs it.
+VERIFIED AT SOURCE, not taken on trust:
+  * main:release/recipe.yaml lines 1010-1013 and 1246-1249 — bin/llvm-bolt,
+    bin/llvm-bolt-heatmap, bin/perf2bolt, bin/merge-fdata are INCLUDE globs in
+    the acpp-tools output (they sit in the same list as bin/clang-tidy,
+    bin/clangd, bin/scan-build).
+  * main:release/recipe.yaml line 1360-1363 — acpp-tools' package_contents
+    test asserts llvm-bolt exists, gated `if: linux` with the comment 'bolt is
+    ELF-only; it does not build on win'.
+  * main:shared/build-stage.nu line 240 — the linux configure passes
+    -DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;bolt;polly;openmp.
+    The win branch (line 338) and the mac branch (line 94) do not, and line 87
+    records why for mac: bolt has no darwin port.
 
-RECOMMENDATION: leave BOLT out of round 1 and decide it on its own merits
-later. Flagged to the Research Lead 2026-09-05 rather than silently dropped.
+SO WHAT THE NEW RECIPE MUST DO: keep the four bolt binaries in acpp-tools, and
+express their absence on win and osx as a `skip:`/conditional inside a UNIFORM
+output list — never by dropping the output or silently omitting the globs,
+which is the variation-by-omission defect being fixed.
+
+WHAT WE LIFT: the LLVM_ENABLE_PROJECTS entry, the four output globs and the
+platform gating, all from main. There is no upstream recipe, no upstream
+patches and no upstream flags to inherit, so this lift's provenance is our own
+history and the PINNED_REF above is a commit in THIS repo.
+
+TO SEE THE LIFT:
+    git show 22bf38e:release/recipe.yaml
+    git show 22bf38e:shared/build-stage.nu

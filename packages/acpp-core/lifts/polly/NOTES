@@ -1,19 +1,25 @@
-# polly — lift-source
+# polly — lift-source (conda-forge feedstock, plus our own build's usage)
 
 Upstream: https://github.com/conda-forge/polly-feedstock
 Fork:     https://github.com/NAGAGroup/polly-feedstock
 Pinned:   6cde8e5afb3f9bf8a8d455c90b0ff246058c6649 (conda-forge main, 2026-04-22)
 
-LIFT, NOT SUBMODULE: we do not build this feedstock. Its content is copied
-into our own core recipe, because acpp forces LLVM+clang into ONE cmake
-configure and conda-forge's per-component split cannot carry it.
+LIFT, NOT SUBMODULE: we do not build this feedstock. Its flags are copied into
+our own core recipe, because acpp forces LLVM+clang into ONE cmake configure
+and conda-forge's per-component split cannot carry it.
 
-The polyhedral optimizer. WHAT WE LIFT: build flags.
+WHAT OUR BUILD ACTUALLY DOES, measured at main:shared/build-stage.nu:240 —
+polly is an LLVM_ENABLE_PROJECTS entry on LINUX ONLY (the win branch at 338
+and the mac branch at 94 omit it). Unlike bolt it ships NO named binary:
+`polly` appears nowhere in main:release/recipe.yaml, so its artifacts ride the
+library and header carves. That is why it needs no output of its own — but its
+platform gating still belongs in a `skip:`/conditional inside a uniform output
+list, not in an omission.
 
 Watch this one: the LLVM discourse thread on building LLVM as a Windows DLL
 reports a plugin symbol-resolution failure precisely in polly
-(getPollyPluginInfo). It is corroboration for the linked-in-not-plugin
-ruling, and a place to expect Windows trouble.
+(getPollyPluginInfo). It corroborates the linked-in-not-plugin ruling, and
+marks a place to expect Windows trouble.
 
 TO DIFF AGAINST UPSTREAM:
     git clone https://github.com/NAGAGroup/polly-feedstock

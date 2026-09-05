@@ -98,9 +98,9 @@ we took and why). See those files; this table is the index.
 | `lld` | `NAGAGroup/lld-feedstock` | build flags |
 | `lldb` | `NAGAGroup/lldb-feedstock` | build flags; lldb is core on EVERY platform incl. Windows |
 | `openmp` | `NAGAGroup/openmp-feedstock` | build flags |
-| `polly` | `NAGAGroup/polly-feedstock` | build flags |
+| `polly` | `NAGAGroup/polly-feedstock` | build flags. Linux-only in our build, and ships no named binary — its artifacts ride the library carves |
 | `clang-tools-extra` | — (no separate feedstock) | lives INSIDE `clangdev-feedstock`: a `clang-tools-extra/*` source entry feeding its `clang-tools` output |
-| `bolt` | — (does not exist) | conda-forge packages no BOLT at all; `llvmdev` does not enable it. If we want BOLT it is an `LLVM_ENABLE_PROJECTS` entry in our own build with no upstream prior art to lift |
+| `bolt` | — **our own `main` @ `22bf38e`** | conda-forge packages no BOLT at all, but we SHIP it: `bin/llvm-bolt`, `llvm-bolt-heatmap`, `perf2bolt`, `merge-fdata` are include globs in `acpp-tools` and asserted in its `package_contents` test. The lift source is our own history, not upstream. ELF-only: linux gets it, win and osx do not — expressed as a `skip:`, never an omission |
 
 ## Class C — depend on conda-forge, do not fork
 

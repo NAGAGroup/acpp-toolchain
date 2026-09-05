@@ -1,22 +1,23 @@
 #!/usr/bin/env nu
-# Install the runtime's backend-bitcode activation scripts into the package.
+# Install the CUDA backend-bitcode activation scripts into the package.
 #
-# This runs as the acpp-runtime OUTPUT's build script, deliberately NOT as
-# part of the staging build: the staging cache is keyed on
-# SHA(resolved requirements + variant vars) and does NOT hash the contents of
-# shared/, so anything the staging script copies from there goes stale
-# silently whenever we edit it (cost us a full debug cycle on 2026-08-08 —
-# the win libdevice path fix never reached the package). Output scripts run
+# Runs as the acpp-runtime-CUDA output's build script: base packages ship no
+# activation, and this is the package whose install guarantees libdevice
+# exists. Deliberately NOT part of the staging build — the staging cache is
+# keyed on SHA(resolved requirements + variant vars) and does NOT hash
+# shared/, so staging-copied scripts go stale silently. Output scripts run
 # on every build, so these files are always current.
 #
-# Sources come from shared-fresh/, a copy fetched by THIS output — not from
-# the staging work dir, whose shared/ is restored from the cache and can be
-# arbitrarily old. Missing files are a hard error, never a silent skip.
+# Sources come from this output's own fetched copy of shared/ (target dir
+# shared-fresh on staging-inheriting outputs, shared on plain ones).
+# Missing files are a hard error, never a silent skip.
 
 def is-windows [] { $nu.os-info.name == "windows" }
 
 def main [] {
-  let src = ($env.SRC_DIR | path join "shared-fresh" "activation")
+  let fresh = ($env.SRC_DIR | path join "shared-fresh")
+  let root = (if ($fresh | path exists) { $fresh } else { $env.SRC_DIR | path join "shared" })
+  let src = ($root | path join "activation")
   # Activation scripts always live under $PREFIX/etc, never %PREFIX%\Library\etc.
   let act = ($env.PREFIX | path join "etc" "conda" "activate.d")
   mkdir $act

@@ -25,17 +25,22 @@ c_stdlib: [sysroot]
 c_stdlib_version: ["2.28"]
 
 # ---- CUDA ------------------------------------------------------------------
-# MAJOR ONLY, and deliberately the only CUDA pin in the tree. Everything else
-# CUDA-shaped hangs off this one key: cuda-cudart-dev and friends each depend
-# on `cuda-version >=12.9,<12.10.0a0`, so pinning the major aligns the whole
-# set without naming any of them.
+# The conda-forge pinning-feedstock keys (their file carries cuda_compiler_version
+# and _min; _max is ours). The recipe hard-pins the BUILD with
+# `cuda-version ==${{ cuda_compiler_version }}` and states acpp-runtime-cuda's
+# run range as `cuda-version >=${{ _min }},<${{ _max }}` — one declaration to
+# move the CUDA line, no per-component pins anywhere.
 #
-# This is also what replaced every hand-written `__cuda >=12,<13`. Measured:
-# cuda-version 12.9 constrains `__cuda >=12` — a FLOOR, with no ceiling. The
-# old manual line put a ceiling on a driver virtual package, which is simply
-# wrong: a newer driver runs older CUDA fine, and the ceiling would have
-# refused to install on any host that upgraded to a 13.x driver.
-cuda-version: ["12"]
+# The ceiling is required: libcudart's SONAME is major-versioned
+# (libcudart.so.12 vs .so.13, measured from the packages), the backend records
+# it in DT_NEEDED, and dlopen resolves filenames, not versions — a CUDA-13
+# runtime silently removes the GPU. The DRIVER needs no ceiling: cuda-version
+# constrains `__cuda >=12`, a floor, and newer drivers run older CUDA.
+#
+# QUOTED on purpose: unquoted 12.10 is the YAML float 12.1.
+cuda_compiler_version: ["12.9"]
+cuda_compiler_version_min: ["12.9"]
+cuda_compiler_version_max: ["13"]
 
 # ---- ABI-sensitive libraries ----------------------------------------------
 # Pinned at soname granularity, conda-forge pinning-feedstock style.
@@ -64,4 +69,4 @@ python: ["3.14"]
 # sources, patches or build script, so editing a patch silently reused a stale
 # toolchain. This hash covers those real inputs; shared/gen-staging-hash.nu
 # regenerates it and CI fails when it is stale.
-staging_inputs: ["3db9cae3beaf36cd"]
+staging_inputs: ["f0e09c8561742f46"]

@@ -1,0 +1,82 @@
+Host JIT: locate libmvec through the dynamic loader, and link it by SONAME.
+
+The host JIT links each kernel with a direct ld.lld invocation. lld has no
+default search paths, so libmvec is found via -L <dir> where <dir> comes from
+getLibMvecDir(): first AdaptiveCpp's own lib directory, else the baked
+LIB_MVEC_DIR — find_library()'s answer on the BUILD machine. For any
+redistributed build that path does not exist on the user's machine (in a
+conda build it is the toolchain sysroot), so every host kernel silently
+compiles without vector math, with only a debug-level note.
+
+Shipping libmvec is not an option: it is part of glibc, whose pieces are
+matched to the exact libc build (it imports GLIBC_PRIVATE), so the only copy
+safe to use at runtime is the running system's own. Ask the dynamic loader
+where that copy lives — dlopen("libmvec.so.1") + dlinfo(RTLD_DI_LINKMAP) —
+between the redistributable check and the baked-path fallback.
+
+Link -l:libmvec.so.1 when the directory carries the SONAME file: -lmvec wants
+the unversioned libmvec.so symlink, which is a dev-package file (libc6-dev)
+that plain runtime machines do not have. The glibc SONAME is stable; kernels
+record DT_NEEDED libmvec.so.1 and the loader binds the system copy.
+
+--- a/src/compiler/llvm-to-backend/Utils.cpp
++++ b/src/compiler/llvm-to-backend/Utils.cpp
+@@ -15,5 +15,8 @@
+ #include <llvm/Support/Program.h>
+ 
+ #ifdef _WIN32
+ #include <llvm/Support/FileSystem.h>
++#else
++#include <dlfcn.h>
++#include <link.h>
+ #endif
+@@ -195,10 +198,29 @@
+   std::string lib_mvec_path = common::filesystem::join_path(LIB_MVEC_DIR, LIB_MVEC_NAME);
+ 
+   if (common::filesystem::exists(lib_mvec_redistributable_path)) {
+     path = lib_path;
+-  } else if (common::filesystem::exists(lib_mvec_path)) {
+-    path = replacePathPlaceholders(LIB_MVEC_DIR);
+   }
++#ifndef _WIN32
++  // libmvec is glibc: the copy the dynamic loader resolves is the one that
++  // matches libc at runtime. LIB_MVEC_DIR is find_library()'s answer on the
++  // build machine and need not exist on the target.
++  if (path.empty()) {
++    if (void *handle = dlopen("libmvec.so.1", RTLD_LAZY | RTLD_LOCAL)) {
++      link_map *map = nullptr;
++      if (dlinfo(handle, RTLD_DI_LINKMAP, &map) == 0 && map && map->l_name &&
++          map->l_name[0] != '\0') {
++        std::string p{map->l_name};
++        auto pos = p.find_last_of('/');
++        if (pos != std::string::npos && pos > 0)
++          path = p.substr(0, pos);
++      }
++      dlclose(handle);
++    }
++  }
++#endif
++  if (path.empty() && common::filesystem::exists(lib_mvec_path)) {
++    path = replacePathPlaceholders(LIB_MVEC_DIR);
++  }
+ #endif
+ 
+   return path;
+--- a/src/compiler/llvm-to-backend/host/LLVMToHost.cpp
++++ b/src/compiler/llvm-to-backend/host/LLVMToHost.cpp
+@@ -477,8 +477,14 @@
+         LldInvocation.push_back("-L");
+         LldInvocation.push_back(mvecDir);
+         LldInvocation.push_back("--rpath");
+         LldInvocation.push_back(mvecDir);
+-        LldInvocation.push_back("-lmvec");
++        // -lmvec wants the unversioned dev symlink; a runtime machine has
++        // only the glibc SONAME. Link whichever this directory has.
++        if (common::filesystem::exists(
++                common::filesystem::join_path(mvecDir, "libmvec.so.1")))
++          LldInvocation.push_back("-l:libmvec.so.1");
++        else
++          LldInvocation.push_back("-lmvec");
+ #if LLVM_VERSION_MAJOR > 20
+         OptInvocation.push_back("-vector-library=LIBMVEC");
+ #else

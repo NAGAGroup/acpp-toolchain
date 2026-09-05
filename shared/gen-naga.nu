@@ -57,13 +57,19 @@ const ACPP_SRC_NIGHTLY = '      - git: https://github.com/AdaptiveCpp/AdaptiveCp
           # Level Zero backend includes a glibc-internal header; breaks on win
           - ../shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
           # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
-          - ../shared/patches/0003-ze-find-loader-library-portably.patch'
+          - ../shared/patches/0003-ze-find-loader-library-portably.patch
+          # Host-JIT vector math: find libmvec through the dynamic loader at
+          # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot,
+          # which does not exist on user machines, and lld has no default
+          # search paths. Nightly-only: 25.10 has no vector-math code at all.
+          - ../shared/patches/0008-host-jit-find-libmvec-via-loader.patch'
 
 const ACPP_SRC_NAGA = '      - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
         # No patches: the fork branch is cut from the base these patches were
-        # written against and carries all three as commits.'
+        # written against and carries all of them as commits (0001-0003 from
+        # its cut point, 0008 as its own commit).'
 
 # Every nightly package name contains "-nightly"; the release names it excludes
 # do not. So unlike gen-nightly, these patterns cannot re-match an exclusion
@@ -78,7 +84,8 @@ def rename-pairs [] {
    ["acpp-clang-nightly_win-64", "naga-acpp-clang_win-64"]
    ["acpp-clang-nightly_linux-64", "naga-acpp-clang_linux-64"]
    ["acpp-runtime-cuda-nightly", "naga-acpp-runtime-cuda"]
-   ["acpp-runtime-intel-nightly", "naga-acpp-runtime-intel"]
+   ["acpp-runtime-level-zero-nightly", "naga-acpp-runtime-level-zero"]
+   ["acpp-runtime-ocl-nightly", "naga-acpp-runtime-ocl"]
    ["acpp-runtime-nightly", "naga-acpp-runtime"]
    ["acpp-llvm-dev-nightly", "naga-acpp-llvm-dev"]
    ["acpp-toolchain-nightly", "naga-acpp-toolchain"]
@@ -100,7 +107,8 @@ def twin-pairs [] {
    ["acpp-clang_win-64", "acpp-clang-nightly_win-64"]
    ["acpp-clang_linux-64", "acpp-clang-nightly_linux-64"]
    ["acpp-runtime-cuda", "acpp-runtime-cuda-nightly"]
-   ["acpp-runtime-intel", "acpp-runtime-intel-nightly"]
+   ["acpp-runtime-level-zero", "acpp-runtime-level-zero-nightly"]
+   ["acpp-runtime-ocl", "acpp-runtime-ocl-nightly"]
    ["acpp-runtime", "acpp-runtime-nightly"]
    ["acpp-llvm-dev", "acpp-llvm-dev-nightly"]
    ["acpp-tools", "acpp-tools-nightly"]

@@ -104,6 +104,7 @@ CLANGXX_EXTRA="${CLANGXX_EXTRA} \
 \"ACPP_TARGETS,\${ACPP_TARGETS:-generic}\" \
 \"ACPP_COMPILER_DIR,\${CONDA_PREFIX}\" \
 \"ACPP_CLANG,\${CONDA_PREFIX}/bin/${CHOST}-clang++\" \
+\"ACPP_CPU_CXX,\${CONDA_PREFIX}/bin/${CHOST}-clang++\" \
 "
 
 find . -name "*activate-clang.sh" -exec sed -i.bak "s|@C_EXTRA@|${CLANG_EXTRA}|g" "{}" \;
@@ -121,15 +122,23 @@ if [[ ${errors} != "" ]]; then
 fi
 
 # ---- install (canonical install-clang{,++}.sh, PKG_NAME naming) -------------
-mkdir -p "${PREFIX}/etc/conda/activate.d" "${PREFIX}/etc/conda/deactivate.d"
+# The triple-prefixed driver names install HERE, not in the base packages:
+# conda-forge's clangxx ships clang++, clangxx_linux-64 ships the triplet.
+# The triplet's presence is what tells the ecosystem (and clang's own
+# argv[0] handling) that it is in an isolated conda build env, so a base
+# package carrying it poisons plain runtime environments.
+mkdir -p "${PREFIX}/etc/conda/activate.d" "${PREFIX}/etc/conda/deactivate.d" "${PREFIX}/bin"
 case "${side}" in
   clang)
     cp activate-clang.sh   "${PREFIX}/etc/conda/activate.d/activate-${PKG_NAME}.sh"
     cp deactivate-clang.sh "${PREFIX}/etc/conda/deactivate.d/deactivate-${PKG_NAME}.sh"
+    ln -sf clang     "${PREFIX}/bin/${CHOST}-clang"
+    ln -sf clang-cpp "${PREFIX}/bin/${CHOST}-clang-cpp"
     ;;
   clangxx)
     cp activate-clang++.sh   "${PREFIX}/etc/conda/activate.d/activate-${PKG_NAME}.sh"
     cp deactivate-clang++.sh "${PREFIX}/etc/conda/deactivate.d/deactivate-${PKG_NAME}.sh"
+    ln -sf clang++ "${PREFIX}/bin/${CHOST}-clang++"
     ;;
   *) echo "unknown side: ${side}"; exit 1 ;;
 esac

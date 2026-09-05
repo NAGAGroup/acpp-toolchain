@@ -82,6 +82,11 @@ outputs:
           # [release-only] POSIX branch compiles on win unless CMake's default
           # [release-only] /DWIN32 survives; backport of upstream's develop fix
           - ../shared/patches/0007-omp-queue-win32-guard-use-compiler-builtin.patch # [release-only]
+          # Host-JIT vector math: find libmvec through the dynamic loader at
+          # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot,
+          # which does not exist on user machines, and lld has no default
+          # search paths. Nightly-only: 25.10 has no vector-math code at all.
+          # [nightly-only] - ../shared/patches/0008-host-jit-find-libmvec-via-loader.patch
       - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/f0ae76f12c62ede090e57ece8c986f4c3c971a71.tar.gz
         sha256: da7f91cc0d1f22fe6bb3806fd964366296109c20b462f524f60418ae0bc5a16a
         target_directory: SPIRV-LLVM-Translator
@@ -174,13 +179,23 @@ outputs:
         - acpp-llvm ==${{ llvm_major }}
         - zlib
         - zstd
-        # The single CUDA pin. cuda-version is what every other cuda-* package
-        # constrains itself against, so naming it once here — with the major
-        # coming from the variant config — aligns cudart, nvvm and the nvcc
-        # tools without a version literal on any of them.
-        - cuda-version
+        # The single CUDA pin, hard against the variant key (conda-forge
+        # pinning-feedstock convention): cuda-version is what every other
+        # cuda-* package constrains itself against, so pinning it once aligns
+        # the whole set without a version literal on any of them.
+        - cuda-version ==${{ cuda_compiler_version }}
+        # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
         - cuda-cudart-dev
-        - cuda-nvvm
+        # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home,
+        # and acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the
+        # cuda-nvvm metapackage — that drags in libnvvm.so, which nothing
+        # here ever loads.
+        - cuda-nvvm-tools
+        # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles the
+        # CUDA code. FindCUDAToolkit refuses to locate a toolkit without an
+        # nvcc binary (measured: FOUND=FALSE with cudart-dev + driver-dev +
+        # nvvm-tools + crt-dev alone), the same role cuda-nvcc-impl plays for
+        # the legacy FindCUDA module on win.
         - cuda-nvcc-tools
         # Both platforms get Level Zero + OpenCL: level-zero{,-devel} and
         # opencl-headers all ship for win-64, so the Intel backends are not
@@ -220,13 +235,6 @@ outputs:
     # No source here: staging-inheriting outputs get the ENTIRE staging work
     # dir restored (shared/ and its licenses included); fetching ../shared
     # ourselves collides with that restore ("File already exists").
-    source:
-      # A FRESH copy of shared/, under its own target dir. The staging restore
-      # brings the work dir back with the shared/ that existed when the cache
-      # was built, so reading activation scripts from there serves stale files
-      # (and re-fetching onto the same path collides with the restore).
-      - path: ../shared
-        target_directory: shared-fresh
     inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -234,13 +242,6 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # Installed HERE rather than in the staging build: the staging cache is
-      # keyed on resolved requirements + variant vars and does NOT hash
-      # shared/, so staging-installed copies of these scripts go stale
-      # silently when we edit them. Output scripts always re-run.
-      script:
-        interpreter: nu
-        file: ../shared/install-runtime-activation.nu
       files:
         include:
           - if: linux
@@ -289,9 +290,6 @@ outputs:
               - Library/lib/hipSYCL/**
               # runtime JSON configs
               - Library/etc/AdaptiveCpp/**
-          # backend bitcode wiring on activation (opt-in, fail-soft;
-          # .sh on linux, .bat/.ps1/.sh triple on win)
-          - etc/conda/activate.d/acpp-runtime-activate.*
         exclude:
           - if: linux
             then:
@@ -306,8 +304,6 @@ outputs:
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
     requirements:
-      build:
-        - nushell
       run:
         # NB the lane mutex is deliberately absent from this list. It arrives
         # automatically as a run_export of the staging output's host dep — see
@@ -395,12 +391,12 @@ outputs:
         #
         # All of these are build-time-only for us. The backends are dlopened at
         # runtime, and their real dependencies are declared by the
-        # acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # acpp-runtime-{cuda,level-zero,ocl} metapackages — which is what lets someone
         # install the CPU runtime without dragging in CUDA.
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -440,7 +436,6 @@ outputs:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
                   - etc/AdaptiveCpp/acpp-core.json
-                  - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
                   # backend plugins are RUNTIME artifacts -> bin on win;
                   # llvm-to-backend is linked statically into per-target
@@ -454,18 +449,19 @@ outputs:
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
                   - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-core.json
-                  - etc/conda/activate.d/acpp-runtime-activate.bat
-                  - etc/conda/activate.d/acpp-runtime-activate.ps1
-                  - etc/conda/activate.d/acpp-runtime-activate.sh
             not_exists:
               - if: linux
                 then:
                   - lib/hipSYCL/librt-backend-hip.so # AMD off (design §4)
                   - lib/libomp.so
                   - lib/liblldb.so
+                  # base packages ship NO activation; the CUDA bitcode wiring
+                  # moved to acpp-runtime-cuda, whose install brings libdevice
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
                   - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off (design §4)
                   - Library/bin/libomp.dll
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
   - package:
       name: acpp
       version: ${{ version }}
@@ -514,9 +510,10 @@ outputs:
               - bin/llvm-cov
               - bin/llvm-profdata
               - bin/llvm-profgen
-              - bin/x86_64-conda-linux-gnu-clang
-              - bin/x86_64-conda-linux-gnu-clang++
-              - bin/x86_64-conda-linux-gnu-clang-cpp
+              # NB no x86_64-conda-linux-gnu-clang* here: triple-prefixed
+              # driver names are ACTIVATION-package files (conda-forge's
+              # clangxx ships clang++; clangxx_linux-64 ships the triplet),
+              # created by render-install.sh in the activation outputs.
               - include/AdaptiveCpp/**
               - lib/clang/**
               - lib/cmake/AdaptiveCpp/**
@@ -637,12 +634,12 @@ outputs:
         #
         # All of these are build-time-only for us. The backends are dlopened at
         # runtime, and their real dependencies are declared by the
-        # acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # acpp-runtime-{cuda,level-zero,ocl} metapackages — which is what lets someone
         # install the CPU runtime without dragging in CUDA.
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -753,7 +750,7 @@ outputs:
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -862,9 +859,6 @@ outputs:
               - bin/llvm-cov
               - bin/llvm-profdata
               - bin/llvm-profgen
-              - bin/x86_64-conda-linux-gnu-clang
-              - bin/x86_64-conda-linux-gnu-clang++
-              - bin/x86_64-conda-linux-gnu-clang-cpp
               - include/AdaptiveCpp/**
               - lib/cmake/AdaptiveCpp/**
               # claimed by acpp-tools
@@ -1043,12 +1037,12 @@ outputs:
         #
         # All of these are build-time-only for us. The backends are dlopened at
         # runtime, and their real dependencies are declared by the
-        # acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # acpp-runtime-{cuda,level-zero,ocl} metapackages — which is what lets someone
         # install the CPU runtime without dragging in CUDA.
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -1227,12 +1221,12 @@ outputs:
         #
         # All of these are build-time-only for us. The backends are dlopened at
         # runtime, and their real dependencies are declared by the
-        # acpp-runtime-{cuda,intel} metapackages — which is what lets someone
+        # acpp-runtime-{cuda,level-zero,ocl} metapackages — which is what lets someone
         # install the CPU runtime without dragging in CUDA.
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -1299,7 +1293,7 @@ outputs:
         from_package:
           - cuda-version
           - cuda-cudart-dev
-          - cuda-nvvm
+          - cuda-nvvm-tools
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
@@ -1371,6 +1365,8 @@ outputs:
             exists:
               - etc/conda/activate.d/activate-acpp-clang_linux-64.sh
               - etc/conda/deactivate.d/deactivate-acpp-clang_linux-64.sh
+              - bin/x86_64-conda-linux-gnu-clang
+              - bin/x86_64-conda-linux-gnu-clang-cpp
       - script:
           - |
             # The test env already sources our activate.d script, so assert a
@@ -1423,6 +1419,7 @@ outputs:
             exists:
               - etc/conda/activate.d/activate-acpp-clangxx_linux-64.sh
               - etc/conda/deactivate.d/deactivate-acpp-clangxx_linux-64.sh
+              - bin/x86_64-conda-linux-gnu-clang++
       - script:
           - |
             # The test env already sources our activate.d script, so assert a
@@ -1582,32 +1579,58 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # The CUDA bitcode wiring (activation-time libdevice symlink/copy into
+      # acpp's redist path) lives HERE, not in acpp-runtime: base packages
+      # ship no activation, and this is the package whose install guarantees
+      # libdevice exists. On win the copy is the load-bearing mechanism —
+      # binary prefix replacement does not rewrite the baked path there.
+      script:
+        interpreter: nu
+        file: ../shared/install-runtime-activation.nu
     requirements:
-      # REAL host deps (phase-3 ruling [B]): this metapackage's whole job is to
-      # state which CUDA the runtime beside it was built against, so its floors
-      # must track the staging solve rather than being maintained by hand. They
-      # are host deps purely so pin_compatible below has something to resolve
-      # against — nothing is compiled here.
-      host:
-        - cuda-version
-        - cuda-cudart
-        - cuda-nvvm
+      build:
+        - nushell
       run:
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
-        - ${{ pin_compatible('cuda-cudart') }}
-        - ${{ pin_compatible('cuda-nvvm') }}
+        # Constrained through cuda-version, components bare (conda-forge's
+        # documented downstream pattern): every cuda-* package pins itself to
+        # cuda-version, so the range needs stating exactly once. The ceiling
+        # is required — libcudart's SONAME is major-versioned and dlopen
+        # resolves filenames, so a CUDA-13 runtime silently removes the GPU.
+        - cuda-version >=${{ cuda_compiler_version_min }},<${{ cuda_compiler_version_max }}
+        - cuda-cudart
+        # libdevice.10.bc only. NOT the cuda-nvvm metapackage: that also
+        # drags cuda-nvvm-impl's libnvvm.so, which acpp never loads. cicc
+        # rides along; libdevice has no package of its own.
+        - cuda-nvvm-tools
       run_constraints:
         # __cuda: DELETED. This is the package that legitimately needs a driver
         # floor, and it gets one WITHOUT us writing it: cuda-cudart depends on
         # cuda-version, which constrains "__cuda >=12" — a floor with no
         # ceiling, unlike the "<13" we used to assert against a driver.
         - acpp-runtime-cuda-nightly <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: linux
+                then:
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
+                else:
+                  - etc/conda/activate.d/acpp-runtime-activate.bat
+                  - etc/conda/activate.d/acpp-runtime-activate.ps1
+                  - etc/conda/activate.d/acpp-runtime-activate.sh
     about:
       summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
       license: BSD-3-Clause
 
+  # acpp-runtime-intel is GONE FROM THE MANIFEST (split 2026-09-05): Level
+  # Zero and OpenCL are separate backends with separate dependencies —
+  # conflating them forced every OpenCL user to install Intel's L0 loader.
+  # The published acpp-runtime-intel artifacts stay on the channel; the
+  # channel is durable and nothing is deleted from it.
   - package:
-      name: acpp-runtime-intel
+      name: acpp-runtime-level-zero
       version: ${{ version }}
     source:
       # Thin source: license texts + activation/render scripts only. The big
@@ -1621,26 +1644,55 @@ outputs:
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
     requirements:
-      # Real host deps so the floors below track the staging solve; see the
+      # Real host dep so the floor below tracks the staging solve; see the
       # CUDA metapackage. level-zero comes in via level-zero-devel, which is
-      # what the runtime was actually built against.
+      # what the runtime was actually built against. The GPU driver itself is
+      # the system's — no channel ships it.
       host:
         - level-zero-devel
       run:
         - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
         - ${{ pin_compatible('level-zero') }}
+      run_constraints:
+        - acpp-runtime-level-zero-nightly <0.0a0
+    about:
+      summary: acpp SYCL runtime with Level Zero backend dependencies (Intel GPUs)
+      license: BSD-3-Clause
+
+  - package:
+      name: acpp-runtime-ocl
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: ../shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime', upper_bound='x.x') }}
         # The OpenCL ICD loader ships under a different name per platform:
-        # ocl-icd is linux-only, Windows uses the Khronos loader. Left
-        # unpinned on purpose — an ICD loader's entire contract is a stable
-        # ABI across versions, so a floor derived from our build machine would
-        # be noise rather than information.
+        # ocl-icd is linux-only, Windows uses the Khronos loader (which reads
+        # the registry — no vendor-dir wiring needed there). Left unpinned on
+        # purpose — an ICD loader's entire contract is a stable ABI across
+        # versions, so a floor derived from our build machine would be noise
+        # rather than information. ICDs come from the environment
+        # (intel-compute-runtime, pocl, …) or, via ocl-icd-system, from the
+        # host system. NB the SPIR-V ingestion caveat: NVIDIA's OpenCL cannot
+        # consume acpp's SPIR-V; this backend lights up on Intel, Mesa
+        # rusticl, and pocl.
         - if: linux
           then: ocl-icd
           else: khronos-opencl-icd-loader
       run_constraints:
-        - acpp-runtime-intel-nightly <0.0a0
+        - acpp-runtime-ocl-nightly <0.0a0
     about:
-      summary: acpp SYCL runtime with Intel GPU (Level Zero / OpenCL) backend dependencies
+      summary: acpp SYCL runtime with OpenCL backend dependencies (ICD loader)
       license: BSD-3-Clause
 
 about:

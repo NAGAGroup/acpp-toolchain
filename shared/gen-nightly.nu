@@ -99,7 +99,8 @@ def park-pairs [] {
    ["acpp-clang-nightly_win-64", "@X_CLANG_WIN@"]
    ["acpp-clang-nightly_linux-64", "@X_CLANG@"]
    ["acpp-runtime-cuda-nightly", "@X_CUDA@"]
-   ["acpp-runtime-intel-nightly", "@X_INTEL@"]
+   ["acpp-runtime-level-zero-nightly", "@X_LZ@"]
+   ["acpp-runtime-ocl-nightly", "@X_OCL@"]
    ["acpp-runtime-nightly", "@X_RT@"]
    ["acpp-llvm-dev-nightly", "@X_DEV@"]
    ["acpp-tools-nightly", "@X_TOOLS@"]
@@ -119,7 +120,8 @@ def rename-pairs [] {
    ["acpp-clang_win-64", "@N_CLANG_WIN@"]
    ["acpp-clang_linux-64", "@N_CLANG@"]
    ["acpp-runtime-cuda", "@N_CUDA@"]
-   ["acpp-runtime-intel", "@N_INTEL@"]
+   ["acpp-runtime-level-zero", "@N_LZ@"]
+   ["acpp-runtime-ocl", "@N_OCL@"]
    ["acpp-runtime", "@N_RT@"]
    ["acpp-llvm-dev", "@N_DEV@"]
    ["acpp-tools", "@N_TOOLS@"]
@@ -138,7 +140,8 @@ def unpark-pairs [] {
    ["@X_CLANG_WIN@", "acpp-clang_win-64"]
    ["@X_CLANG@", "acpp-clang_linux-64"]
    ["@X_CUDA@", "acpp-runtime-cuda"]
-   ["@X_INTEL@", "acpp-runtime-intel"]
+   ["@X_LZ@", "acpp-runtime-level-zero"]
+   ["@X_OCL@", "acpp-runtime-ocl"]
    ["@X_RT@", "acpp-runtime"]
    ["@X_DEV@", "acpp-llvm-dev"]
    ["@X_TOOLS@", "acpp-tools"]
@@ -152,7 +155,8 @@ def unpark-pairs [] {
    ["@N_CLANG_WIN@", "acpp-clang-nightly_win-64"]
    ["@N_CLANG@", "acpp-clang-nightly_linux-64"]
    ["@N_CUDA@", "acpp-runtime-cuda-nightly"]
-   ["@N_INTEL@", "acpp-runtime-intel-nightly"]
+   ["@N_LZ@", "acpp-runtime-level-zero-nightly"]
+   ["@N_OCL@", "acpp-runtime-ocl-nightly"]
    ["@N_RT@", "acpp-runtime-nightly"]
    ["@N_DEV@", "acpp-llvm-dev-nightly"]
    ["@N_TOOLS@", "acpp-tools-nightly"]
@@ -190,6 +194,10 @@ def generate [src: path] {
   # Lines marked [release-only] are dropped from the nightly lane (e.g.
   # backport patches for bugs upstream has already fixed on develop).
   $s = (($s | lines | where {|l| not ($l | str contains "[release-only]") } | str join "\n") + "\n")
+  # Lines marked [nightly-only] ship COMMENTED in the release recipe (they
+  # must not apply there — e.g. patches against code 25.10 does not have)
+  # and are activated for this lane by stripping the marker prefix.
+  $s = ($s | str replace --all "# [nightly-only] " "")
   $s = ($s | str replace --all $HEADER_RELEASE $HEADER_NIGHTLY)
   $s = ($s | str replace --all $CONTEXT_RELEASE $CONTEXT_NIGHTLY)
   $s = ($s | str replace --all $ACPP_SRC_RELEASE $ACPP_SRC_NIGHTLY)

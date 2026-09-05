@@ -442,13 +442,25 @@ def main [] {
       let p = ($prefix | path join "lib" $f)
       if ($p | path exists) { rm $p }
     }
-    # Triple-prefixed driver names, matching the conda-forge clang_impl layout
-    if not (($prefix | path join "bin" "x86_64-conda-linux-gnu-clang") | path exists) {
-      ^ln -s clang ($prefix | path join "bin" "x86_64-conda-linux-gnu-clang")
-      ^ln -s clang++ ($prefix | path join "bin" "x86_64-conda-linux-gnu-clang++")
-      ^ln -s clang-cpp ($prefix | path join "bin" "x86_64-conda-linux-gnu-clang-cpp")
-    }
+    # NB: NO triple-prefixed driver symlinks here. They are activation-package
+    # files (render-install.sh creates them); a base package carrying the
+    # triplet tells the LLVM/cmake ecosystem it is in an isolated build env
+    # and poisons plain runtime environments.
   } else {
+  }
+
+  # default-cpu-cxx is baked as CMAKE_CXX_COMPILER — the BUILD machine's
+  # compiler, dead on every user machine. Rewrite it to the $ACPP_PATH
+  # placeholder the driver expands at runtime (the mechanism default-clang
+  # already uses); the compiler activation package overrides both via
+  # ACPP_CPU_CXX/ACPP_CLANG with the triple-prefixed form.
+  let core_json = ($prefix | path join "etc" "AdaptiveCpp" "acpp-core.json")
+  if ($core_json | path exists) {
+    let cpu_cxx = (if (is-windows) { "$ACPP_PATH/bin/clang++.exe" } else { "$ACPP_PATH/bin/clang++" })
+    open --raw $core_json | from json | upsert "default-cpu-cxx" $cpu_cxx | to json | save -f $core_json
+    print $"acpp-core.json: default-cpu-cxx -> ($cpu_cxx)"
+  } else {
+    error make {msg: $"acpp-core.json not found at ($core_json)"}
   }
 
   ^ccache --show-stats

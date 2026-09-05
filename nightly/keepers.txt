@@ -38,18 +38,9 @@
 
 # --- keepers -----------------------------------------------------------------
 
-# INERT, AND KEPT ON PURPOSE AS A LIVE TEST (Jack, 2026-09-02). This set is no
-# longer on the channel — the legacy artifacts were deleted by hand on
-# 2026-08-10 — and nothing pins it: the template's acpp branch lock names zero
-# 08-09 artifacts, verified against the committed lock. It stays because it is
-# last month's, and a stale keeper from a previous month must NOT block this
-# month's first green set from being recorded. Deleting this line would remove
-# the only case that exercises that.
-2026.08.09_llvm21.1.8
-# LOAD-BEARING, both platforms. The template's acpp branch has this set in its
-# committed lock on linux-64 AND win-64 — 5 outputs each (acpp, acpp-runtime,
-# acpp-tools, acpp-clang_<plat>, acpp-clangxx_<plat>), all 10 present on the
-# channel. Retire only when that lock no longer references it.
-2026.08.10_llvm21.1.8
-# First green set of 2026.09, recorded automatically by the retention job (run 33706172179).
-2026.09.03_llvm21.1.8
+# All pre-2026.09.05 keepers were REMOVED (Jack, 2026-09-05): every set built
+# before then ships base packages carrying compiler-activation files (the
+# conda-triplet driver symlinks), no vector math in the host JIT, and the
+# cuda-nvvm metapackage — broken by construction, nothing should pin them.
+# The template lock that referenced 2026.08.10 must re-lock onto this set.
+2026.09.05_llvm21.1.8

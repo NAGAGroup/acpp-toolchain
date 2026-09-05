@@ -244,6 +244,17 @@ outputs:
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       files:
         include:
+          # macOS (first cut, OMP-only): same shape as linux with dylibs and
+          # the APPLE host-JIT linker (acpp drives ld64.lld there).
+          - if: osx
+            then:
+              - bin/opt
+              - bin/llc
+              - bin/lld
+              - bin/ld64.lld
+              - lib/*.dylib*
+              - lib/hipSYCL/**
+              - etc/AdaptiveCpp/**
           - if: linux
             then:
               # SSCP JIT external tools: ptx JIT execs opt+llc; CPU JIT execs
@@ -291,6 +302,10 @@ outputs:
               # runtime JSON configs
               - Library/etc/AdaptiveCpp/**
         exclude:
+          # libomp comes from conda-forge llvm-openmp on mac too
+          - if: osx
+            then:
+              - lib/libomp*
           - if: linux
             then:
               # libomp comes from conda-forge llvm-openmp (design §5)
@@ -432,6 +447,12 @@ outputs:
             - lld
           files:
             exists:
+              # Deliberately minimal on mac: the backend-plugin file extension
+              # there is a build detail (MODULE libraries), asserted by the
+              # audit rather than a hardcoded name here.
+              - if: osx
+                then:
+                  - etc/AdaptiveCpp/acpp-core.json
               - if: linux
                 then:
                   - lib/hipSYCL/librt-backend-omp.so
@@ -493,6 +514,34 @@ outputs:
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       files:
         include:
+          # macOS (first cut): compiler + headers + cmake config. ld64.lld is
+          # the runtime's there (the mac host JIT drives it); ld.lld and the
+          # cross flavors stay here.
+          - if: osx
+            then:
+              - bin/acpp*
+              - bin/clang
+              - bin/clang++
+              - bin/clang-cpp
+              - bin/clang-${{ llvm_major }}
+              - bin/ld.lld
+              - bin/lld-link
+              - bin/wasm-ld
+              - bin/llvm-ar
+              - bin/llvm-nm
+              - bin/llvm-ranlib
+              - bin/llvm-strip
+              - bin/llvm-objcopy
+              - bin/llvm-objdump
+              - bin/llvm-readelf
+              - bin/llvm-readobj
+              - bin/llvm-size
+              - bin/llvm-strings
+              - bin/llvm-symbolizer
+              - bin/llvm-cxxfilt
+              - include/AdaptiveCpp/**
+              - lib/clang/**
+              - lib/cmake/AdaptiveCpp/**
           - if: linux
             then:
               - bin/acpp*
@@ -730,6 +779,10 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # macOS first cut ships compiler + runtime only; the sanitizer story is
+      # its own pass (compiler-rt is not built there).
+      skip:
+        - osx
       files:
         include:
           # The clang resource directory splits cleanly: include/ holds the
@@ -820,6 +873,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # macOS first cut ships compiler + runtime only.
+      skip:
+        - osx
       files:
         include:
           - if: linux
@@ -1107,6 +1163,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # macOS first cut ships compiler + runtime only.
+      skip:
+        - osx
       files:
         include:
           - if: linux
@@ -1278,8 +1337,10 @@ outputs:
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
+      # nor in the macOS first cut
       skip:
         - win
+        - osx
       files:
         include:
           - bin/lldb*
@@ -1595,9 +1656,10 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 lane is OMP-only.
+      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
       skip:
         - target_platform == "linux-aarch64"
+        - osx
       # The CUDA bitcode wiring (activation-time libdevice symlink/copy into
       # acpp's redist path) lives HERE, not in acpp-runtime-nightly: base packages
       # ship no activation, and this is the package whose install guarantees
@@ -1662,9 +1724,10 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 lane is OMP-only.
+      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
       skip:
         - target_platform == "linux-aarch64"
+        - osx
     requirements:
       # Real host dep so the floor below tracks the staging solve; see the
       # CUDA metapackage. level-zero comes in via level-zero-devel, which is
@@ -1695,9 +1758,10 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 lane is OMP-only.
+      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
       skip:
         - target_platform == "linux-aarch64"
+        - osx
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}

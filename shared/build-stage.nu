@@ -82,6 +82,31 @@ def linux-triple [] {
   if $nu.os-info.arch == "aarch64" { "aarch64-conda-linux-gnu" } else { "x86_64-conda-linux-gnu" }
 }
 
+def is-darwin [] { $nu.os-info.name == "macos" }
+
+# macOS, FIRST CUT — OMP-only, no lldb/bolt (bolt has no darwin port), no
+# compiler-rt (the sanitizer story is its own pass), no GPU backends (Metal
+# comes later). Apple triples are inferred natively — no host/target triple
+# overrides, no sysroot machinery: the activation's CMAKE_ARGS carries
+# CMAKE_OSX_SYSROOT and the deployment target.
+def darwin-args [src: string, prefix: string] {
+  [
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp"
+    "-DLLVM_BUILD_LLVM_DYLIB=ON"
+    "-DLLVM_LINK_LLVM_DYLIB=ON"
+    "-DWITH_CUDA_BACKEND=OFF"
+    "-DWITH_LEVEL_ZERO_BACKEND=OFF"
+    "-DWITH_OPENCL_BACKEND=OFF"
+    "-DWITH_ROCM_BACKEND=OFF"
+    "-DLLVM_TARGETS_TO_BUILD=AArch64"
+    "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
+    "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
+    "-DCOMPILER_RT_BUILD_PROFILE=OFF"
+    "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF"
+    "-DCMAKE_INSTALL_RPATH=@loader_path/../lib"
+  ]
+}
+
 def conda-toolchain-args [] {
   let sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
   let bp = ($env.BUILD_PREFIX? | default "")
@@ -448,7 +473,13 @@ def main [] {
   let args = ($activation_args
     | append (common-args $src $prefix $build)
     | append $flag_args
-    | append (if (is-windows) { (windows-args $src $prefix $build) } else { (linux-args $src $prefix) }))
+    | append (if (is-windows) {
+        (windows-args $src $prefix $build)
+      } else if (is-darwin) {
+        (darwin-args $src $prefix)
+      } else {
+        (linux-args $src $prefix)
+      }))
 
   ^cmake ($src | path join "llvm-project" "llvm") -G Ninja ...$args -B $build
 

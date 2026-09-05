@@ -35,6 +35,8 @@ def main [lane: string] {
   let arm = ($nu.os-info.arch == "aarch64")
   let plat = (if $nu.os-info.name == "windows" {
     (if $arm { "win-arm64" } else { "win-64" })
+  } else if $nu.os-info.name == "macos" {
+    (if $arm { "osx-arm64" } else { "osx-64" })
   } else {
     (if $arm { "linux-aarch64" } else { "linux-64" })
   })

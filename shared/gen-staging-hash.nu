@@ -17,7 +17,7 @@
 #   nu shared/gen-staging-hash.nu           # write the hash into the variants
 #   nu shared/gen-staging-hash.nu --check   # exit 1 if a variant file is stale
 
-const VARIANTS = ["shared/variants/linux-64.yaml", "shared/variants/win-64.yaml", "shared/variants/linux-aarch64.yaml"]
+const VARIANTS = ["shared/variants/linux-64.yaml", "shared/variants/win-64.yaml", "shared/variants/linux-aarch64.yaml", "shared/variants/osx-arm64.yaml"]
 
 # The `source:` block of a lane recipe: everything the staging output fetches
 # (URLs, sha256s, git revs, patch lists) but that the key ignores.

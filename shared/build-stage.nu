@@ -513,14 +513,19 @@ def main [] {
   # with the child's CMakeError.log dumped into the CI log.
   # NB backslashes are glob ESCAPES in nushell — normalize the joined path or
   # `glob` fails to parse on Windows (this crash ate a run's evidence).
-  let rt_glob = (if (is-windows) {
-    ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')
-  } else {
-    ($prefix | path join "lib" "clang" "**" "libclang_rt.asan*")
-  })
-  if ((glob $rt_glob | length) == 0) {
-    dump-runtimes-logs $build
-    error make {msg: "compiler-rt runtimes are HOLLOW (no asan artifacts installed) — child configure evidence dumped above"}
+  # Not on the macOS first cut: compiler-rt is deliberately not built there
+  # (the sanitizer story is its own pass), so absence is the expected state,
+  # not hollowness.
+  if not (is-darwin) {
+    let rt_glob = (if (is-windows) {
+      ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')
+    } else {
+      ($prefix | path join "lib" "clang" "**" "libclang_rt.asan*")
+    })
+    if ((glob $rt_glob | length) == 0) {
+      dump-runtimes-logs $build
+      error make {msg: "compiler-rt runtimes are HOLLOW (no asan artifacts installed) — child configure evidence dumped above"}
+    }
   }
 
   if not (is-windows) {

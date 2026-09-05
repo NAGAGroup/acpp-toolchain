@@ -30,8 +30,14 @@ def main [lane: string] {
 
   # Variant config is per-platform (linux uses gcc + sysroot; windows uses
   # clang-cl + vs). Passed explicitly rather than auto-discovered so the wrong
-  # platform's file can never be picked up.
-  let plat = (if $nu.os-info.name == "windows" { "win-64" } else { "linux-64" })
+  # platform's file can never be picked up. Arch-aware: the arm runners build
+  # natively, so the host arch names the platform.
+  let arm = ($nu.os-info.arch == "aarch64")
+  let plat = (if $nu.os-info.name == "windows" {
+    (if $arm { "win-arm64" } else { "win-64" })
+  } else {
+    (if $arm { "linux-aarch64" } else { "linux-64" })
+  })
   let variants = ([shared variants $"($plat).yaml"] | path join)
 
   # CI points this at fast storage (the win runner's D: temp drive is ~6x

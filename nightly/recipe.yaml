@@ -77,14 +77,14 @@ outputs:
       - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
         sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
         target_directory: OpenCL-CLHPP
-      # ROCm, linux-only: TheRock's stable core tarball is the BUILD input —
+      # ROCm, linux-64 only: TheRock's stable core tarball is the BUILD input —
       # ROCM_PATH points here at configure time and the staging build deploys
       # the runtime subset into the prefix (carved into acpp-runtime-rocm-nightly).
       # gfx1150 is the SMALLEST family tarball (1.7 GB): the pieces acpp's
       # hip manifest deploys (hiprtc, amdhip64, hsa-runtime64, amd_comgr,
       # device-lib bitcode) are family-INDEPENDENT — the .kpack difference
       # between families is ROCm's own math-library kernels, never deployed.
-      - if: linux
+      - if: target_platform == "linux-64"
         then:
           - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
             sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
@@ -172,43 +172,50 @@ outputs:
         - acpp-llvm ==${{ llvm_major }}
         - zlib
         - zstd
-        # The single CUDA pin, hard against the variant key (conda-forge
-        # pinning-feedstock convention): cuda-version is what every other
-        # cuda-* package constrains itself against, so pinning it once aligns
-        # the whole set without a version literal on any of them.
-        - cuda-version ==${{ cuda_compiler_version }}
-        # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
-        - cuda-cudart-dev
-        # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home,
-        # and acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the
-        # cuda-nvvm metapackage — that drags in libnvvm.so, which nothing
-        # here ever loads.
-        - cuda-nvvm-tools
-        # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles the
-        # CUDA code. FindCUDAToolkit refuses to locate a toolkit without an
-        # nvcc binary (measured: FOUND=FALSE with cudart-dev + driver-dev +
-        # nvvm-tools + crt-dev alone), the same role cuda-nvcc-impl plays for
-        # the legacy FindCUDA module on win.
-        - cuda-nvcc-tools
-        # Both platforms get Level Zero + OpenCL: level-zero{,-devel} and
-        # opencl-headers all ship for win-64, so the Intel backends are not
-        # linux-only. (Upstream's Windows CI disables OpenCL, but the docs
-        # never say it cannot work — we build it and let CI adjudicate.)
-        - level-zero-devel
-        - opencl-headers
-        - if: linux
+        # GPU backend build deps are X86-PLATFORM inputs: the aarch64 lane is
+        # OMP-only by design, so everything CUDA/L0/OCL-shaped gates on the
+        # two x86 platforms rather than on `linux`.
+        - if: target_platform == "linux-64" or target_platform == "win-64"
+          then:
+            # The single CUDA pin, hard against the variant key (conda-forge
+            # pinning-feedstock convention): cuda-version is what every other
+            # cuda-* package constrains itself against, so pinning it once
+            # aligns the whole set without a version literal on any of them.
+            - cuda-version ==${{ cuda_compiler_version }}
+            # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
+            - cuda-cudart-dev
+            # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home,
+            # and acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the
+            # cuda-nvvm metapackage — that drags in libnvvm.so, which nothing
+            # here ever loads.
+            - cuda-nvvm-tools
+            # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles
+            # the CUDA code. FindCUDAToolkit refuses to locate a toolkit
+            # without an nvcc binary (measured: FOUND=FALSE with cudart-dev +
+            # driver-dev + nvvm-tools + crt-dev alone), the same role
+            # cuda-nvcc-impl plays for the legacy FindCUDA module on win.
+            - cuda-nvcc-tools
+            # Both x86 platforms get Level Zero + OpenCL: level-zero{,-devel}
+            # and opencl-headers all ship for win-64, so the Intel backends
+            # are not linux-only. (Upstream's Windows CI disables OpenCL, but
+            # the docs never say it cannot work — we build it and let CI
+            # adjudicate.)
+            - level-zero-devel
+            - opencl-headers
+        - if: target_platform == "linux-64"
           then:
             - ocl-icd
-          else:
+            - cuda-driver-dev
+            - cuda-crt-dev_linux-64
+        - if: win
+          then:
             - khronos-opencl-icd-loader
-        # Linux-only: lldb needs python+swig; libxml2/numactl and the cudart
-        # CRT headers are linux packages.
+        # Linux (both arches): lldb needs python+swig; libxml2/numactl are
+        # linux packages.
         - if: linux
           then:
             - libxml2-devel
             - python
-            - cuda-driver-dev
-            - cuda-crt-dev_linux-64
             - numactl
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
@@ -428,18 +435,22 @@ outputs:
               - if: linux
                 then:
                   - lib/hipSYCL/librt-backend-omp.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
+                  - etc/AdaptiveCpp/acpp-core.json
+              # GPU backends are x86-only; the aarch64 lane is OMP-only
+              - if: target_platform == "linux-64"
+                then:
                   - lib/hipSYCL/librt-backend-cuda.so
                   - lib/hipSYCL/librt-backend-ze.so
                   - lib/hipSYCL/librt-backend-ocl.so
                   - lib/hipSYCL/librt-backend-hip.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
-                  - etc/AdaptiveCpp/acpp-core.json
-                else:
+              - if: win
+                then:
                   # backend plugins are RUNTIME artifacts -> bin on win;
                   # llvm-to-backend is linked statically into per-target
                   # tools (no llvm-to-*.dll exists)
@@ -1584,6 +1595,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # x86 platforms only: the aarch64 lane is OMP-only.
+      skip:
+        - target_platform == "linux-aarch64"
       # The CUDA bitcode wiring (activation-time libdevice symlink/copy into
       # acpp's redist path) lives HERE, not in acpp-runtime-nightly: base packages
       # ship no activation, and this is the package whose install guarantees
@@ -1648,6 +1662,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # x86 platforms only: the aarch64 lane is OMP-only.
+      skip:
+        - target_platform == "linux-aarch64"
     requirements:
       # Real host dep so the floor below tracks the staging solve; see the
       # CUDA metapackage. level-zero comes in via level-zero-devel, which is
@@ -1678,6 +1695,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # x86 platforms only: the aarch64 lane is OMP-only.
+      skip:
+        - target_platform == "linux-aarch64"
     requirements:
       run:
         - ${{ pin_subpackage('acpp-runtime-nightly', exact=True) }}

@@ -76,11 +76,17 @@ def common-args [src: string, prefix: string, build: string] {
 # Where the conda toolchain lives, for the runtimes sub-build. See the note in
 # linux-args. Returns [] when neither can be located, so the build fails with
 # the real compiler error rather than a confusing empty --sysroot=.
+def linux-triple [] {
+  # The build is always native (pseudo-cross): the runner's arch IS the
+  # target arch, and the conda triplet follows it.
+  if $nu.os-info.arch == "aarch64" { "aarch64-conda-linux-gnu" } else { "x86_64-conda-linux-gnu" }
+}
+
 def conda-toolchain-args [] {
   let sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
   let bp = ($env.BUILD_PREFIX? | default "")
   # conda's own layout when CONDA_BUILD_SYSROOT is not exported.
-  let derived = (if $bp != "" { [$bp "x86_64-conda-linux-gnu" "sysroot"] | path join } else { "" })
+  let derived = (if $bp != "" { [$bp (linux-triple) "sysroot"] | path join } else { "" })
   let chosen = (if ($sysroot != "" and ($sysroot | path exists)) {
     $sysroot
   } else if ($derived != "" and ($derived | path exists)) {
@@ -125,7 +131,7 @@ def conda-toolchain-args [] {
   #   * Deliberately NOT set: CMAKE_SYSTEM_NAME=Linux — it flips the child
   #     into full cross mode and changes find semantics wholesale, which the
   #     explicit FIND_ROOT settings above make unnecessary.
-  let triple = "x86_64-conda-linux-gnu"
+  let triple = (linux-triple)
   let flags = $"--sysroot=($chosen) --gcc-toolchain=($bp)"
   let host_prefix = ($env.PREFIX? | default "")
   [
@@ -223,14 +229,34 @@ def linux-args [src: string, prefix: string] {
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_DYLIB_SYMBOL_VERSIONING=ON"
+    "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
+    "-DLLVM_ENABLE_LIBXML2=FORCE_ON"
+    "-DLLVM_ENABLE_LIBEDIT=OFF"
+    "-DLLDB_ENABLE_PYTHON=ON"
+    "-DLLDB_ENABLE_LIBEDIT=OFF"
+    "-DLLDB_ENABLE_CURSES=OFF"
+    "-DLLDB_ENABLE_LZMA=OFF"
+    "-DLLDB_ENABLE_LIBXML2=OFF"
+    "-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib"
+    $"-DLLVM_HOST_TRIPLE=(linux-triple)"
+    $"-DLLVM_DEFAULT_TARGET_TRIPLE=(linux-triple)"
+    # -pthread now folded into outer-flag-args (explicit CMAKE_*_LINKER_FLAGS
+    # override *_INIT, so the old _INIT lines would have been silently dropped)
+  ] ++ (if $nu.os-info.arch == "aarch64" { linux-arm-backend-args } else { linux-x86-backend-args $src $prefix })
+    ++ (conda-toolchain-args))
+}
+
+# x86-64: the full backend set.
+def linux-x86-backend-args [src: string, prefix: string] {
+  [
     "-DWITH_LEVEL_ZERO_BACKEND=ON"
     "-DWITH_OPENCL_BACKEND=ON"
-    # ROCm (linux-only for now): the TheRock core tarball is a BUILD input —
-    # ROCM_PATH points into the extracted source tree so acpp's find_* succeed;
-    # the runtime subset is deployed into the prefix post-install (see the
-    # rocm-deploy step) and carved into acpp-runtime-rocm. Overrides the
-    # common-args OFF (cmake: last -D wins) and widens the LLVM target list —
-    # llvm-to-amdgpu JITs through libLLVM's AMDGPU backend.
+    # ROCm: the TheRock core tarball is a BUILD input — ROCM_PATH points into
+    # the extracted source tree so acpp's find_* succeed; the runtime subset
+    # is deployed into the prefix post-install (see the rocm-deploy step) and
+    # carved into acpp-runtime-rocm. Overrides the common-args OFF (cmake:
+    # last -D wins) and widens the LLVM target list — llvm-to-amdgpu JITs
+    # through libLLVM's AMDGPU backend.
     "-DWITH_ROCM_BACKEND=ON"
     $"-DROCM_PATH=($src)/rocm-dist"
     # PRESET, not searched: the activation's CMAKE_ARGS confines find_library
@@ -252,20 +278,20 @@ def linux-args [src: string, prefix: string] {
     $"-DOpenCL_INCLUDE_DIR=($prefix)/include"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($src)/OpenCL-Headers"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-CXX-HEADERS=($src)/OpenCL-CLHPP"
-    "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
-    "-DLLVM_ENABLE_LIBXML2=FORCE_ON"
-    "-DLLVM_ENABLE_LIBEDIT=OFF"
-    "-DLLDB_ENABLE_PYTHON=ON"
-    "-DLLDB_ENABLE_LIBEDIT=OFF"
-    "-DLLDB_ENABLE_CURSES=OFF"
-    "-DLLDB_ENABLE_LZMA=OFF"
-    "-DLLDB_ENABLE_LIBXML2=OFF"
-    "-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib"
-    "-DLLVM_HOST_TRIPLE=x86_64-conda-linux-gnu"
-    "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-conda-linux-gnu"
-    # -pthread now folded into outer-flag-args (explicit CMAKE_*_LINKER_FLAGS
-    # override *_INIT, so the old _INIT lines would have been silently dropped)
-  ] ++ (conda-toolchain-args))
+  ]
+}
+
+# aarch64: OMP-ONLY by design — the CPU backend and accelerated-CPU compiler
+# are the deliverable; GPU backends arrive per platform as their dependency
+# stories are established. Overrides common-args' CUDA=ON (last -D wins).
+def linux-arm-backend-args [] {
+  [
+    "-DWITH_CUDA_BACKEND=OFF"
+    "-DWITH_LEVEL_ZERO_BACKEND=OFF"
+    "-DWITH_OPENCL_BACKEND=OFF"
+    "-DWITH_ROCM_BACKEND=OFF"
+    "-DLLVM_TARGETS_TO_BUILD=AArch64"
+  ]
 }
 
 def windows-args [src: string, libprefix: string, build: string] {
@@ -493,7 +519,7 @@ def main [] {
   # installed normally and skipped. Symlink families are preserved: the
   # manifest names find_library's answer (the unversioned dev name) while
   # DT_NEEDED resolves the SONAME, so both must exist.
-  if not (is-windows) {
+  if (not (is-windows)) and $nu.os-info.arch != "aarch64" {
     let manifest = ($prefix | path join "etc" "AdaptiveCpp" "deploy" "acpp-deployment-manifest-hip.json")
     if not ($manifest | path exists) {
       error make {msg: $"hip deployment manifest missing: ($manifest)"}

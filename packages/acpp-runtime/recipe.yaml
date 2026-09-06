@@ -26,6 +26,12 @@ context:
   llvm_major: "21"
   version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Read from the env ONCE, into context, because `build_number` — like
+  # `hash` — is undefined inside requirements: both are derived during the
+  # build-string computation, which happens after requirements are resolved.
+  # The run_export below needs the same value build.number uses, so both read
+  # this one variable.
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
   # Computed ONCE, so paths are written once rather than branched. `else` is a
   # two-platform construct: on a third platform it silently hands out another
   # platform's answer.
@@ -71,8 +77,8 @@ source:
     target_directory: licenses
 
 build:
-  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
-  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   script:
     interpreter: nu
     file: ../_shared/carve.nu
@@ -119,17 +125,27 @@ requirements:
   # changes the other must, which is why they sit next to each other.
   run_exports:
     weak:
-      # MatchSpec BRACKET form, and it has to be this form: `name ==ver=build`
-      # rejects a wildcard build ("the build string can only contain
-      # alphanumeric characters and underscores"), and ${{ hash }} is undefined
-      # inside requirements — the variant hash is computed FROM the resolved
-      # requirements, so it cannot be referenced within them.
+      # Three-field match spec — `name version build` — pinning VERSION, the
+      # LLVM tag AND the build number. The three things a set of packages
+      # built together share: version and build number both come from the same
+      # env vars (ACPP_NIGHTLY_DATE, ACPP_BUILD_NUMBER) and the tag from the
+      # same context. Only the h<hash> segment is left free, and it must be:
+      # the variant hash is per-recipe, so a consumer cannot compute the
+      # producer''s.
       #
-      # What this pins: version exactly, and the build string down to the LLVM
-      # tag. Verified on a probe that the export lands in the consumer as
-      # `pa ==1.2.3 llvm21_1_8_*`, i.e. the consumer cannot resolve a runtime
-      # built against a different LLVM.
-      - acpp-runtime[version="==${{ version }}",build="${{ llvm_build_tag }}_*"]
+      # The syntax is not interchangeable. `name ==ver=build` with a wildcard
+      # is rejected ("the build string can only contain alphanumeric
+      # characters and underscores"), `name ==ver *[build=...]` gives "found
+      # multiple values for: build", and ${{ hash }} is undefined inside
+      # requirements because the hash is computed FROM the resolved
+      # requirements.
+      #
+      # Verified in both directions against real artifacts, not renders: a
+      # consumer resolves the exact build
+      # (pa 1.2.3 llvm21_1_8_hb0f4dca_0), and against a channel offering only
+      # a different-LLVM build the solve FAILS with "pa ==1.2.3 llvm21_1_8_*_0,
+      # for which no candidates were found".
+      - acpp-runtime ==${{ version }} ${{ llvm_build_tag }}_*_${{ build_num }}
 
 tests:
   # NOT `strict: true`. Measured: strict means every file in the package must

@@ -43,9 +43,10 @@ context:
   #
   # linux/osx: the SSCP JIT external tools (ptx JIT execs opt+llc; the CPU JIT
   # execs opt+llc+lld — verified in llvm-to-backend/{ptx,host}/*.cpp), the
-  # versioned shared libraries, the JIT backend plugins + SSCP bitcode +
-  # pinned llvm-spirv under lib/hipSYCL, the runtime JSON configs, and on
-  # linux the OMP debugger extension.
+  # versioned shared libraries, the JIT backend plugins + SSCP bitcode under
+  # lib/hipSYCL, the runtime JSON configs, and on linux the OMP debugger
+  # extension. The SPIR-V translator the spirv plugin execs is NOT here — it
+  # is acpp-llvm-spirv, and the backend metapackages that need it depend on it.
   carve_linux: >-
     bin/opt;bin/llc;bin/lld;bin/ld.lld;lib/*.so*;lib/hipSYCL/**;etc/AdaptiveCpp/**;share/gdb/**
   carve_osx: >-

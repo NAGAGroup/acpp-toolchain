@@ -52,7 +52,12 @@ def common-args [src: string, prefix: string, deps: string, build: string] {
     # directory we are still creating.
     $"-DCUDAToolkit_ROOT=($deps)"
     $"-DCUDA_TOOLKIT_ROOT_DIR=($deps)"
-    $"-DLLVMSPIRV_SOURCE_DIR=($src)/SPIRV-LLVM-Translator"
+    # The SPIRV-LLVM-Translator comes from acpp-llvm-spirv and lands at
+    # bin/llvm-spirv in the same prefix, so this build neither fetches nor
+    # builds it. "." rather than "" keeps the baked HIPSYCL_RELATIVE_LLVMSPIRV_PATH
+    # relative — an empty value leaves a leading slash and makes it absolute.
+    "-DACPP_EXTERNAL_LLVMSPIRV=ON"
+    "-DLLVMSPIRV_RELATIVE_INSTALLDIR=."
     "-DOPENMP_ENABLE_LIBOMPTARGET=OFF"
     # compiler-rt: builtins plus the sanitizer runtimes (phase-3 ruling [B]).
     #

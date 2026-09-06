@@ -39,6 +39,11 @@ requirements:
     # NOT written here: acpp-runtime is a HOST dep (below), and its weak
     # run_export supplies the exact version+LLVM-tag spec automatically.
     - ${{ pin_compatible('level-zero') }}
+    # The SPIR-V translator, which the spirv JIT plugin invokes as a
+    # subprocess. It rides the backend metapackages rather than acpp-runtime
+    # because only the SPIR-V-consuming backends need it — a CUDA-only install
+    # JITs to PTX and never execs it.
+    - acpp-llvm-spirv ==${{ version }}
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

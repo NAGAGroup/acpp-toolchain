@@ -55,7 +55,10 @@ source:
     rev: ${{ acpp_commit }}
     target_directory: AdaptiveCpp
     patches:
-      - ../_shared/patches/0001-llvmspirv-allow-local-source-dir.patch
+      # The SPIRV-LLVM-Translator is its own package (acpp-llvm-spirv) and
+      # lands in the same prefix; this stops the sub-build and points the
+      # baked path at bin/.
+      - ../_shared/patches/0001-llvmspirv-provide-externally.patch
       # Level Zero backend includes a glibc-internal header; breaks on win
       - ../_shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
       # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
@@ -64,9 +67,6 @@ source:
       # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot, which
       # does not exist on user machines, and lld has no default search paths.
       - ../_shared/patches/0008-host-jit-find-libmvec-via-loader.patch
-  - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
-    sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
-    target_directory: SPIRV-LLVM-Translator
   - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
     sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
     target_directory: OpenCL-Headers

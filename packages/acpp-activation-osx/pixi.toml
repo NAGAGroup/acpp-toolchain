@@ -1,48 +1,36 @@
-# acpp-activation-osx — the macOS compiler-activation packages
-# (acpp-clang_osx-arm64, acpp-clangxx_osx-arm64), built from our fork of
+# acpp-activation-osx — the osx-arm64 compiler-activation packages
+# (acpp-clang_osx-arm64 / acpp-clangxx_osx-arm64), built from our fork of
 # conda-forge's clang-compiler-activation-feedstock.
 #
-# THIS ONE IS NEW. We have never vendored the osx activation, and that absence
-# is precisely why the mac lane went ad-hoc: with no activation contract to
-# match, the mac lane inherited whatever the runner's Xcode provided and every
-# platform assumption was re-derived by hand.
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root. The manifest
+# sits outside the submodule and points into it — `pixi publish` skips any
+# subdirectory carrying its own workspace, and feedstocks ship pixi.toml files.
 #
-# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+# WHY THIS FEEDSTOCK FOR macOS: the clang_osx-* / clangxx_osx-* family is
+# produced by clang-compiler-activation, NOT by ctng-compiler-activation
+# (which owns linux) and not by clangdev (which owns the NATIVE clang_impl_*).
 #
-# TWO PIECES OF WORK, not one: this feedstock is still conda-build
-# `meta.yaml`, so it needs a FORMAT CONVERSION to rattler `recipe.yaml` on top
-# of the rename to acpp-*. Budget for it.
-#
-# WHAT THE OSX ACTIVATION MUST DO DIFFERENTLY FROM LINUX — the find model is
-# platform-specific and copying linux's onto mac would be wrong. Linux (from
-# ctng's activate-gcc.sh, under CONDA_BUILD=1, in the NON-Darwin branch) sets
-# CMAKE_FIND_ROOT_PATH_MODE_{PROGRAM=NEVER,LIBRARY=ONLY,INCLUDE=ONLY} plus
-# CMAKE_FIND_ROOT_PATH. macOS achieves the same isolation by entirely
-# different means: CMAKE_OSX_SYSROOT, CMAKE_FIND_FRAMEWORK=LAST,
-# CMAKE_FIND_APPBUNDLE=LAST. There is no CMAKE_FIND_ROOT_PATH* in the osx
-# activation at all.
-#
-# THE SDK PIN IS THE POINT, and it is NOT a variant key. sdkroot_env's
-# activation takes the first of: an already-set SDKROOT, then
-# CONDA_BUILD_SYSROOT, then `xcrun --show-sdk-path` — the runner's SDK, which
-# is the root cause of the whole mac patch sequence. MACOSX_SDK_VERSION does
-# not change that: nothing in any forked feedstock reads it, and osx-sysroot
-# carries it as a "dummy value for SDK to be downloaded" consumed by
-# conda-smithy, which we do not run. The SDK therefore has to be fetched and
-# exported as SDKROOT by the workflow. See ../../variants.yaml.
-#
-# STATUS (round 1, step 2): fork vendored and pinned; out of the publish set
-# until conversion + rename land. See ../../vendor/PROVENANCE.md.
+# TWO OUTPUTS FROM ONE RECIPE, which is why this manifest's name matches
+# neither of them. The C++ activation script only sets the CXX half and relies
+# on the C one having run first, so the pair is pinned to each other with
+# pin_subpackage(exact=True) — a function that names another output of the SAME
+# recipe and therefore exists only while they share one.
 [package]
 name = "acpp-activation-osx"
-version = "0.1.0"
-publish = false
+version = "0.dev0"
+publish = true
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
 
+# THE PASSTHROUGH. The manifest tables add no dependencies — the backend
+# regards only what the recipe declares — but they supply the workspace path
+# mapping the recipe cannot know, which lets it name `acpp ==<version>` under
+# requirements.host as if it came from a channel. acpp is the compiler these
+# packages activate, and its weak run_export is what turns that host dependency
+# into an exact-build run dependency.
+[package.build-dependencies]
+acpp = { workspace = true }
+
 [package.build.config]
-# NOTE: this path does not exist yet — upstream ships recipe/meta.yaml here.
-# It is written as the TARGET of the conversion, so the wrapper does not have
-# to be edited twice.
 recipe = "../../vendor/clang-compiler-activation-feedstock/recipe/recipe.yaml"

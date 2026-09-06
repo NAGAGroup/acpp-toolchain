@@ -72,6 +72,7 @@ acpp-runtime-cuda = { path = "packages/acpp-runtime-cuda" }
 acpp-runtime-level-zero = { path = "packages/acpp-runtime-level-zero" }
 acpp-runtime-ocl = { path = "packages/acpp-runtime-ocl" }
 acpp-runtime-rocm = { path = "packages/acpp-runtime-rocm" }
+acpp-lldb = { path = "packages/acpp-lldb" }
 acpp-activation-linux = { path = "packages/acpp-activation-linux" }
 acpp-activation-win = { path = "packages/acpp-activation-win" }
 acpp-activation-osx = { path = "packages/acpp-activation-osx" }

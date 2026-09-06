@@ -95,7 +95,9 @@ def is-darwin [] { $nu.os-info.name == "macos" }
 # CMAKE_OSX_SYSROOT and the deployment target.
 def darwin-args [src: string, prefix: string] {
   [
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp"
+    # lldb is IN on macOS this round: its absence was our omission, not a
+    # platform limit — conda-forge ships lldb on every platform we target.
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;openmp"
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DWITH_CUDA_BACKEND=OFF"
@@ -240,7 +242,8 @@ def dump-runtimes-logs [build: string] {
 
 def linux-args [src: string, prefix: string, deps: string] {
   ([
-    # lldb/bolt/polly/clang-tools-extra are linux-only in this suite
+    # bolt and polly stay linux-only (bolt is ELF-only and has no darwin port);
+  # lldb is now built on every platform
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;bolt;polly;openmp"
     # Runtimes bootstrap (just-built clang builds compiler-rt) is the linux
     # path ONLY — the host compiler here is conda gcc, which must not build
@@ -345,7 +348,10 @@ def windows-args [src: string, libprefix: string, build: string] {
     # LLVM_ENABLE_PROJECTS="clang;openmp;lld;compiler-rt" and never uses the
     # win runtimes bootstrap. lldb/bolt/polly stay linux-only;
     # clang-tools-extra is added on top for acpp-tools parity.
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp;compiler-rt"
+    # lldb is IN on Windows this round. It was never a feasibility claim that
+    # it could not build here — conda-forge ships lldb for win-64 — and our own
+    # run_constraints would otherwise stop a Windows user installing theirs.
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;openmp;compiler-rt"
     # Windows has no libLLVM dylib — tools link the static libs instead, which
     # is why the win file partition differs from linux by construction.
     "-DLLVM_BUILD_LLVM_DYLIB=OFF"

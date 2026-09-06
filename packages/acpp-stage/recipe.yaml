@@ -125,9 +125,9 @@ requirements:
     # independent solves that could pick different interpreters, with lldb's
     # bindings compiled against whichever one host resolved.
     - python
-    # swig is only needed for lldb's python bindings (linux build)
-    - if: linux
-      then: swig
+    # swig generates lldb's python bindings, and lldb is now built on every
+    # platform, so swig is no longer linux-only.
+    - swig
     # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
     # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp itself
     # must be compiled by a clang-family driver. We take the plain `clang`
@@ -185,10 +185,13 @@ requirements:
     - if: win
       then:
         - khronos-opencl-icd-loader
+    # lldb links its python bindings against the HOST interpreter, so python
+    # belongs in host on every platform that builds lldb — which is now all of
+    # them. libxml2 and numactl remain linux packages.
+    - python
     - if: linux
       then:
         - libxml2-devel
-        - python
         - numactl
     - if: win
       then:

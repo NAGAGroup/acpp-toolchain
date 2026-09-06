@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-lldb — the LLDB debugger and its Python bindings, carved from the stage.
+#
+# ON ALL THREE PLATFORMS THIS ROUND, including Windows. lldb's absence from our
+# Windows build was OUR omission, not upstream's: conda-forge ships lldb for
+# win-64 at 21.1.x. Two reasons it belongs everywhere — it is a strong debugger
+# Windows users want, and our own run_constraints would otherwise PREVENT a
+# Windows user from installing conda-forge's lldb alongside this toolchain.
+#
+# ⚠ WIN AND OSX ARE UNPROVEN. Enabling lldb on those platforms is a change to
+# the stage's LLVM_ENABLE_PROJECTS and to its build requirements (swig and
+# python were linux-only), so the first real build on each is where it gets
+# tested. This package is correct by construction; the stage build is what may
+# need iteration.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_major_next: "22"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  library_prefix: ${{ "Library/" if win else "" }}
+
+  # THE CARVE. The debugger binaries, the shared library, and the Python
+  # bindings module. Each platform names itself; no fall-through branch, and
+  # the empty final case makes an unknown platform fail loudly in carve.nu
+  # rather than silently receive another platform's list.
+  carve_unix: >-
+    bin/lldb*;lib/liblldb*;lib/python*/**
+  carve_win: >-
+    Library/bin/lldb*.exe;Library/bin/liblldb.dll;Library/lib/liblldb.lib;Library/lib/python*/**
+  carve: ${{ carve_win if win else (carve_unix if (linux or osx) else "") }}
+
+package:
+  name: acpp-lldb
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: ${{ carve }}
+      PKG_NAME: acpp-lldb
+
+requirements:
+  build:
+    - nushell
+  host:
+    - acpp-stage ==${{ version }}
+    # Supplies the exact acpp-runtime spec to `run` via its weak run_export,
+    # pinning version, LLVM tag and build number in one place.
+    - acpp-runtime ==${{ version }}
+  run:
+    # This package ships the lldb Python bindings, so it needs an interpreter
+    # to be of any use. python's own run_export supplies python_abi, which
+    # pins the interpreter ABI *if* python is present but does not require it
+    # to be there — so without this the bindings could land in an environment
+    # with nothing able to import them.
+    - python
+  run_constraints:
+    # Same-major window: a different-major lldb cannot collide with ours, so
+    # only our own major is excluded. This is exactly the constraint that would
+    # have locked Windows users out of conda-forge's lldb had we kept shipping
+    # no lldb of our own there.
+    - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+  # NO ignore_run_exports. Under the old design every output inherited the
+  # staging host environment, so each one carried a long from_package list
+  # naming the CUDA, Level Zero and OpenCL packages to suppress. This package
+  # does not host-depend on any of them, so there is nothing to suppress —
+  # the list is not shorter, it is unnecessary.
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - ${{ library_prefix }}bin/lldb${{ ".exe" if win else "" }}
+          - if: not win
+            then:
+              - bin/lldb-server
+
+about:
+  homepage: https://lldb.llvm.org/
+  license: Apache-2.0 WITH LLVM-exception
+  license_file:
+    - licenses/llvm-LICENSE.TXT
+  summary: LLDB debugger built alongside the acpp toolchain

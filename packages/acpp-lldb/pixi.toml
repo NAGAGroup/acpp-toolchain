@@ -1,0 +1,17 @@
+# acpp-lldb — the LLDB debugger, carved from acpp-stage. PACKAGE-ONLY
+# manifest; the sole [workspace] is the repo root.
+[package]
+name = "acpp-lldb"
+version = "0.dev0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# The stage to carve from, and the runtime for its exact-build run_export.
+[package.build-dependencies]
+acpp-stage = { workspace = true }
+acpp-runtime = { workspace = true }
+
+[package.build.config]
+extra-input-globs = ["../_shared/carve.nu"]

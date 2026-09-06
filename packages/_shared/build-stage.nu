@@ -415,14 +415,30 @@ def main [] {
   }
   let src = $env.SRC_DIR
 
-  # (The license-drift guard that used to live here is GONE, deliberately. It
-  # compared vendored copies under shared/licenses/ against the extracted
-  # source trees, so a pin bump that changed a licence failed loudly instead of
-  # shipping stale text. The new recipes point `license_file` straight at the
-  # licence inside the extracted source — ${{ SRC_DIR }}/rocm-dist/share/doc/*/
-  # LICENSE* and friends — which CANNOT drift, because it IS the source. A
-  # guard against drift is only needed where a copy exists; deleting the copy
-  # deletes the failure mode, which is the better fix.)
+  # LICENCE-DRIFT GUARD. The shipped packages carve files out of this build and
+  # have no source tree of their own, so their `license_file` points at the
+  # vendored texts under _shared/licenses/. This is the only place that can
+  # still see both the vendored copy and the real licence in the extracted
+  # source, so it is where they are compared. A pin bump that changes a licence
+  # fails HERE, loudly, instead of shipping stale text — a licence is a publish
+  # gate, and the cost is one diff inside a build that already takes hours.
+  for pair in ([
+    [($src | path join "vendored-licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
+    [($src | path join "vendored-licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
+  ] ++ (if (($src | path join "rocm-dist") | path exists) {
+    # ROCm subset licences — linux-64 only, since the tarball is that
+    # platform's build input.
+    [
+      [($src | path join "vendored-licenses" "rocm" "hip-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "hip" "LICENSE.md")]
+      [($src | path join "vendored-licenses" "rocm" "rocr-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocr" "LICENSE.md")]
+      [($src | path join "vendored-licenses" "rocm" "amd_comgr-LICENSE.txt"), ($src | path join "rocm-dist" "share" "doc" "amd_comgr" "LICENSE.txt")]
+      [($src | path join "vendored-licenses" "rocm" "rocprofiler-register-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocprofiler-register" "LICENSE.md")]
+    ]
+  } else { [] })) {
+    if ((open --raw $pair.0 | str replace --all "\r" "") != (open --raw $pair.1 | str replace --all "\r" "")) {
+      error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update packages/_shared/licenses/"}
+    }
+  }
 
   # Conda's Windows layout puts headers/libs/binaries under %PREFIX%\Library,
   # so that — not $PREFIX — is the install prefix and the dependency root on

@@ -26,10 +26,9 @@ context:
   llvm_major: "21"
   version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
-  # Computed ONCE, so paths are written once. Never an `if: linux / else:`
-  # pair on a platform condition: `else` is a two-platform construct, and
-  # adding osx to a linux/win recipe sent macOS down every Windows branch —
-  # that is precisely how the mac content tests broke.
+  # Computed ONCE, so paths are written once rather than branched. `else` is a
+  # two-platform construct: on a third platform it silently hands out another
+  # platform's answer.
   library_prefix: ${{ "Library/" if win else "" }}
 
   # ── THE CARVE ────────────────────────────────────────────────────────────
@@ -53,7 +52,10 @@ context:
   # win, so the hipSYCL plugins appear under both bin and lib.
   carve_win: >-
     Library/bin/opt.exe;Library/bin/llc.exe;Library/bin/lld.exe;Library/bin/lld-link.exe;Library/bin/LLVM-C.dll;Library/bin/LTO.dll;Library/bin/Remarks.dll;Library/bin/libclang.dll;Library/bin/acpp-rt.dll;Library/bin/acpp-common.dll;Library/lib/LLVM-C.lib;Library/lib/LTO.lib;Library/lib/Remarks.lib;Library/lib/libclang.lib;Library/lib/acpp-rt.lib;Library/lib/acpp-common.lib;Library/bin/hipSYCL/**;Library/lib/hipSYCL/**
-  carve: ${{ carve_linux if linux else (carve_win if win else carve_osx) }}
+  # Every platform names itself. The final branch is deliberately EMPTY, not
+  # carve_osx: an unknown platform must fail loudly (carve.nu errors on an
+  # empty list) rather than silently receive the macOS carve.
+  carve: ${{ carve_linux if linux else (carve_win if win else (carve_osx if osx else "")) }}
 
 package:
   name: acpp-runtime
@@ -65,6 +67,8 @@ source:
   # which is what keeps a carving build cheap.
   - path: ../_shared/activation
     target_directory: activation
+  - path: ../_shared/licenses
+    target_directory: licenses
 
 build:
   number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
@@ -99,8 +103,12 @@ requirements:
     - zstd
 
 tests:
+  # NOT `strict: true`. Measured: strict means every file in the package must
+  # match a listed glob, so a short assertion list fails a package shipping
+  # hundreds of files ("Strict mode: 2 unmatched files found" on a 3-file
+  # probe). Without strict the list still fails loudly on a path that is
+  # missing, which is the assertion wanted here.
   - package_contents:
-      strict: true
       files:
         exists:
           - ${{ library_prefix }}bin/opt${{ ".exe" if win else "" }}
@@ -120,24 +128,11 @@ tests:
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
   license: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception
-  # ⚠ NO license_file YET — OPEN QUESTION, not an oversight.
-  #
-  # The ratified rule is "point license_file at the licence inside the
-  # extracted source, so it cannot drift". That rule assumed the old design,
-  # where every output inherited the staging work dir and therefore had the
-  # source trees to point at. A carving subpackage has NO source tree: it
-  # takes the stage as a HOST dependency, which is exactly what makes it
-  # cheap, and license_file resolves against SRC_DIR/RECIPE_DIR, never against
-  # the installed prefix.
-  #
-  # Three routes, none of them free, so this is a decision rather than a
-  # default:
-  #   1. the stage installs the licence texts into _stage/.licenses/ and each
-  #      subpackage CARVES the one it needs into share/licenses/<pkg>/ —
-  #      ships the text, but not as conda's info/licenses metadata;
-  #   2. each subpackage adds a source entry for just the licence file (a URL
-  #      plus sha256 per package, and network per build);
-  #   3. re-vendor the licence texts under _shared/licenses/ — which is what
-  #      the rebuild deleted, along with the drift guard it needed.
-  # Raised rather than silently picked.
+  # Vendored texts: a carving package has no source tree to point at, and
+  # license_file resolves against SRC_DIR/RECIPE_DIR, never the prefix. The
+  # stage asserts these copies are byte-identical to the extracted sources at
+  # every build, so they cannot drift unnoticed.
+  license_file:
+    - licenses/AdaptiveCpp-LICENSE
+    - licenses/llvm-LICENSE.TXT
   summary: AdaptiveCpp SYCL runtime and SSCP JIT backends

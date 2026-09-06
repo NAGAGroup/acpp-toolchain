@@ -85,6 +85,12 @@ source:
       - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
         sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
         target_directory: rocm-dist
+  # The vendored licence texts the shipped packages carry as their
+  # license_file. They come in here so the build can assert, against the
+  # extracted sources, that each one is still byte-identical — this build is
+  # the only place that can see both sides.
+  - path: ../_shared/licenses
+    target_directory: vendored-licenses
 
 build:
   number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}

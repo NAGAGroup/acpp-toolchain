@@ -1,0 +1,20 @@
+# acpp-runtime-rocm — the deliberate exception to "metapackages over
+# conda-forge": conda-forge ROCm is generations behind the LLVM this
+# toolchain needs (the generic JIT requires acpp LLVM <= ROCm LLVM), so the
+# runtime subset is deployed from TheRock stable core by the stage build and
+# CARVED here — real files, not dependencies. PACKAGE-ONLY manifest.
+[package]
+name = "acpp-runtime-rocm"
+version = "0.dev0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# Carves from the stage, so it takes the stage as a source sibling; the
+# recipe names it under requirements.host.
+[package.build-dependencies]
+acpp-stage = { workspace = true }
+
+[package.build.config]
+extra-input-globs = ["../_shared/carve.nu"]

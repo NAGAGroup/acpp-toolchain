@@ -40,4 +40,5 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 extra-input-globs = [
   "../_shared/build-stage.nu",
   "../_shared/patches/**",
+  "../_shared/licenses/**",
 ]

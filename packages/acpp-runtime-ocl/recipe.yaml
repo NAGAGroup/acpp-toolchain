@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime-ocl — the OpenCL backend's dependency set (an ICD loader).
+# Ships no toolchain files.
+
+context:
+  llvm_version: "21.1.8"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+package:
+  name: acpp-runtime-ocl
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  # x86 platforms only: the mac lane is OMP-only.
+  skip:
+    - osx
+
+requirements:
+  run:
+    - acpp-runtime ==${{ version }}
+    # The ICD loader ships under a different name per platform: ocl-icd is
+    # linux-only, Windows uses the Khronos loader (which reads the registry, so
+    # no vendor-dir wiring is needed there). Each platform names itself — no
+    # fall-through branch.
+    #
+    # Left UNPINNED on purpose: an ICD loader's entire contract is a stable ABI
+    # across versions, so a floor derived from our build machine would be noise
+    # rather than information. ICDs come from the environment
+    # (intel-compute-runtime, pocl, ...) or from the host system via
+    # ocl-icd-system, whose post-link script pixi disables by default.
+    #
+    # Caveat worth knowing: NVIDIA's OpenCL cannot ingest acpp's SPIR-V, so
+    # this backend lights up on Intel, Mesa rusticl and pocl.
+    - if: linux
+      then:
+        - ocl-icd
+        - ocl-icd-system
+    - if: win
+      then:
+        - khronos-opencl-icd-loader
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-3-Clause
+  license_file:
+    - licenses/AdaptiveCpp-LICENSE
+  summary: acpp SYCL runtime with OpenCL backend dependencies (ICD loader)

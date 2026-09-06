@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime-cuda — the CUDA backend's dependency set, plus the activation
+# that wires acpp's bitcode path. It ships no toolchain files of its own.
+#
+# Backend packages are separate so a user does not pull what they do not need.
+# They are NOT gated on a GPU being present: these are userspace libraries, and
+# on a machine with no CUDA device they simply report no devices available.
+
+context:
+  llvm_version: "21.1.8"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+package:
+  name: acpp-runtime-cuda
+  version: ${{ version }}
+
+source:
+  # Activation scripts and the vendored licence texts. No toolchain sources:
+  # this package carves nothing.
+  - path: ../_shared/activation
+    target_directory: activation
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  # The CUDA backend is an x86-platform deliverable; the mac lane is OMP-only.
+  skip:
+    - osx
+  # The CUDA bitcode wiring (an activation-time libdevice symlink or copy into
+  # acpp's redist path) lives HERE rather than in acpp-runtime: base packages
+  # ship no activation, and this is the package whose installation guarantees
+  # libdevice exists. On Windows the copy is the load-bearing mechanism —
+  # binary prefix replacement does not rewrite the baked path there.
+  script:
+    interpreter: nu
+    file: ../_shared/install-runtime-activation.nu
+
+requirements:
+  build:
+    - nushell
+  run:
+    # Exact, not a range. Under the old multi-output recipe this was
+    # pin_subpackage('acpp-runtime', upper_bound='x.x'); pin_subpackage refers
+    # to another OUTPUT of the same recipe and each package is now its own
+    # recipe, so the relationship has to be stated directly. Exact is right for
+    # a backend metapackage: it is meaningful only against the runtime build it
+    # was produced beside.
+    - acpp-runtime ==${{ version }}
+    # Constrained through cuda-version, components bare — conda-forge's
+    # documented downstream pattern: every cuda-* package pins itself to
+    # cuda-version, so the range is stated exactly once. The ceiling is
+    # required because libcudart's SONAME is major-versioned and dlopen
+    # resolves filenames, so a CUDA-13 runtime silently removes the GPU.
+    - cuda-version >=${{ cuda_compiler_version_min }},<${{ cuda_compiler_version_max }}
+    - cuda-cudart
+    # libdevice.10.bc only. NOT the cuda-nvvm metapackage: that also drags
+    # cuda-nvvm-impl's libnvvm.so, which acpp never loads. cicc rides along;
+    # libdevice has no package of its own.
+    - cuda-nvvm-tools
+  # No __cuda run constraint, deliberately: cuda-cudart depends on
+  # cuda-version, which already constrains "__cuda >=12" — a floor with no
+  # ceiling, which is the correct shape for a driver.
+
+tests:
+  - package_contents:
+      # NOT `strict: true`. Measured: strict requires EVERY shipped file to
+      # match a listed glob, so it demands a complete inventory — the second
+      # source of truth this design removes. Without it the list still fails
+      # loudly when a named path is missing, which is the assertion wanted.
+      files:
+        exists:
+          - if: linux
+            then:
+              - etc/conda/activate.d/acpp-runtime-activate.sh
+          - if: win
+            then:
+              - etc/conda/activate.d/acpp-runtime-activate.bat
+              - etc/conda/activate.d/acpp-runtime-activate.ps1
+              - etc/conda/activate.d/acpp-runtime-activate.sh
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-3-Clause
+  license_file:
+    - licenses/AdaptiveCpp-LICENSE
+  summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)

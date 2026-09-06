@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime-rocm — the deliberate exception to "metapackages over
+# conda-forge". conda-forge's ROCm is generations behind the LLVM this
+# toolchain needs (the generic JIT requires acpp's LLVM <= ROCm's LLVM), so the
+# runtime subset is deployed from TheRock's stable core tarball by the stage
+# build and CARVED here: real files, not dependencies. Named for rocm, not hip.
+
+context:
+  llvm_version: "21.1.8"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+  # THE CARVE — the subset acpp's own hip deployment manifest names, which the
+  # stage build deployed from the TheRock tarball. Family-independent: no
+  # .kpack, no math libraries. linux-64 only, so there is one list and no
+  # platform branch at all.
+  carve: >-
+    lib/libhiprtc*;lib/libamdhip64*;lib/libhsa*;lib/libamd_comgr*;lib/libroc*;lib/hipSYCL/ext/bitcode/amdgcn/**
+
+package:
+  name: acpp-runtime-rocm
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  # The ROCm tarball is a linux-64 build input; nothing to carve elsewhere.
+  skip:
+    - target_platform != "linux-64"
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: ${{ carve }}
+      PKG_NAME: acpp-runtime-rocm
+
+requirements:
+  build:
+    - nushell
+  host:
+    - acpp-stage ==${{ version }}
+  run:
+    - acpp-runtime ==${{ version }}
+  # Nothing else. Under the old design this output inherited the staging host
+  # environment wholesale, which is how cuda-cudart, level-zero, ocl-icd and
+  # python_abi became run dependencies of a ROCm metapackage. The stage exports
+  # nothing now, so a package carries only what it names.
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - lib/libamdhip64.so*
+          - lib/libhsa-runtime64.so*
+          - lib/libamd_comgr.so*
+          - lib/hipSYCL/ext/bitcode/amdgcn/ockl.bc
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  # Per-component sweep, read from the tarball's own share/doc texts: the HIP
+  # runtime, hiprtc and rocprofiler-register are MIT; hsa-runtime64 (ROCR) is
+  # NCSA; amd_comgr and the amdgcn device libraries are Apache-2.0 WITH
+  # LLVM-exception.
+  license: MIT AND NCSA AND Apache-2.0 WITH LLVM-exception
+  license_file:
+    - licenses/rocm/hip-LICENSE.md
+    - licenses/rocm/rocr-LICENSE.md
+    - licenses/rocm/amd_comgr-LICENSE.txt
+    - licenses/rocm/rocprofiler-register-LICENSE.md
+  summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)

@@ -1,0 +1,13 @@
+# acpp-runtime-ocl — backend METAPACKAGE. It ships no toolchain files, so it does not
+# depend on acpp-stage at all: nothing to carve, and no multi-GB stage
+# install in its build. PACKAGE-ONLY manifest; the sole [workspace] is the
+# repo root.
+#
+# Published with `pixi publish --path packages/acpp-runtime-ocl`.
+[package]
+name = "acpp-runtime-ocl"
+version = "0.dev0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }

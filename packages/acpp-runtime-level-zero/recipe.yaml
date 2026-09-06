@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime-level-zero — the Level Zero backend's dependency set (Intel
+# GPUs). Ships no toolchain files.
+#
+# Level Zero and OpenCL are SEPARATE backends with separate dependencies. They
+# were once a single acpp-runtime-intel package, which forced every OpenCL user
+# to install Intel's L0 loader.
+
+context:
+  llvm_version: "21.1.8"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+package:
+  name: acpp-runtime-level-zero
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  # x86 platforms only: the mac lane is OMP-only. level-zero ships for win-64
+  # as well as linux-64, so this backend is not linux-only.
+  skip:
+    - osx
+
+requirements:
+  # A REAL host dependency, so the run floor below tracks what the runtime was
+  # actually built against. level-zero arrives via level-zero-devel. The GPU
+  # driver itself is the system's — no channel ships it.
+  host:
+    - level-zero-devel
+  run:
+    # Stated directly rather than with pin_subpackage: that function refers to
+    # another OUTPUT of the same recipe, and every package is its own recipe
+    # now.
+    - acpp-runtime ==${{ version }}
+    - ${{ pin_compatible('level-zero') }}
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-3-Clause
+  license_file:
+    - licenses/AdaptiveCpp-LICENSE
+  summary: acpp SYCL runtime with Level Zero backend dependencies (Intel GPUs)

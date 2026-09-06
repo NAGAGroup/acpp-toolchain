@@ -2,39 +2,40 @@
 # and built as its own source package from our fork of conda-forge's
 # llvm-spirv-feedstock.
 #
-# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root. The manifest
+# sits outside the submodule and points into it — `pixi publish` skips any
+# subdirectory carrying its own workspace, and feedstocks ship pixi.toml files.
 #
-# WHY THIS SPLIT IS SAFE — verified, no circularity. acpp does NOT link the
-# translator. It builds it via ExternalProject_Add(LLVMSpirvTranslator) with
-# -DLLVM_SPIRV_BUILD_EXTERNAL=YES -DLLVM_DIR=... — i.e. against LLVM, not
+# WHY THIS SPLIT IS SAFE — verified at source, no circularity. acpp does NOT
+# link the translator. It builds it via ExternalProject_Add(LLVMSpirvTranslator)
+# with -DLLVM_SPIRV_BUILD_EXTERNAL=YES -DLLVM_DIR=... — i.e. against LLVM, not
 # against acpp — bakes in HIPSYCL_LLVMSPIRV_NAME and
 # HIPSYCL_RELATIVE_LLVMSPIRV_PATH, and then invokes llvm-spirv AS A SUBPROCESS
 # at runtime. add_dependencies() is build ordering only. The chain is strictly
 # LLVM -> llvm-spirv; acpp needs nothing but a path string.
 #
-# TWO EDITS THIS REQUIRES (both belong to the port, not to the skeleton):
-#   1. acpp hardcodes lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv. Set
-#      LLVMSPIRV_RELATIVE_INSTALLDIR so the baked compile definition points at
-#      bin/ — both packages land in the same conda prefix.
-#   2. The forked feedstock's source pin moves to the revision acpp expects,
-#      and stays locked to our LLVM major (acpp defaults the translator branch
-#      to llvm_release_${LLVM_VERSION_MAJOR}0).
-#
-# Like the osx activation, this feedstock is still conda-build `meta.yaml` and
-# needs a format conversion to rattler `recipe.yaml` before the backend can
-# consume it.
-#
-# STATUS (round 1, step 2): fork vendored and pinned; out of the publish set
-# until conversion + rename land. See ../../vendor/PROVENANCE.md.
+# THE acpp SIDE OF THE SPLIT IS A PATCH, NOT A -D. LLVMSPIRV_RELATIVE_INSTALLDIR
+# is assigned with a plain set(), which shadows any -D of the same name, and
+# nothing in acpp's CMake makes the ExternalProject optional. Redirecting the
+# baked path and suppressing the sub-build both belong to the stage recipe's
+# patch set; see packages/_shared/patches/.
 [package]
 name = "acpp-llvm-spirv"
-version = "0.1.0"
-publish = false
+version = "0.dev0"
+publish = true
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
 
+# THE PASSTHROUGH. The manifest tables add no dependencies — the backend
+# regards only what the recipe declares — but they supply the workspace path
+# mapping the recipe cannot know, which lets the recipe name these under
+# requirements.host as if they came from a channel. acpp-llvm-dev provides
+# LLVM's cmake package and link libraries; acpp-runtime's weak run_export is
+# what turns its host entry into an exact-build run dependency.
+[package.build-dependencies]
+acpp-llvm-dev = { workspace = true }
+acpp-runtime = { workspace = true }
+
 [package.build.config]
-# NOTE: this path does not exist yet — upstream ships recipe/meta.yaml here.
-# Written as the TARGET of the conversion so the wrapper is edited once.
 recipe = "../../vendor/llvm-spirv-feedstock/recipe/recipe.yaml"

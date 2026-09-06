@@ -1,0 +1,122 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-compiler-rt — the compiler-rt runtimes: the sanitizer and profile
+# archives, shared objects and ignorelists that `clang -fsanitize=...` and
+# `-fprofile-instr-generate` link against.
+#
+# A SEPARATE PACKAGE rather than part of acpp, matching conda-forge, which also
+# ships compiler-rt on its own: the runtimes are large and only wanted by
+# people who instrument builds. The run dependency is on `acpp` — the COMPILER,
+# not the runtime — which is what conda-forge's own artifact does
+# (compiler-rt 20.1.8 depends on `clang 20.1.8.*`).
+#
+# NOT BUILT ON macOS: the stage's darwin arguments set every
+# COMPILER_RT_BUILD_* to OFF, so there is nothing to carve there.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_major_next: "22"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  library_prefix: ${{ "Library/" if win else "" }}
+
+  # ── THE CARVE: HALF OF A PARTITION ───────────────────────────────────────
+  # The clang resource directory splits cleanly in two. include/ holds the
+  # compiler's own headers and belongs to acpp; lib/ and share/ hold the
+  # compiler-rt archives, shared objects and sanitizer ignorelists and belong
+  # here. acpp excludes exactly these two subtrees through its
+  # ACPP_CARVE_EXCLUDE, so the two lists are the same statement made from
+  # opposite sides — and tools/check-package-disjointness.nu asserts the result
+  # on the built artifacts rather than trusting the two lists to agree.
+  #
+  # No osx branch: this package is skipped there (see build.skip), and the
+  # final branch is empty so an unknown platform fails loudly in carve.nu.
+  carve_linux: >-
+    lib/clang/${{ llvm_major }}/lib/**;lib/clang/${{ llvm_major }}/share/**
+  carve_win: >-
+    Library/lib/clang/${{ llvm_major }}/lib/**;Library/lib/clang/${{ llvm_major }}/share/**
+  carve: ${{ carve_linux if linux else (carve_win if win else "") }}
+
+package:
+  name: acpp-compiler-rt
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  # macOS builds no compiler-rt components, so this package has no content
+  # there. When the mac sanitizer story is done, this skip comes off together
+  # with the COMPILER_RT_BUILD_* flags in the stage's darwin arguments.
+  skip:
+    - osx
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: ${{ carve }}
+      PKG_NAME: acpp-compiler-rt
+
+requirements:
+  build:
+    - nushell
+  host:
+    - acpp-stage ==${{ version }}
+    # HOST, not run: acpp carries a weak run_export naming its own version and
+    # build string, so the run dependency below is COMPUTED from the compiler
+    # these runtimes were carved beside rather than hand-written. Same
+    # mechanism acpp-runtime uses for the backend packages.
+    - acpp ==${{ version }}
+  run_constraints:
+    # conda-forge's compiler-rt of OUR major installs into the same
+    # lib/clang/<major>/lib path, so it is a genuine file collision rather than
+    # a version disagreement. A different major cannot collide.
+    - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    # BOTH platform payload packages. conda-forge splits compiler-rt into a
+    # front package plus a per-platform one, and it publishes the Windows half
+    # too (compiler-rt_win-64 exists — checked, not assumed), so constraining
+    # only the linux name would leave the Windows collision open.
+    - compiler-rt_linux-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - compiler-rt_win-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: linux
+            then:
+              # The archives every -fsanitize=address / -fprofile link needs.
+              # GLOBBED deliberately: the directory under lib/ is named after
+              # the build triple, which is a build-config detail rather than a
+              # contract. Safe to glob because `exists:` fails on a glob that
+              # matches nothing ("No match for files glob"), which is exactly
+              # the property wanted — if the partition ever stops matching,
+              # this package ships hollow and the build must stop.
+              - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.asan*
+              - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.profile*
+          - if: win
+            then:
+              - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.asan*
+        not_exists:
+          # The resource HEADERS and the compiler itself are acpp's — the other
+          # half of the partition, asserted from this side.
+          - if: linux
+            then:
+              - lib/clang/${{ llvm_major }}/include/omp.h
+              - bin/clang
+          - if: win
+            then:
+              - Library/lib/clang/${{ llvm_major }}/include/omp.h
+              - Library/bin/clang.exe
+
+about:
+  homepage: https://compiler-rt.llvm.org/
+  license: Apache-2.0 WITH LLVM-exception
+  license_file:
+    - licenses/llvm-LICENSE.TXT
+  summary: compiler-rt sanitizer and profile runtimes for the acpp toolchain

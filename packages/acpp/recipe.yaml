@@ -1,0 +1,208 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp — the compiler: the acpp drivers, the clang drivers AdaptiveCpp is
+# linked into, the binutils-equivalent LLVM tools, the SYCL headers, the clang
+# resource headers and the AdaptiveCpp cmake package.
+#
+# THIS IS THE LOAD-BEARING CONSUMER NAME. A project writes `host: acpp` and
+# selects the compilers by variant stem; everything it needs at run time
+# arrives through this package's run_export.
+#
+# Follows the acpp-runtime pattern exactly: single output, stage as a host
+# dependency, ../_shared/carve.nu doing the copy, no `files:` block.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_major_next: "22"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Read from the env ONCE, into context: `build_number` and `hash` are both
+  # undefined inside requirements, and the run_export below needs the same
+  # value build.number uses.
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  library_prefix: ${{ "Library/" if win else "" }}
+
+  # ── THE CARVE ────────────────────────────────────────────────────────────
+  # Final package paths, semicolon-separated. Every platform names its own set;
+  # the final branch is deliberately EMPTY so an unknown platform fails loudly
+  # in carve.nu instead of inheriting another platform's list.
+  #
+  # The three drivers clang++/clang-cl/clang-cpp are SYMLINKS to clang on every
+  # platform (clang/tools/driver/CMakeLists.txt creates them unconditionally),
+  # which is why carve.nu must copy links as links.
+  #
+  # LINKER OWNERSHIP splits by which driver the SSCP host JIT executes on that
+  # platform — those belong to acpp-runtime, the cross flavours stay here:
+  #   linux: runtime owns lld + ld.lld  -> here ld64.lld, lld-link, wasm-ld
+  #   osx:   runtime owns lld + ld64.lld -> here ld.lld,  lld-link, wasm-ld
+  #   win:   runtime owns lld + lld-link -> here ld.lld,  ld64.lld,  wasm-ld
+  # The links that stay here point at an lld that ships in acpp-runtime, which
+  # this package depends on, so they resolve once installed.
+  carve_linux: >-
+    bin/acpp*;bin/clang;bin/clang++;bin/clang-cl;bin/clang-cpp;bin/clang-${{ llvm_major }};bin/ld64.lld;bin/lld-link;bin/wasm-ld;bin/llvm-ar;bin/llvm-nm;bin/llvm-ranlib;bin/llvm-strip;bin/llvm-objcopy;bin/llvm-objdump;bin/llvm-readelf;bin/llvm-readobj;bin/llvm-size;bin/llvm-strings;bin/llvm-symbolizer;bin/llvm-cxxfilt;bin/llvm-addr2line;bin/llvm-dwarfdump;bin/llvm-dlltool;bin/llvm-lib;bin/llvm-rc;bin/llvm-mt;bin/llvm-windres;bin/llvm-cov;bin/llvm-profdata;bin/llvm-profgen;include/AdaptiveCpp/**;lib/clang/**;lib/cmake/AdaptiveCpp/**
+  # osx carries the Mach-O binutils (llvm-install-name-tool, llvm-bitcode-strip
+  # — unconditional symlinks to llvm-objcopy) and NOT the PE/COFF-oriented
+  # tools: llvm-mt is built only when LLVM_ENABLE_LIBXML2 is on, which is
+  # forced on the linux leg and not on the macOS one, and a carve glob matching
+  # nothing fails the build. Anything left unclaimed here is picked up by
+  # acpp-llvm-dev's bin/** remainder rather than going unpackaged.
+  carve_osx: >-
+    bin/acpp*;bin/clang;bin/clang++;bin/clang-cl;bin/clang-cpp;bin/clang-${{ llvm_major }};bin/ld.lld;bin/lld-link;bin/wasm-ld;bin/llvm-ar;bin/llvm-nm;bin/llvm-ranlib;bin/llvm-strip;bin/llvm-objcopy;bin/llvm-objdump;bin/llvm-readelf;bin/llvm-readobj;bin/llvm-size;bin/llvm-strings;bin/llvm-symbolizer;bin/llvm-cxxfilt;bin/llvm-install-name-tool;bin/llvm-bitcode-strip;include/AdaptiveCpp/**;lib/clang/**;lib/cmake/AdaptiveCpp/**
+  # win: clang.exe is the real binary (there is no clang-NN.exe) and the other
+  # drivers are install-time copies. `Library/bin/acpp` is the extensionless
+  # python driver; the *.exe form is spelled separately because a bare `acpp*`
+  # would also swallow acpp-rt.dll/acpp-common.dll, which are acpp-runtime's.
+  # The static link libraries live here — the import libs for the runtime DLLs
+  # do not.
+  carve_win: >-
+    Library/bin/acpp;Library/bin/acpp*.exe;Library/bin/clang.exe;Library/bin/clang++.exe;Library/bin/clang-cl.exe;Library/bin/clang-cpp.exe;Library/bin/ld.lld.exe;Library/bin/ld64.lld.exe;Library/bin/wasm-ld.exe;Library/bin/llvm-ar.exe;Library/bin/llvm-nm.exe;Library/bin/llvm-ranlib.exe;Library/bin/llvm-strip.exe;Library/bin/llvm-objcopy.exe;Library/bin/llvm-objdump.exe;Library/bin/llvm-readelf.exe;Library/bin/llvm-readobj.exe;Library/bin/llvm-size.exe;Library/bin/llvm-strings.exe;Library/bin/llvm-symbolizer.exe;Library/bin/llvm-cxxfilt.exe;Library/bin/llvm-addr2line.exe;Library/bin/llvm-dwarfdump.exe;Library/bin/llvm-dlltool.exe;Library/bin/llvm-lib.exe;Library/bin/llvm-rc.exe;Library/bin/llvm-mt.exe;Library/bin/llvm-windres.exe;Library/bin/llvm-cov.exe;Library/bin/llvm-profdata.exe;Library/bin/llvm-profgen.exe;Library/include/AdaptiveCpp/**;Library/lib/clang/**;Library/lib/cmake/AdaptiveCpp/**;Library/lib/AdaptiveCpp.lib;Library/lib/acpp-frontend.lib;Library/lib/acpp-clang-cbs.lib
+  carve: ${{ carve_linux if linux else (carve_win if win else (carve_osx if osx else "")) }}
+
+  # ── THE PARTITION OF THE CLANG RESOURCE DIRECTORY ────────────────────────
+  # lib/clang/<major> splits in two: include/ holds the compiler's own headers
+  # and belongs here; lib/ and share/ hold the compiler-rt archives, shared
+  # objects and sanitizer ignorelists and belong to acpp-compiler-rt. Claiming
+  # the whole tree above and subtracting exactly those two subtrees is what
+  # keeps the two packages a partition — the same statement acpp-compiler-rt
+  # makes from the other side.
+  #
+  # EMPTY ON macOS, and that is not an oversight: compiler-rt is not built
+  # there (COMPILER_RT_BUILD_* are OFF in the stage's darwin arguments), so
+  # those subtrees do not exist, and carve.nu fails an exclude glob that
+  # matches nothing exactly as it fails an include that matches nothing.
+  carve_exclude_unix: >-
+    lib/clang/${{ llvm_major }}/lib/**;lib/clang/${{ llvm_major }}/share/**
+  carve_exclude_win: >-
+    Library/lib/clang/${{ llvm_major }}/lib/**;Library/lib/clang/${{ llvm_major }}/share/**
+  carve_exclude: ${{ carve_exclude_unix if linux else (carve_exclude_win if win else "") }}
+
+package:
+  name: acpp
+  version: ${{ version }}
+
+source:
+  - path: ../_shared/licenses
+    target_directory: licenses
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: ${{ carve }}
+      ACPP_CARVE_EXCLUDE: ${{ carve_exclude }}
+      PKG_NAME: acpp
+
+requirements:
+  build:
+    - nushell
+  host:
+    - acpp-stage ==${{ version }}
+    # Supplies the exact acpp-runtime spec to `run` via its weak run_export.
+    - acpp-runtime ==${{ version }}
+  run:
+    # The acpp driver is a python program.
+    - python >=3.9
+    - if: linux
+      then:
+        # The C and C++ headers and startup files clang needs to compile
+        # anything on linux. macOS gets the equivalent from the SDK through its
+        # activation package; Windows from the MSVC toolset.
+        - libgcc-devel_linux-64 >=13
+        - libstdcxx-devel_linux-64 >=13
+  run_exports:
+    # TWO exports, and they do different jobs.
+    strong:
+      # THE consumer-facing line. Anything compiled with this toolchain gets
+      # the runtime it links against, with no manifest text on the consumer's
+      # side. Strong, so it reaches the consumer's `run` from the consumer's
+      # `host: acpp`.
+      #
+      # ⚠ NARROWER THAN THE PUBLISHED CONTRACT, deliberately, for round 1.
+      # On `main` this was pin_subpackage('acpp-runtime', upper_bound='x.x'),
+      # a RANGE (>=25.10.0,<25.11.0a0). pin_subpackage names another OUTPUT of
+      # the same recipe and does not exist across recipes, and a hand-written
+      # month-wide range over a DATE version is arithmetic jinja cannot do
+      # cleanly. `==<version>` means "the runtime of the same dated build set",
+      # which is what a nightly lane means anyway. The range form has to come
+      # back with the release lane, alongside the acpp-llvm mutex.
+      - acpp-runtime ==${{ version }}
+    weak:
+      # Self-identity, for acpp-compiler-rt, which takes this package as a HOST
+      # dependency and must receive the exact build it was carved beside. Same
+      # three-field match spec as acpp-runtime's: name, version, and a build
+      # string pinning the LLVM tag and the build number with only the variant
+      # hash left free (a consumer cannot compute the producer's hash).
+      - acpp ==${{ version }} ${{ llvm_build_tag }}_*_${{ build_num }}
+  run_constraints:
+    # SAME-MAJOR WINDOWS, not blanket exclusions. These names are unversioned
+    # on conda-forge, so a bare `<0.0a0` would forbid them at every version —
+    # needlessly barring clang 19 or clang 22 tooling that cannot collide with
+    # our files. The window forbids only the major we actually ship.
+    - clang <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - clangxx <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - llvm <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - llvm-tools <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - lld <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - llvmdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - clangdev <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    - compiler-rt <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+    # Already major-scoped by name, so a blanket forbid IS the same-major
+    # window.
+    - clang-${{ llvm_major }} <0.0a0
+
+tests:
+  - package_contents:
+      bin:
+        # `bin:` expands to the platform's executable spelling, so the
+        # extensionless acpp python driver matches on both layouts.
+        - clang
+        - acpp
+        - acpp-info
+        - llvm-ar
+      files:
+        exists:
+          - if: linux
+            then:
+              - include/AdaptiveCpp/sycl/sycl.hpp
+              - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+              - lib/clang/${{ llvm_major }}/include/omp.h
+          - if: osx
+            then:
+              # AdaptiveCpp's component mode is (APPLE OR WIN32), which nests
+              # the SYCL headers one level deeper than on linux.
+              - include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp
+              - include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
+              - lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+              - lib/clang/${{ llvm_major }}/include/omp.h
+          - if: win
+            then:
+              - Library/include/AdaptiveCpp/AdaptiveCpp/sycl/sycl.hpp
+              - Library/include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
+              - Library/lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
+              - Library/lib/clang/${{ llvm_major }}/include/omp.h
+        not_exists:
+          # The partition, asserted from this side: siblings' files must not be
+          # here. llvm-config is acpp-llvm-dev's, clang-tidy is acpp-tools',
+          # lldb is acpp-lldb's.
+          - if: not win
+            then:
+              - bin/clang-tidy
+              - bin/lldb
+              - bin/llvm-config
+          - if: win
+            then:
+              - Library/bin/clang-tidy.exe
+              - Library/bin/lldb.exe
+              - Library/bin/llvm-config.exe
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception
+  license_file:
+    - licenses/AdaptiveCpp-LICENSE
+    - licenses/llvm-LICENSE.TXT
+  summary: AdaptiveCpp SYCL compiler (clang with AdaptiveCpp linked in)

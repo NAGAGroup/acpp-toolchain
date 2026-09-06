@@ -68,6 +68,10 @@ build-variants-files = ["./variants.yaml"]
 [workspace.dependencies]
 acpp-stage = { path = "packages/acpp-stage" }
 acpp-runtime = { path = "packages/acpp-runtime" }
+acpp = { path = "packages/acpp" }
+acpp-compiler-rt = { path = "packages/acpp-compiler-rt" }
+acpp-llvm-dev = { path = "packages/acpp-llvm-dev" }
+acpp-tools = { path = "packages/acpp-tools" }
 acpp-runtime-cuda = { path = "packages/acpp-runtime-cuda" }
 acpp-runtime-level-zero = { path = "packages/acpp-runtime-level-zero" }
 acpp-runtime-ocl = { path = "packages/acpp-runtime-ocl" }
@@ -95,7 +99,10 @@ no-default-feature = true
 # rattler-index carries a real bound rather than the bare "*" the old manifest
 # used: whether bare "*" counts under the fleet no-version-wildcards rule is a
 # question still open with Jack, and a real bound sidesteps it.
-dependencies = { nushell = ">=0.114,<0.115", rattler-build = ">=0.75,<0.76", rattler-index = ">=0.31,<0.32", git = ">=2.55,<2.56" }
+# libarchive supplies bsdtar, which reads a .conda (a zip) and the
+# pkg-*.tar.zst inside it in one pipeline — that is how the disjointness check
+# reads a built artifact's info/files without unpacking anything to disk.
+dependencies = { nushell = ">=0.114,<0.115", rattler-build = ">=0.75,<0.76", rattler-index = ">=0.31,<0.32", git = ">=2.55,<2.56", libarchive = ">=3.8,<3.9" }
 
 # One publish builds every opted-in package across the variant matrix, in
 # dependency order, into an INDEXED local channel (a bare --target-dir only

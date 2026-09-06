@@ -1,0 +1,30 @@
+# acpp — the compiler, carved from acpp-stage. PACKAGE-ONLY manifest; the sole
+# [workspace] is the repo root.
+[package]
+name = "acpp"
+version = "0.dev0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# ONLY the stage, and the omission of acpp-runtime here is deliberate.
+#
+# MEASURED: pixi classifies a workspace sibling named in the recipe's
+# `run_exports` as a source RUN dependency, and `pixi publish --path` refuses a
+# package that has one ("has source run dependencies (acpp-runtime) and cannot
+# be published on its own"). This package must export acpp-runtime strongly —
+# that export IS the consumer contract — so the name cannot be mapped to a
+# source package here. Dropping the mapping renders green; the recipe's
+# `acpp-runtime ==<version>` host dependency then resolves from the TARGET
+# CHANNEL instead of from the sibling directory.
+#
+# CONSEQUENCE, for whoever writes the workflow: publish order is load-bearing.
+# acpp-runtime must be published before acpp is built. Every other package in
+# this family gets acpp-runtime through host + weak run_export, which pixi does
+# not see, so this constraint applies to acpp alone.
+[package.build-dependencies]
+acpp-stage = { workspace = true }
+
+[package.build.config]
+extra-input-globs = ["../_shared/carve.nu"]

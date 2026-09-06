@@ -180,11 +180,13 @@ RUNTIME_VERSION:
 CL_VERSION:
   - if: win
     then: "19.51.36247"
-# STILL OPEN, decided during the win port: FINAL_CFLAGS, FINAL_CXXFLAGS and
-# FINAL_CL_FLAGS. They are a genuine choice — they are the flag set every
-# consumer of this toolchain compiles with — but whether they stay variant keys
-# or become recipe constants is a question about the ported recipe, so they are
-# not half-lifted here.
+# FINAL_CFLAGS, FINAL_CXXFLAGS and FINAL_CL_FLAGS are deliberately ABSENT.
+# They are the flag set every consumer of this toolchain compiles with, so they
+# look like a choice — but upstream needs a variant only because its two rows
+# are win-64 and win-arm64, which differ by -march/-mtune. With one natively
+# built Windows platform the value is fixed, so they are constants in the win
+# recipe's own context: block, next to the CPPFLAGS_USED strings in the
+# activation templates they are spliced into.
 
 # ---- CUDA ------------------------------------------------------------------
 # conda-forge's pinning keys (cuda_compiler_version and _min are theirs; _max

@@ -10,29 +10,33 @@
 # the recipe — "no distinction between C/C++ because clangxx-cl exists
 # nowhere". clang-cl.bat sets BOTH CC and CXX to clang-cl.exe.
 #
-# The clang-cl output and the clang output must not activate together:
-# upstream gives clang-cl_<plat> an impossible run_constraint
-# (`clang_<plat> <0.0a0`, commented "avoid conflicting activations"), and our
-# renamed pair needs exactly the same treatment or they fight in a prefix.
+# The clang-cl output and the clang/clangxx pair must not activate together:
+# both install a vs<YEAR>_y-* script and both claim CC, so each side carries a
+# run_constraint excluding the other.
 #
 # Windows activation is a genuinely DIFFERENT contract from unix, not a
 # parameterisation of it: direct `set VAR=value`, no backup/restore helper,
 # no CMAKE_ARGS and no MESON_ARGS, CC=clang.exe rather than a triplet-prefixed
 # name. Ordering is engineered through FILENAMES (`vs<YEAR>_y-clang_<plat>.bat`
 # sorts after the VS activation; `_z-clangxx` after clang, because clangxx's
-# script consumes %CPPFLAGS_USED% that clang's sets). Our scripts must be
-# NAMED for their ordering, not merely written in an order.
-#
-# STATUS (round 1, step 2): fork vendored and pinned; the recipe is still
-# upstream's and still publishes upstream names, so this stays out of the
-# publish set until the rename lands. See ../../vendor/PROVENANCE.md.
+# script consumes %CPPFLAGS_USED% that clang's sets). Our scripts are NAMED
+# for their ordering, not merely written in an order.
 [package]
 name = "acpp-activation-win"
-version = "0.1.0"
-publish = false
+version = "0.dev0"
+publish = true
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# THE PASSTHROUGH. The manifest tables add no dependencies — the backend
+# regards only what the recipe declares — but they supply the workspace path
+# mapping the recipe cannot know, which lets it name `acpp ==<version>` under
+# requirements.host as if it came from a channel. acpp is the compiler these
+# packages activate, and its weak run_export is what turns that host dependency
+# into an exact-build run dependency.
+[package.build-dependencies]
+acpp = { workspace = true }
 
 [package.build.config]
 recipe = "../../vendor/clang-win-activation-feedstock/recipe/recipe.yaml"

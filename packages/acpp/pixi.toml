@@ -13,16 +13,18 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # MEASURED: pixi classifies a workspace sibling named in the recipe's
 # `run_exports` as a source RUN dependency, and `pixi publish --path` refuses a
 # package that has one ("has source run dependencies (acpp-runtime) and cannot
-# be published on its own"). This package must export acpp-runtime strongly —
-# that export IS the consumer contract — so the name cannot be mapped to a
-# source package here. Dropping the mapping renders green; the recipe's
-# `acpp-runtime ==<version>` host dependency then resolves from the TARGET
-# CHANNEL instead of from the sibling directory.
+# be published on its own"). That is a rule about what may be in a publish set;
+# `run_exports` itself is a templated string that is never resolved at build
+# time, so it is not what makes anything resolvable. This package must export
+# acpp-runtime strongly — that export IS the consumer contract — so the name
+# cannot be mapped to a source package here.
 #
-# CONSEQUENCE, for whoever writes the workflow: publish order is load-bearing.
-# acpp-runtime must be published before acpp is built. Every other package in
-# this family gets acpp-runtime through host + weak run_export, which pixi does
-# not see, so this constraint applies to acpp alone.
+# CONSEQUENCE, for whoever writes the workflow: publish order is load-bearing,
+# and the line that makes it so is the recipe's `acpp-runtime ==<version>` HOST
+# dependency, which does resolve. With no source mapping it resolves from the
+# TARGET CHANNEL, so acpp-runtime must be published before acpp is built. Every
+# other package in this family gets acpp-runtime through host + weak
+# run_export, which pixi does not see, so this applies to acpp alone.
 [package.build-dependencies]
 acpp-stage = { workspace = true }
 

@@ -56,7 +56,14 @@ requirements:
     # cuda-version, so the range is stated exactly once. The ceiling is
     # required because libcudart's SONAME is major-versioned and dlopen
     # resolves filenames, so a CUDA-13 runtime silently removes the GPU.
-    - cuda-version >=${{ cuda_compiler_version_min }},<${{ cuda_compiler_version_max }}
+    #
+    # GUARDED even though this whole output skips on osx: a variant key is
+    # resolved BEFORE `skip:` is honoured, so an unguarded reference to a key
+    # that variants.yaml scopes to `not osx` makes the osx render fail with
+    # "Template rendering failed: undefined value" instead of skipping.
+    - if: not osx
+      then:
+        - cuda-version >=${{ cuda_compiler_version_min }},<${{ cuda_compiler_version_max }}
     - cuda-cudart
     # libdevice.10.bc only. NOT the cuda-nvvm metapackage: that also drags
     # cuda-nvvm-impl's libnvvm.so, which acpp never loads. cicc rides along;

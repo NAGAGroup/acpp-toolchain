@@ -1,26 +1,43 @@
-# Nightly lane, BOTH platforms. Resolves AdaptiveCpp develop HEAD once and
-# skips a platform's build when it hasn't moved past that platform's last
-# published SHA. The resolved SHA is passed into the recipe
-# (ACPP_NIGHTLY_SHA) so the source is pinned per-commit — that also makes the
-# staging cache key rotate deterministically instead of relying on a floating
-# branch.
+# nightly — the ONE workflow for the rebuilt package set.
 #
-# Publish is PER-PLATFORM (unlike the atomic release publish): a nightly is
-# "whatever succeeded tonight", so a failing platform never blocks the other.
-# Each platform tracks its own bookkeeping variable (NIGHTLY_LAST_SHA /
-# NIGHTLY_LAST_SHA_WIN).
+# One file by design: the channel needs a single trusted-publisher
+# registration rather than one per platform. Platform selection happens
+# through dispatch inputs, not through separate workflows.
 #
-# Windows GPU gate: PLACEHOLDER — pending the runner-choices discussion;
-# Windows GPU validation is manual on real hardware until then.
+# JOB SHAPE IS LOAD-BEARING. Every package of a platform builds in ONE job,
+# because the expensive acpp-stage build is reused across all of them through
+# pixi's .pixi/bld cache, and that cache does not cross runners. Parallelise
+# by PLATFORM, never by package — a job per package would rebuild LLVM per
+# package.
+#
+# THERE IS NO "BUILD WITHOUT PUBLISHING" MODE, and that is structural rather
+# than an omission. `acpp`'s recipe carries `acpp-runtime ==<version>` as a
+# HOST dependency, and host dependencies resolve. acpp-runtime cannot be a
+# workspace sibling of acpp (pixi classifies a sibling named in run_exports as
+# a source RUN dependency and refuses to publish acpp on its own), so it has
+# to reach acpp through a channel — which means it must already be PUBLISHED
+# when acpp builds. Everything from `acpp` onward therefore requires a real
+# channel. The gates run immediately after, and `--force` means a bad set is
+# corrected by re-running rather than by cleanup.
 name: nightly
 
 on:
-  schedule:
-    - cron: "17 9 * * *" # daily; 24h cadence per design
   workflow_dispatch:
     inputs:
+      linux:
+        description: "Build linux-64"
+        type: boolean
+        default: true
+      win:
+        description: "Build win-64"
+        type: boolean
+        default: true
+      osx:
+        description: "Build osx-arm64"
+        type: boolean
+        default: true
       build_number:
-        description: "Build number override (bump when trialing workflow changes so publish gets fresh filenames)"
+        description: "Build number"
         default: "0"
 
 concurrency:
@@ -28,560 +45,132 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  upstream:
+  # Emits the platform matrix from the boolean inputs, and pins the version
+  # ONCE for the whole run. A date computed per-job could straddle midnight UTC
+  # and split one run across two versions.
+  setup:
     runs-on: ubuntu-latest
     outputs:
-      sha: ${{ steps.check.outputs.sha }}
-      date: ${{ steps.check.outputs.date }}
-      changed_linux: ${{ steps.check.outputs.changed_linux }}
-      changed_win: ${{ steps.check.outputs.changed_win }}
+      matrix: ${{ steps.m.outputs.matrix }}
+      nightly_date: ${{ steps.v.outputs.date }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          cache: true
-          environments: dev
-      - name: nightly recipe is in sync with release
-        run: pixi run -e dev check-nightly
-      # Without this the staging cache silently reuses a build made from
-      # different patches/sources (rattler-build does not hash them).
-      - name: staging_inputs hash is current
-        run: pixi run -e dev check-staging-hash
-      # Invisible to --render-only; fails at build time on the big runner.
-      - name: pins are resolvable
-        run: pixi run -e dev check-pins
-      - name: Resolve AdaptiveCpp develop HEAD
-        id: check
+      - id: v
+        run: echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+      - id: m
+        shell: bash
         run: |
-          # Exact ref: a bare `develop` glob also matches refs/remotes/*/develop
-          # upstream, which yields two lines and corrupts $GITHUB_OUTPUT.
-          SHA=$(git ls-remote https://github.com/AdaptiveCpp/AdaptiveCpp refs/heads/develop | head -1 | cut -f1)
-          DATE=$(date -u +%Y.%m.%d)
-          # PAUSE GATE. This lane's builds run on the 64-core runner, and the
-          # schedule fires them UNATTENDED whenever upstream develop moves. A
-          # marker file lets work-in-progress land on main without a cron
-          # deciding, at 09:17 UTC, to spend an hour of that runner proving a
-          # half-finished tree red.
-          #
-          # Deliberately scoped to `schedule` ONLY: workflow_dispatch always
-          # runs, so pausing never blocks the work, it only stops the clock
-          # from spending money on our behalf. Committed rather than a repo
-          # setting so it is visible in review and impossible to forget
-          # silently — every scheduled run it suppresses says so in the log.
-          if [ -f nightly/PAUSE-SCHEDULED ] && [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "::notice title=Scheduled nightly paused::nightly/PAUSE-SCHEDULED present — skipping. Dispatch manually to override."
-            sed 's/^/  /' nightly/PAUSE-SCHEDULED
-            {
-              echo "sha=$SHA"
-              echo "date=$DATE"
-              echo "changed_linux=false"
-              echo "changed_win=false"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+          set -euo pipefail
+          # `expect` is the number of ARTIFACTS that platform produces, which
+          # is not the package count: the activation packages are multi-output
+          # (linux 2, win 3, osx 2). MEASURED by rendering every package on
+          # every platform, not inferred from the skip blocks.
+          entries=()
+          [ "${{ inputs.linux }}" = "true" ] && entries+=('{"platform":"linux-64","runner":"Linux-x64-64","expect":13}')
+          [ "${{ inputs.win }}"   = "true" ] && entries+=('{"platform":"win-64","runner":"Win-x64-64","expect":13}')
+          [ "${{ inputs.osx }}"   = "true" ] && entries+=('{"platform":"osx-arm64","runner":"macOS-26-xlarge","expect":8}')
+          if [ ${#entries[@]} -eq 0 ]; then
+            echo "No platform selected — nothing to do." >&2
+            exit 1
           fi
-          # Bookkeeping lives in tag NAMES (nightly-last/<plat>/<sha>):
-          # GITHUB_TOKEN cannot access the repo Variables API at all
-          # (community#84700), but it can push refs with contents: write.
-          LAST_LINUX=$(git ls-remote origin "refs/tags/nightly-last/linux/*" | head -1 | sed 's|.*nightly-last/linux/||'); LAST_LINUX=${LAST_LINUX:-none}
-          LAST_WIN=$(git ls-remote origin "refs/tags/nightly-last/win/*" | head -1 | sed 's|.*nightly-last/win/||'); LAST_WIN=${LAST_WIN:-none}
-          {
-            echo "sha=$SHA"
-            echo "date=$DATE"
-            echo "changed_linux=$([ "$SHA" != "$LAST_LINUX" ] && echo true || echo false)"
-            echo "changed_win=$([ "$SHA" != "$LAST_WIN" ] && echo true || echo false)"
-          } >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ github.token }}
+          printf 'matrix={"include":[%s]}\n' "$(IFS=,; echo "${entries[*]}")" >> "$GITHUB_OUTPUT"
 
-  build-linux:
-    needs: upstream
-    if: needs.upstream.outputs.changed_linux == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: Linux-x64-64
-    timeout-minutes: 240
+  build:
+    needs: setup
+    strategy:
+      # A red platform must never cancel its siblings: each platform that
+      # succeeds publishes while the others are still being fixed.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 600
+    permissions:
+      id-token: write # OIDC trusted publishing — no stored key anywhere
     env:
+      # Set ONCE, here. Every recipe reads these; a package falling back to its
+      # default would publish version 0.dev0 silently.
+      ACPP_NIGHTLY_DATE: ${{ needs.setup.outputs.nightly_date }}
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
-      ACPP_NIGHTLY_SHA: ${{ needs.upstream.outputs.sha }}
-      ACPP_NIGHTLY_DATE: ${{ needs.upstream.outputs.date }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 20G
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
-          cache: true
-          environments: dev
+          submodules: recursive # the vendored feedstocks are submodules
 
-      - name: Restore ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-nightly-${{ github.run_id }}
-          restore-keys: |
-            ccache-nightly-
-            ccache-release-
-
-      - name: Restore rattler cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/rattler/cache
-          key: rattler-nightly-${{ github.run_id }}
-          restore-keys: rattler-nightly-
-
-      # The staging cache (full LLVM+acpp build) lives under the rattler
-      # OUTPUT dir (<output>/build_cache), NOT the global rattler cache —
-      # cache it explicitly or every run rebuilds staging from scratch.
-      - name: Restore staging cache
-        uses: actions/cache/restore@v4
-        with:
-          path: output/build_cache
-          key: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
-          restore-keys: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-
-
-      - name: Build nightly lane -> indexed local channel
-        run: pixi run -e dev build-nightly
-
-      - name: Prune stale staging caches
-        if: always()
-        run: |
-          cd output/build_cache 2>/dev/null || exit 0
-          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
-          du -sh . || true
-
-      - name: Save staging cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: output/build_cache
-          key: staging-nightly-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ github.run_id }}
-
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-nightly-${{ github.run_id }}
-
-      - name: Save rattler cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/rattler/cache
-          key: rattler-nightly-${{ github.run_id }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: local-channel-nightly
-          path: local-channel/
-          retention-days: 14
-
-  build-win:
-    needs: upstream
-    if: needs.upstream.outputs.changed_win == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: Win-x64-64
-    timeout-minutes: 300
-    env:
-      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
-      ACPP_NIGHTLY_SHA: ${{ needs.upstream.outputs.sha }}
-      ACPP_NIGHTLY_DATE: ${{ needs.upstream.outputs.date }}
-      CCACHE_MAXSIZE: 20G
-      CCACHE_NOHASHDIR: "1"
-    steps:
-      - uses: actions/checkout@v4
-
-      # See release.yml build-win for the storage rationale (D: removal,
-      # VHDX fallback, probed numbers).
-      - name: Select build storage
-        run: |
-          $root = $null
-          if (Test-Path "D:\") {
-            $root = "D:"
-          } else {
-            try {
-              $vhd = "C:\build-drive.vhdx"
-              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
-              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
-              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
-              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
-              $root = "$($part.DriveLetter):"
-              Write-Host "No D: on this instance (fleet is mid D:-removal); mounted ReFS VHDX at $root"
-            } catch {
-              Write-Host "VHDX fallback failed ($_); using workspace drive"
-              $root = $env:GITHUB_WORKSPACE
-            }
-          }
-          Write-Host "Fast storage root: $root"
-          New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
-          @(
-            "CCACHE_DIR=$root\ccache"
-            "CCACHE_BASEDIR=$root\rb-output"
-            "RATTLER_CACHE_DIR=$root\rattler-cache"
-            "ACPP_OUTPUT_DIR=$root\rb-output"
-          ) | Add-Content -Path $env:GITHUB_ENV
-
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          cache: true
-          environments: dev
-
-      - name: Restore ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-win-nightly-${{ github.run_id }}
-          restore-keys: |
-            ccache-win-nightly-
-            ccache-win-
-
-      - name: Restore rattler cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.RATTLER_CACHE_DIR }}
-          key: rattler-win-nightly-${{ github.run_id }}
-          restore-keys: rattler-win-nightly-
-
-      # Staging cache lives under the OUTPUT dir, not RATTLER_CACHE_DIR —
-      # see the linux job note.
-      - name: Restore staging cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
-          restore-keys: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-
-
-      # Same PATH strip as the release build-win (cmd.exe 8191-char limit).
-      - name: Build nightly lane (win-64) -> indexed local channel
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          Write-Host "PATH length: $($env:PATH.Length)"
-          pixi run -e dev build-nightly
-
-      - name: Inventory the produced packages
+      # A run that forgets the version publishes `0.dev0` with nothing failing
+      # anywhere. Fail here, before anything is built.
+      - name: Guard — version must be set
         shell: bash
         run: |
-          find local-channel -name '*.conda' -printf '%f  %s bytes\n' | sort
+          set -euo pipefail
+          if [ -z "${ACPP_NIGHTLY_DATE:-}" ] || [ "$ACPP_NIGHTLY_DATE" = "0.dev0" ]; then
+            echo "ACPP_NIGHTLY_DATE is unset or default — refusing to build." >&2
+            exit 1
+          fi
+          echo "Building $ACPP_NIGHTLY_DATE build $ACPP_BUILD_NUMBER for ${{ matrix.platform }}"
 
-      # Build-once/run-on-GPU: compile the SYCL smoke HERE (this box has
-      # VS2026) against the just-built channel; the GPU gate box has no VS
-      # and only runs the device-agnostic SSCP binary.
-      # pixi solves EVERY platform in the manifest; pin to this leg's own
-      # platform BEFORE the first solve or the local channel (win-64-only
-      # here) fails the linux-64 solve — this bit run 31354340049 after the
-      # legacy linux artifacts were deleted from the published channel (the
-      # foreign-platform solve had been silently satisfied by stale
-      # published artifacts until then). Mirrors the gpu-gate jobs' pin.
-      - name: Pin smoke manifest to this platform
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
-      - name: Compile GPU smoke binary
-        working-directory: shared/tests/gpu-smoke
-        timeout-minutes: 30
-        env:
-          ACPP_SMOKE_VCVARS: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat
-        run: |
-          pixi run build-smoke
-          Copy-Item smoke.exe ..\..\..\local-channel\smoke.exe
-
-      - name: Prune stale staging caches
-        if: always()
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:ACPP_OUTPUT_DIR "build_cache"
-          if ($dir -and (Test-Path $dir)) {
-            Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
-          }
-
-      - name: Save staging cache
-        if: always()
-        uses: actions/cache/save@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
-          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
-          key: staging-win-nightly-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ github.run_id }}
+          cache: true
+
+      # Explicit restore/save on both caches: actions/cache's post-step only
+      # saves on job SUCCESS, which starves iteration on exactly the runs that
+      # need warmth.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.platform }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.platform }}-
+
+      # THE stage cache. This is what makes the expensive build run once for
+      # all eleven-plus packages instead of once each.
+      - name: Restore pixi build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .pixi/bld
+          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-${{ github.run_id }}
+          restore-keys: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-
+
+      # Publishes in dependency order and collects the artifacts for gating.
+      # Asserts that every package on disk is accounted for as built or
+      # skipped, and that the skips are this platform's expected ones.
+      - name: Build and publish, in dependency order
+        run: >
+          pixi exec --spec nushell -- nu tools/build-platform.nu
+          --channel https://prefix.dev/jackm97/naga-labs-staging
+          --artifacts-dir dist
+
+      # Replaces the zero-clobber partition audit the exclude-based carve
+      # removed. Asserts the PROPERTY — no two of our packages ship the same
+      # path — rather than that the glob lists looked right. It found a real
+      # clobber on the CURRENT channel the first time it was run. `--expect`
+      # is mandatory and refuses a count below two, so it cannot pass
+      # vacuously over an empty or single-artifact set.
+      - name: "Gate: acpp-* artifacts are pairwise disjoint"
+        run: >
+          pixi exec --spec nushell --spec libarchive -- nu tools/check-package-disjointness.nu
+          --artifacts dist
+          --expect ${{ matrix.expect }}
 
       - name: Save ccache
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-win-nightly-${{ github.run_id }}
-
-      - name: Save rattler cache
+          path: .ccache
+          key: ccache-${{ matrix.platform }}-${{ github.run_id }}
+      - name: Save pixi build cache
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: ${{ env.RATTLER_CACHE_DIR }}
-          key: rattler-win-nightly-${{ github.run_id }}
+          path: .pixi/bld
+          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: local-channel-win-nightly
-          path: local-channel/
+          name: dist-${{ matrix.platform }}
+          path: dist/
           retention-days: 14
-
-  gpu-gate:
-    needs: [upstream, build-linux]
-    runs-on: Linux-x64-GPU
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-nightly
-          path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          run-install: false
-      - run: nvidia-smi
-      # The smoke manifest names release-lane packages; nightly ships the
-      # -nightly twins, so point the same tasks at those. Also pin to this
-      # platform: pixi solves every platform in the manifest, and this
-      # artifact channel only carries linux-64.
-      - name: Retarget smoke manifest at the nightly suite
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          sed -i 's/^acpp = /acpp-nightly = /; s/^acpp-runtime-cuda = /acpp-runtime-cuda-nightly = /; s/^acpp-compiler-rt = /acpp-compiler-rt-nightly = /; s/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
-      # Install SEPARATELY from running, with a generous bound: tonight a hung
-      # binary and a slow ~1GB cold download were indistinguishable, because
-      # the first `pixi run` silently carried the install. Splitting them means
-      # the run steps below can take a TIGHT timeout that only ever fires on a
-      # genuinely wedged binary.
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
-        timeout-minutes: 30
-        run: pixi install
-      - name: SYCL smoke on CPU backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
-      - name: SYCL smoke on CUDA backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cuda
-      - name: Sanitizer smoke (acpp-compiler-rt-nightly)
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run sanitizer-smoke
-
-  publish-linux:
-    needs: [upstream, build-linux, gpu-gate]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # the skip-check bookkeeping tag marker
-      id-token: write # OIDC trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-nightly
-          path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          cache: true
-          environments: dev
-      - name: "C-11 gate: no conda-forge name collisions"
-        run: pixi run -e dev check-no-collision
-      - name: "Closure gate: complete output set + every spec solvable"
-        run: pixi run -e dev check-closure
-      - name: Upload to prefix.dev
-        run: pixi run -e dev publish-channel
-      - name: Record built develop SHA (tag marker)
-        run: |
-          OLD=$(git ls-remote origin "refs/tags/nightly-last/linux/*" | awk '{print $2}')
-          if [ -n "$OLD" ]; then git push origin $(echo "$OLD" | sed 's/^/:/') || true; fi
-          git tag "nightly-last/linux/${{ needs.upstream.outputs.sha }}"
-          git push origin "nightly-last/linux/${{ needs.upstream.outputs.sha }}"
-
-  win-gpu-gate:
-    needs: [upstream, build-win]
-    runs-on: Win-x64-GPU
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-win-nightly
-          path: local-channel
-      # See release.yml win-gpu-gate for the driver rationale.
-      - name: Update NVIDIA datacenter driver
-        run: |
-          nvidia-smi
-          $ver = "553.62"
-          $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-winserver-2022-dch-international.exe"
-          Write-Host "Fetching $url"
-          curl.exe -sL -o driver.exe $url
-          Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait
-          nvidia-smi
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          run-install: false
-      # NB pwsh, not bash: on the Data Science Server image `shell: bash`
-      # resolves to C:\Windows\system32\bash.EXE (the WSL stub, no distro)
-      # rather than Git Bash, so every bash step fails instantly.
-      - name: Retarget smoke manifest at the nightly suite
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          # Every acpp* name must be renamed, not just the ones the smoke runs:
-          # a single release-lane name left in a nightly manifest is a lane mix,
-          # and the mirrored run_constraints make the whole workspace
-          # unsolvable rather than just ignoring the stray package.
-          (Get-Content pixi.toml) -replace '^acpp = ', 'acpp-nightly = ' -replace '^acpp-runtime-cuda = ', 'acpp-runtime-cuda-nightly = ' -replace '^acpp-compiler-rt = ', 'acpp-compiler-rt-nightly = ' | Set-Content pixi.toml
-      - name: Stage prebuilt smoke binary
-        run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
-      # pixi solves EVERY platform in the manifest; pin to this gate's own
-      # platform so a linux gate never tries to solve win-64 (and vice versa)
-      - name: Pin smoke manifest to this platform
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
-      # Install SEPARATELY from running, with a generous bound: tonight a hung
-      # binary and a slow ~1GB cold download were indistinguishable, because
-      # the first `pixi run` silently carried the install. Splitting them means
-      # the run steps below can take a TIGHT timeout that only ever fires on a
-      # genuinely wedged binary.
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
-        timeout-minutes: 30
-        run: pixi install
-      - name: Backends visible to the runtime
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run acpp-info
-      # Guard the layout the win runtime actually depends on: acpp locates
-      # its bitcode relative to acpp-common.dll (Library/bin), and the
-      # activation script must land libdevice there. Both have silently
-      # regressed before, surfacing only as an opaque JIT error, so assert
-      # them with a clear message instead.
-      - name: Verify runtime layout
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          $p = ".pixi\envs\default"
-          $required = @(
-            "$p\Library\bin\acpp-common.dll",
-            "$p\Library\lib\hipSYCL\bitcode\libkernel-sscp-host-full.bc",
-            "$p\Library\bin\hipSYCL\ext\bitcode\ptx\libdevice.10.bc"
-          )
-          $missing = $required | Where-Object { -not (Test-Path $_) }
-          if ($missing) {
-            Write-Host "Missing required runtime files:"
-            $missing | ForEach-Object { Write-Host "  $_" }
-            exit 1
-          }
-          Write-Host "runtime layout OK"
-      - name: SYCL smoke on CPU backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
-      - name: SYCL smoke on CUDA backend (PTX JIT on real hardware)
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cuda
-
-  publish-win:
-    needs: [upstream, build-win, win-gpu-gate]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # the skip-check bookkeeping tag marker
-      id-token: write # OIDC trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-win-nightly
-          path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          cache: true
-          environments: dev
-      - name: "C-11 gate: no conda-forge name collisions"
-        run: pixi run -e dev check-no-collision
-      - name: "Closure gate: complete output set + every spec solvable"
-        run: pixi run -e dev check-closure
-      - name: Upload to prefix.dev
-        run: pixi run -e dev publish-channel
-      - name: Record built develop SHA (tag marker)
-        run: |
-          OLD=$(git ls-remote origin "refs/tags/nightly-last/win/*" | awk '{print $2}')
-          if [ -n "$OLD" ]; then git push origin $(echo "$OLD" | sed 's/^/:/') || true; fi
-          git tag "nightly-last/win/${{ needs.upstream.outputs.sha }}"
-          git push origin "nightly-last/win/${{ needs.upstream.outputs.sha }}"
-
-  # ── Retention ─────────────────────────────────────────────────────────────
-  # ONE job, gated on BOTH platform publishes.
-  #
-  # Not a step inside the publish jobs: those run per-platform, so retention
-  # would run twice, and the first run would compute its window while the
-  # newest set existed on only one platform. The prune unit is a COMPLETE
-  # (date, llvm) set across every output AND both platforms, so retention must
-  # not form an opinion until the set it is protecting is actually complete.
-  #
-  # `needs` both publishes, so a red or skipped publish on either platform
-  # means no pruning at all — a broken streak must never eat the last known
-  # good nightlies.
-  #
-  # It is also where the monthly keeper is recorded, for the same reason: a
-  # keeper names a set complete on BOTH platforms, and this is the only job that
-  # has seen both publishes succeed. The keeper step runs BEFORE the prune and
-  # is not `continue-on-error`, so a failure to record stops the job with
-  # nothing deleted — recording the keeper is what makes the prune safe.
-  retention:
-    needs: [publish-linux, publish-win]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # the keeper commit; deletion below uses OIDC, not this
-      id-token: write # deletion goes through the same OIDC trusted publisher
-    steps:
-      # Full history, unlike every other job here: this job COMMITS, and the
-      # `git pull --rebase` below needs a merge base. On the default depth-1
-      # checkout the rebase fails outright the moment origin/main has moved.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: prefix-dev/setup-pixi@v0.10.0
-        with:
-          cache: true
-          environments: dev
-
-      # Appends only when this calendar month has no keeper yet, so it is a
-      # no-op on all but the first green nightly of a month, and re-running it
-      # is safe. No paths-ignore guard on the push: nightly has no `push:`
-      # trigger and release only listens for `push: tags: ["v*"]`, so this
-      # commit triggers nothing and cannot loop.
-      - name: "Keepers: record this month's first green set"
-        id: keeper
-        run: pixi run -e dev record-keeper
-
-      # Split from the step above because a step cannot read its own outputs.
-      # The two signals — the recorded id and the actual file change — must
-      # agree: either both are present or neither is. A mismatch means the
-      # recorder wrote the file without reporting, or reported without writing,
-      # and either way committing blind would be worse than stopping.
-      - name: "Keepers: commit and push the new keeper"
-        run: |
-          changed="$(git diff --name-only -- nightly/keepers.txt)"
-          id="${{ steps.keeper.outputs.keeper }}"
-          if [ -z "$changed" ] && [ -z "$id" ]; then
-            echo "keepers: this month already has a keeper; nothing to commit"
-            exit 0
-          fi
-          if [ -z "$changed" ] || [ -z "$id" ]; then
-            echo "keepers: INCONSISTENT — changed file='$changed', recorded id='$id'"
-            exit 1
-          fi
-          git config user.name "Jack Myers"
-          git config user.email "jack@myersjack.dev"
-          git add nightly/keepers.txt
-          git commit -m "keepers: record $id as the first green set of its month"
-          git pull --rebase origin main
-          git push origin HEAD:main
-
-      - name: "Retention: prune old nightly build-sets"
-        run: pixi run -e dev prune-nightly

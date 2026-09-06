@@ -100,8 +100,20 @@ def main [
       continue
     }
 
+    # VERDICT FIRST, then the detail. MEASURED: the captured pixi output is
+    # carriage-return heavy (progress rendering), so ANYTHING printed after it
+    # is overwritten on the same line and never reaches the log — including
+    # the `error make` message. The job still aborts with a non-zero exit, but
+    # with nothing naming the package that failed. Printing the verdict before
+    # the dump is what makes a CI failure legible.
+    # VERDICT FIRST, then the detail, and NO bare parens in the interpolation.
+    # `$"... (exit $x) ..."` does not print "(exit 1)" — nushell evaluates the
+    # parenthesised expression, so it CALLS exit and terminates the script
+    # then and there. The job aborted with a plausible non-zero code and no
+    # diagnostics at all, which read as correct behaviour.
+    print $"build-platform: FAILED on ($name) — pixi exit ($r.exit_code), output follows"
     print $out
-    error make {msg: $"build-platform: ($name) failed (exit ($r.exit_code))"}
+    error make {msg: $"build-platform: ($name) failed, pixi exit ($r.exit_code)"}
   }
 
   # Report both counts. Silence is not a result: a reader must be able to see

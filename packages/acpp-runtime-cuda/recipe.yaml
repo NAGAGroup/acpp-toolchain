@@ -42,14 +42,15 @@ build:
 requirements:
   build:
     - nushell
-  run:
-    # Exact, not a range. Under the old multi-output recipe this was
-    # pin_subpackage('acpp-runtime', upper_bound='x.x'); pin_subpackage refers
-    # to another OUTPUT of the same recipe and each package is now its own
-    # recipe, so the relationship has to be stated directly. Exact is right for
-    # a backend metapackage: it is meaningful only against the runtime build it
-    # was produced beside.
+  host:
+    # HOST, not run, and that is the whole mechanism: acpp-runtime carries a
+    # weak run_export naming its own exact version AND build string, and a weak
+    # run_export is applied to whatever host-depends on the package. So the run
+    # dependency below is not written here at all — it is COMPUTED from the
+    # runtime actually used, which is what pin_subpackage(exact=True) did
+    # inside the old single recipe.
     - acpp-runtime ==${{ version }}
+  run:
     # Constrained through cuda-version, components bare — conda-forge's
     # documented downstream pattern: every cuda-* package pins itself to
     # cuda-version, so the range is stated exactly once. The ceiling is

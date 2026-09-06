@@ -44,8 +44,9 @@ requirements:
     - nushell
   host:
     - acpp-stage ==${{ version }}
-  run:
+    # Its weak run_export supplies the exact acpp-runtime spec for run.
     - acpp-runtime ==${{ version }}
+  run:
   # Nothing else. Under the old design this output inherited the staging host
   # environment wholesale, which is how cuda-cudart, level-zero, ocl-icd and
   # python_abi became run dependencies of a ROCm metapackage. The stage exports

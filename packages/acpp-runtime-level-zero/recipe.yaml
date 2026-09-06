@@ -33,12 +33,11 @@ requirements:
   # actually built against. level-zero arrives via level-zero-devel. The GPU
   # driver itself is the system's — no channel ships it.
   host:
+    - acpp-runtime ==${{ version }}
     - level-zero-devel
   run:
-    # Stated directly rather than with pin_subpackage: that function refers to
-    # another OUTPUT of the same recipe, and every package is its own recipe
-    # now.
-    - acpp-runtime ==${{ version }}
+    # NOT written here: acpp-runtime is a HOST dep (below), and its weak
+    # run_export supplies the exact version+LLVM-tag spec automatically.
     - ${{ pin_compatible('level-zero') }}
 
 about:

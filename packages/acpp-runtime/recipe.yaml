@@ -101,6 +101,35 @@ requirements:
         - numactl
     - zlib
     - zstd
+  # THE REPLACEMENT FOR pin_subpackage(exact=True).
+  #
+  # Under one multi-output recipe, pin_subpackage guaranteed that a backend
+  # package depended on exactly the acpp-runtime built beside it. Across
+  # separate recipes that function does not exist — it names another OUTPUT of
+  # the same recipe — and a bare `==version` is NOT equivalent: two builds of
+  # the same version with different variants (a different LLVM, a different
+  # build number) both satisfy it, which is a silently mismatched install in a
+  # user's environment rather than a build failure in ours.
+  #
+  # A package can, however, state its own identity. This weak run_export pins
+  # name, version AND build string, and it is applied to every package that
+  # takes acpp-runtime as a HOST dependency — so each backend package receives
+  # the exact build it was assembled against, computed rather than transcribed.
+  # The build string here is the same expression as build.string above; if one
+  # changes the other must, which is why they sit next to each other.
+  run_exports:
+    weak:
+      # MatchSpec BRACKET form, and it has to be this form: `name ==ver=build`
+      # rejects a wildcard build ("the build string can only contain
+      # alphanumeric characters and underscores"), and ${{ hash }} is undefined
+      # inside requirements — the variant hash is computed FROM the resolved
+      # requirements, so it cannot be referenced within them.
+      #
+      # What this pins: version exactly, and the build string down to the LLVM
+      # tag. Verified on a probe that the export lands in the consumer as
+      # `pa ==1.2.3 llvm21_1_8_*`, i.e. the consumer cannot resolve a runtime
+      # built against a different LLVM.
+      - acpp-runtime[version="==${{ version }}",build="${{ llvm_build_tag }}_*"]
 
 tests:
   # NOT `strict: true`. Measured: strict means every file in the package must

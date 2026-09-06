@@ -11,9 +11,10 @@ publish = true
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
 
-# Carves from the stage, so it takes the stage as a source sibling; the
-# recipe names it under requirements.host.
+# Carves from the stage AND takes the runtime for its exact-build run_export;
+# both are named in the recipe under requirements.host.
 [package.build-dependencies]
+acpp-runtime = { workspace = true }
 acpp-stage = { workspace = true }
 
 [package.build.config]

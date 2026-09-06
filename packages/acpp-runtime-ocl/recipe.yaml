@@ -24,8 +24,10 @@ build:
     - osx
 
 requirements:
-  run:
+  host:
+    # Its weak run_export supplies the exact acpp-runtime spec for run.
     - acpp-runtime ==${{ version }}
+  run:
     # The ICD loader ships under a different name per platform: ocl-icd is
     # linux-only, Windows uses the Khronos loader (which reads the registry, so
     # no vendor-dir wiring is needed there). Each platform names itself — no

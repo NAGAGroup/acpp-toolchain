@@ -158,6 +158,22 @@ zip_keys:
 #   * clang_version (ctng), CLANG_VERSION (win) and the osx `version` key all
 #     name the clang being activated, which for us is the toolchain we ship:
 #     llvm_version / llvm_major above.
+#
+# WHAT THE FOUR PORTS ACTUALLY CONSUME, measured from
+# `rattler-build --render-only` rather than read off the recipes:
+#   ctng (linux-64)      c_stdlib, c_stdlib_version, llvm_version
+#   win  (win-64)        VCVER, VSYEAR, RUNTIME_VERSION, CL_VERSION,
+#                        llvm_major, llvm_version
+#   osx  (osx-arm64)     c_stdlib, c_stdlib_version, llvm_major, llvm_version
+#   llvm-spirv (all)     c_stdlib, c_stdlib_version, cxx_compiler,
+#                        cxx_compiler_version, llvm_major, llvm_version, zlib
+# Every one of those is already defined above, so the ports added nothing —
+# upstream's remaining keys all became recipe constants or died with the
+# outputs that used them. The vs2026 block below is the ONLY platform-scoped
+# variant left, which is why it is also the only place needing the
+# `${{ KEY if win else "<dummy>" }}` form: a recipe's `context:` is evaluated
+# before its `skip:`, so a key with no value on the rendering platform kills
+# the render even when every output there is skipped.
 
 # THE VISUAL STUDIO AXIS — nine keys zipped upstream, collapsed to the win-64
 # row of vs2026. LOOKED UP in conda-forge/vc-feedstock's

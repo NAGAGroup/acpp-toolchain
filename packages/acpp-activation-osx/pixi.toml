@@ -22,10 +22,14 @@
 # CMAKE_FIND_APPBUNDLE=LAST. There is no CMAKE_FIND_ROOT_PATH* in the osx
 # activation at all.
 #
-# THE SDK PIN IS THE POINT. sdkroot_env falls back to
-# `export SDKROOT="$(xcrun --show-sdk-path)"`, so nothing pins the SDK unless
-# we do — that fallback is the root cause of the whole mac patch sequence.
-# MACOSX_SDK_VERSION is pinned in ../../variants.yaml.
+# THE SDK PIN IS THE POINT, and it is NOT a variant key. sdkroot_env's
+# activation takes the first of: an already-set SDKROOT, then
+# CONDA_BUILD_SYSROOT, then `xcrun --show-sdk-path` — the runner's SDK, which
+# is the root cause of the whole mac patch sequence. MACOSX_SDK_VERSION does
+# not change that: nothing in any forked feedstock reads it, and osx-sysroot
+# carries it as a "dummy value for SDK to be downloaded" consumed by
+# conda-smithy, which we do not run. The SDK therefore has to be fetched and
+# exported as SDKROOT by the workflow. See ../../variants.yaml.
 #
 # STATUS (round 1, step 2): fork vendored and pinned; out of the publish set
 # until conversion + rename land. See ../../vendor/PROVENANCE.md.

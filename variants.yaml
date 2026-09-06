@@ -96,30 +96,33 @@ c_stdlib_version:
   - if: osx
     then: "11.0"
 
-# THE macOS SDK PIN — the root cause of the entire ad-hoc mac patch sequence.
-# osx-sysroot's sdkroot_env falls back to `export SDKROOT="$(xcrun
-# --show-sdk-path)"` when nothing is preset, so with no pin we built against
-# whatever Xcode the runner carried (macOS 26 SDK), which is what surfaced
-# LLVM's missing sys/resource.h and acpp's reliance on libc++ transitive
-# includes. conda-forge CI downloads a PINNED SDK instead.
+# THE macOS SDK — deliberately NOT a variant key here, because setting one
+# selects nothing. Traced through every layer 2026-09-05:
 #
-# THE NUMBER IS OPEN, not settled. Measured 2026-09-05: two upstream sources
-# disagree, and neither is the "conda-forge pins MACOSX_SDK_VERSION 11.0" this
-# was written from.
-#   * conda-forge-pinning-feedstock's conda_build_config.yaml defines NO
-#     MACOSX_SDK_VERSION key at all. What it pins at 11.0 is c_stdlib_version,
-#     i.e. the DEPLOYMENT TARGET — a different axis. The "SDK 11.0" claim comes
-#     from the knowledge base and describes conda-forge CI DOWNLOADING a pinned
-#     SDK, not a variant key anyone can inherit.
-#   * ctng-compiler-activation-feedstock — the activation feedstock we fork —
-#     sets MACOSX_SDK_VERSION: 14.5 in its own recipe/conda_build_config.yaml.
-# Both are self-consistent, since the SDK need only be at least the deployment
-# target. 11.0 stands here because it is what the ratified plan says; 14.5 (the
-# SDK the forked activation was written against) is the other defensible
-# value. Decide it deliberately, not by drift.
-MACOSX_SDK_VERSION:
-  - if: osx
-    then: "11.0"
+#   * MACOSX_SDK_VERSION appears in NO recipe and NO script of any of the three
+#     activation feedstocks we fork — only in ctng's own cbc (14.5), which
+#     nothing in that feedstock reads.
+#   * osx-sysroot-feedstock, which OWNS the SDK, carries it as
+#     `MACOSX_SDK_VERSION: 11.0` under the literal comment
+#     "# dummy value for SDK to be downloaded", and references it in exactly
+#     one place: an `echo` in a test.
+#   * The key's real consumer is conda-smithy, which downloads that SDK into
+#     $OSX_SDK_DIR (/opt/conda-sdks since conda-smithy 3.54.0) before the build
+#     starts. We do not run conda-smithy.
+#   * What actually chooses the SDK is sdkroot_env_osx-arm64's activation
+#     script, in this order: an already-set SDKROOT wins; else
+#     CONDA_BUILD_SYSROOT; else, on Darwin, `SDKROOT="$(xcrun --show-sdk-path)"`
+#     — the runner's SDK.
+#
+# So a number here would perturb the variant hash and change nothing else, and
+# the mac build would still inherit the runner's macOS 26 SDK — the root cause
+# of the whole ad-hoc mac patch sequence. The fix belongs in the WORKFLOW, not
+# in this file: fetch a pinned SDK and export SDKROOT before the build, which
+# is the branch sdkroot_env takes first. Tracked as a step-6 item.
+#
+# The DEPLOYMENT TARGET is a different axis and is pinned above, as
+# c_stdlib_version 11.0 — that one is real, and macosx_deployment_target_*
+# turns it into a `__osx >=11.0` run_export.
 
 # Keys move in lockstep. Each group is inert on a platform where its keys are
 # undefined (win defines neither compiler-version key), which is how one file
@@ -128,6 +131,60 @@ zip_keys:
   - [c_compiler, cxx_compiler]
   - [c_compiler_version, cxx_compiler_version]
   - [c_stdlib, c_stdlib_version]
+
+# ---- activation packages: keys lifted from the forked feedstocks -----------
+# pixi does NOT read a vendored feedstock's own recipe/conda_build_config.yaml
+# (measured 2026-09-05: the ctng render died on an undefined
+# cross_target_platform). Only this file reaches a build, so every key a
+# vendored recipe consumes must arrive here — or stop being a variant key.
+#
+# THE SPLIT, and why most of upstream's keys are absent: a key belongs here if
+# its value is a CHOICE. A key whose value is FIXED by building one platform
+# NATIVELY is a constant, and is declared in the ported recipe's own `context:`
+# block instead. Jinja resolves a name from `context:` and from the variant
+# table identically, so a constant costs nothing at the usage sites — and it
+# stops upstream's eight-target cross matrix from existing at all.
+#   * Declared as recipe constants, not lifted: cross_target_platform, triplet,
+#     CHOST, macos_machine, meson_cpu_family, uname_kernel_release,
+#     uname_machine.
+#   * Dropped with the outputs that used them: gcc_version, binutils_version,
+#     libgfortran_soname. We ship the clang activation pair only — no
+#     gcc/g++/gfortran activation and no gcc_bootstrap.
+#   * Collapsed onto keys already defined above: cross_stdlib and
+#     cross_stdlib_version ARE c_stdlib and c_stdlib_version for a native
+#     build. That is also what enforces the ratified "2.28, never upstream's
+#     2.17" — structurally, rather than as two numbers someone has to keep
+#     equal by hand.
+#   * clang_version (ctng), CLANG_VERSION (win) and the osx `version` key all
+#     name the clang being activated, which for us is the toolchain we ship:
+#     llvm_version / llvm_major above.
+
+# THE VISUAL STUDIO AXIS — nine keys zipped upstream, collapsed to the win-64
+# row of vs2026. LOOKED UP in conda-forge/vc-feedstock's
+# conda_build_config.yaml, not derived: upstream clang-win-activation's own cbc
+# knows only VS2022 (VCVER 14.3) and VS2019 (14.2), while c_compiler above pins
+# vs2026. vc-feedstock spells these lowercase and clang-win-activation consumes
+# them UPPERCASE — verified against the recipe — so they are lifted under the
+# names our recipe reads. Row two of that zip is the same vs2026 for win-arm64,
+# a platform we do not build, so taking the win-64 row IS the collapse; and a
+# single-valued key needs no zip_keys entry.
+VCVER:
+  - if: win
+    then: "14.5"
+VSYEAR:
+  - if: win
+    then: "2026"
+RUNTIME_VERSION:
+  - if: win
+    then: "14.51.36247"
+CL_VERSION:
+  - if: win
+    then: "19.51.36247"
+# STILL OPEN, decided during the win port: FINAL_CFLAGS, FINAL_CXXFLAGS and
+# FINAL_CL_FLAGS. They are a genuine choice — they are the flag set every
+# consumer of this toolchain compiles with — but whether they stay variant keys
+# or become recipe constants is a question about the ported recipe, so they are
+# not half-lifted here.
 
 # ---- CUDA ------------------------------------------------------------------
 # conda-forge's pinning keys (cuda_compiler_version and _min are theirs; _max

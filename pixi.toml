@@ -66,6 +66,8 @@ build-variants-files = ["./variants.yaml"]
 # `pixi publish`, and a wrapper outside the fork keeps our packaging metadata
 # out of the diff we take against conda-forge.
 [workspace.dependencies]
+acpp-stage = { path = "packages/acpp-stage" }
+acpp-runtime = { path = "packages/acpp-runtime" }
 acpp-activation-linux = { path = "packages/acpp-activation-linux" }
 acpp-activation-win = { path = "packages/acpp-activation-win" }
 acpp-activation-osx = { path = "packages/acpp-activation-osx" }

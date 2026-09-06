@@ -1,0 +1,208 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-stage — THE expensive build. LLVM + clang + lld + lldb + openmp +
+# compiler-rt + polly + bolt + AdaptiveCpp, in ONE cmake configure, installed
+# into <prefix>/_stage. Every shipped acpp-* package is a carve out of this.
+#
+# THIS PACKAGE IS NEVER PUBLISHED (`publish = false` in pixi.toml). It exists
+# so that its consumers can take it as a HOST dependency and copy their own
+# portion to the top of the prefix.
+#
+# WHY NOT A `staging:` OUTPUT — this is the whole reason the design looks like
+# this. Under pixi's rattler-build backend a `staging:` output's dependency
+# solve receives NO channels: a package output logs "Externally resolved
+# dependencies" (pixi resolves and hands over a finished set) while a staging
+# output logs "Resolving build environment / Channels:" and resolves on its
+# own, with nothing passed to it. Every dep then fails with "No candidates
+# were found". Measured on pixi 0.78.0 AND 0.79.0, for conda-forge binaries
+# and for workspace source packages alike, and unaffected by all five places a
+# channel can be declared. Plain rattler-build builds the same recipe green,
+# because it gets -c on the command line. A stage with real dependencies —
+# and this one needs cmake, ninja, python, zlib, CUDA, Boost — therefore
+# cannot be a staging output here. It can be an ORDINARY package, which is
+# what this is.
+#
+# SINGLE OUTPUT, NO `experimental`. Nothing in this file needs either.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  # Round 1 pins AdaptiveCpp to a CONSTANT develop commit. The reason is
+  # ccache, not feature freezing: resolving develop HEAD dynamically rotates
+  # the source rev on every upstream commit and invalidates the cache. The pin
+  # lives in ../../variants.yaml as acpp_rev so it is stated once.
+  acpp_commit: ${{ acpp_rev }}
+  # Date-versioned, like the nightly lane it replaces: 2026.x sorts above 25.x,
+  # which is exactly what stops a nightly from ever satisfying a release spec
+  # by accident. The LLVM major lives in the build string, not the version.
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+package:
+  name: acpp-stage
+  version: ${{ version }}
+
+source:
+  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+    sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+    target_directory: llvm-project
+    patches:
+      # Xcode 26 toolchain: <sys/resource.h> is no longer a transitive include,
+      # so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1).
+      - ../_shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
+  - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
+    rev: ${{ acpp_commit }}
+    target_directory: AdaptiveCpp
+    patches:
+      - ../_shared/patches/0001-llvmspirv-allow-local-source-dir.patch
+      # Level Zero backend includes a glibc-internal header; breaks on win
+      - ../_shared/patches/0002-ze-use-cstdint-not-glibc-internal-header.patch
+      # Level Zero backend links with GNU-style -lze_loader; lld-link drops it
+      - ../_shared/patches/0003-ze-find-loader-library-portably.patch
+      # Host-JIT vector math: find libmvec through the dynamic loader at
+      # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot, which
+      # does not exist on user machines, and lld has no default search paths.
+      - ../_shared/patches/0008-host-jit-find-libmvec-via-loader.patch
+  - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
+    sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
+    target_directory: SPIRV-LLVM-Translator
+  - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+    sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+    target_directory: OpenCL-Headers
+  - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+    sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+    target_directory: OpenCL-CLHPP
+  # ROCm, linux-64 only: TheRock's stable core tarball is the BUILD input —
+  # ROCM_PATH points here at configure time and the build deploys the runtime
+  # subset into the stage, to be carved by acpp-runtime-rocm. gfx1150 is the
+  # SMALLEST family tarball: the pieces acpp's hip manifest deploys (hiprtc,
+  # amdhip64, hsa-runtime64, amd_comgr, device-lib bitcode) are family-
+  # INDEPENDENT — the .kpack difference between families is ROCm's own math
+  # kernels, which are never deployed.
+  - if: target_platform == "linux-64"
+    then:
+      - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
+        sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
+        target_directory: rocm-dist
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  script:
+    interpreter: nu
+    file: ../_shared/build-stage.nu
+    env:
+      # rattler-build builds with a sanitized env, so anything ccache needs
+      # must be forwarded explicitly. Empty => ccache defaults.
+      CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
+      CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
+      CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
+      CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
+      ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
+
+requirements:
+  build:
+    - ${{ compiler('c') }}
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
+    - nushell
+    # A FUNCTIONAL FLOOR, not a pin: the build genuinely does not configure
+    # below this. Floors state a requirement of the software and stay in the
+    # recipe; choices about which version to build against live in
+    # ../../variants.yaml.
+    - cmake >=3.24
+    - ninja
+    - ccache
+    # De-versioned so the single `python` variant key applies. This used to
+    # read ">=3.9" in build while host asked for a bare `python`: two
+    # independent solves that could pick different interpreters, with lldb's
+    # bindings compiled against whichever one host resolved.
+    - python
+    # swig is only needed for lldb's python bindings (linux build)
+    - if: linux
+      then: swig
+    # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
+    # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp itself
+    # must be compiled by a clang-family driver. We take the plain `clang`
+    # package (deps: vc only) rather than the clang_win-64 ACTIVATION package,
+    # which is built solely against vs2022/vs2019 and would drag the VS year
+    # backwards.
+    #
+    # MUST be a build dep, NOT host: a package is the file DIFF of its build,
+    # and conda-forge's clang ships the very files we install (clang.exe,
+    # clang-cl.exe, clang-cpp.exe, lib/clang/**). As a host dep it silently
+    # ejected them from every package (run 31241929077).
+    #
+    # PINNED to the exact LLVM version we build: on win compiler-rt is built
+    # by THIS clang-cl in projects mode, so the building compiler matches the
+    # clang_rt sources and the shipped clang exactly.
+    - if: win
+      then: clang ==${{ llvm_version }}
+  host:
+    # DE-VERSIONED on purpose. Every version that would be written here lives
+    # in ../../variants.yaml, this workspace's pinning file: a variant key
+    # matching the package name supplies the version, and the render annotates
+    # the resolved spec with (V) to prove it applied. Bare is not unpinned.
+    - zlib
+    - zstd
+    # GPU backend build inputs are X86-PLATFORM inputs.
+    - if: target_platform == "linux-64" or target_platform == "win-64"
+      then:
+        # The single CUDA pin, hard against the variant key (conda-forge
+        # pinning-feedstock convention): cuda-version is what every other
+        # cuda-* package constrains itself against, so pinning it once aligns
+        # the whole set without a version literal on any of them.
+        - cuda-version ==${{ cuda_compiler_version }}
+        # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
+        - cuda-cudart-dev
+        # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home, and
+        # acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the cuda-nvvm
+        # metapackage — that drags in libnvvm.so, which nothing here loads.
+        - cuda-nvvm-tools
+        # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles the
+        # CUDA code. FindCUDAToolkit refuses to locate a toolkit without an
+        # nvcc binary (measured: FOUND=FALSE with cudart-dev + driver-dev +
+        # nvvm-tools + crt-dev alone).
+        - cuda-nvcc-tools
+        # level-zero{,-devel} and opencl-headers all ship for win-64, so the
+        # Intel backends are not linux-only. Upstream's Windows CI disables
+        # OpenCL, but the docs never say it cannot work — absence from someone
+        # else's CI is not evidence of impossibility.
+        - level-zero-devel
+        - opencl-headers
+    - if: target_platform == "linux-64"
+      then:
+        - ocl-icd
+        - cuda-driver-dev
+        - cuda-crt-dev_linux-64
+    - if: win
+      then:
+        - khronos-opencl-icd-loader
+    - if: linux
+      then:
+        - libxml2-devel
+        - python
+        - numactl
+    - if: win
+      then:
+        # nvcc.exe is what the legacy FindCUDA module anchors detection on.
+        # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
+        # hardcoded vs2019_win-64 dependency and would drag the 2019 toolset
+        # into the host env.
+        - cuda-nvcc-impl
+        - libboost-devel
+  # NO RUN DEPENDENCIES, DELIBERATELY, AND THIS IS STRUCTURAL.
+  #
+  # The stage is never installed by a user; it is a build input. Every run
+  # dependency is declared by the SUBPACKAGE that actually needs it. That is
+  # what makes the old run_exports leak impossible to repeat: under the
+  # previous design the metapackages inherited the staging host environment
+  # wholesale, which is how cuda-cudart, level-zero, ocl-icd and python_abi
+  # ended up as run deps of a ROCm metapackage. Here a package can only carry
+  # what it names.
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception
+  summary: Internal build stage for the acpp toolchain (never published)

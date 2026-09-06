@@ -1,0 +1,30 @@
+# acpp-runtime — the SYCL runtime, carved out of acpp-stage.
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+#
+# Published with `pixi publish --path packages/acpp-runtime`. A whole-workspace
+# publish cannot work while the stage is unpublished ("Every source dependency
+# of a published package must itself be published in the same batch"); a
+# --path publish is a batch of one, where only RUN dependencies may not be
+# source deps. The stage is a HOST dep, so this is the sanctioned route.
+[package]
+name = "acpp-runtime"
+version = "0.dev0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# THE PASSTHROUGH. The manifest tables do not ADD dependencies — the backend
+# regards only what the recipe declares. What this supplies is the workspace
+# PATH MAPPING the recipe cannot know, which lets the recipe name
+# `acpp-stage ==<version>` under requirements.host as if it came from a
+# channel.
+[package.build-dependencies]
+acpp-stage = { workspace = true }
+
+[package.build.config]
+# The carve script lives in ../_shared, outside this package directory, so it
+# is not covered by the default input globs derived from the recipe and the
+# package dir. Without this, editing the shared carve logic would not
+# invalidate this package's build.
+extra-input-globs = ["../_shared/carve.nu"]

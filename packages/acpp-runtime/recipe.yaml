@@ -1,0 +1,143 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-runtime — the SYCL runtime: the shared libraries, the JIT backend
+# plugins and SSCP bitcode, the runtime JSON configs, and the LLVM tools the
+# SSCP JIT actually executes at run time.
+#
+# THIS IS THE PATTERN every carving subpackage follows:
+#   * single output, no `staging:`, no `experimental`
+#   * acpp-stage declared in pixi.toml [package.build-dependencies] and named
+#     here under requirements.host by `name ==version` — the workspace
+#     passthrough, which is the sanctioned way a source sibling reaches a
+#     recipe (the manifest tables add no dependencies; they supply the path
+#     mapping the recipe cannot know)
+#   * ../_shared/carve.nu copies THIS package's portion from <root>/_stage to
+#     the top level; those copies are the package's file diff
+#   * run dependencies are declared HERE, by the package that needs them
+#
+# NO `files:` BLOCK, DELIBERATELY. The carve list below is the only list: the
+# copies it makes are the only new files, so capture-everything-new is exactly
+# the carve. A separate `files:` glob would be a second source of truth whose
+# two drift modes are both silent — a package with a hole, or a package with
+# nothing in it.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Computed ONCE, so paths are written once. Never an `if: linux / else:`
+  # pair on a platform condition: `else` is a two-platform construct, and
+  # adding osx to a linux/win recipe sent macOS down every Windows branch —
+  # that is precisely how the mac content tests broke.
+  library_prefix: ${{ "Library/" if win else "" }}
+
+  # ── THE CARVE ────────────────────────────────────────────────────────────
+  # Final package paths, semicolon-separated. Each platform names its own set
+  # explicitly; there is no fall-through branch.
+  #
+  # linux/osx: the SSCP JIT external tools (ptx JIT execs opt+llc; the CPU JIT
+  # execs opt+llc+lld — verified in llvm-to-backend/{ptx,host}/*.cpp), the
+  # versioned shared libraries, the JIT backend plugins + SSCP bitcode +
+  # pinned llvm-spirv under lib/hipSYCL, the runtime JSON configs, and on
+  # linux the OMP debugger extension.
+  carve_linux: >-
+    bin/opt;bin/llc;bin/lld;bin/ld.lld;lib/*.so*;lib/hipSYCL/**;etc/AdaptiveCpp/**;share/gdb/**
+  carve_osx: >-
+    bin/opt;bin/llc;bin/lld;bin/ld64.lld;lib/*.dylib*;lib/hipSYCL/**;etc/AdaptiveCpp/**
+  # win: no LLVM dylib (tools link static), so the shipped DLLs are the
+  # C-API/LTO/Remarks surface, libclang and acpp's own runtime; import .lib
+  # files travel with their DLL. The host JIT drives the native COFF linker,
+  # so lld-link and the lld driver live here, while the cross flavours
+  # (ld.lld/ld64.lld/wasm-ld) belong to acpp. DLLs are RUNTIME artifacts on
+  # win, so the hipSYCL plugins appear under both bin and lib.
+  carve_win: >-
+    Library/bin/opt.exe;Library/bin/llc.exe;Library/bin/lld.exe;Library/bin/lld-link.exe;Library/bin/LLVM-C.dll;Library/bin/LTO.dll;Library/bin/Remarks.dll;Library/bin/libclang.dll;Library/bin/acpp-rt.dll;Library/bin/acpp-common.dll;Library/lib/LLVM-C.lib;Library/lib/LTO.lib;Library/lib/Remarks.lib;Library/lib/libclang.lib;Library/lib/acpp-rt.lib;Library/lib/acpp-common.lib;Library/bin/hipSYCL/**;Library/lib/hipSYCL/**
+  carve: ${{ carve_linux if linux else (carve_win if win else carve_osx) }}
+
+package:
+  name: acpp-runtime
+  version: ${{ version }}
+
+source:
+  # Only the activation assets — NOT the toolchain sources. The stage carries
+  # those, and it arrives as a host dependency rather than as a source tree,
+  # which is what keeps a carving build cheap.
+  - path: ../_shared/activation
+    target_directory: activation
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: ${{ carve }}
+      PKG_NAME: acpp-runtime
+
+requirements:
+  build:
+    - nushell
+  host:
+    # The stage, by exact version. Declared as a source sibling in pixi.toml;
+    # named here as if it came from a channel. This is the passthrough that
+    # works — and note the stage is a HOST dep, which is precisely why
+    # `pixi publish --path` can publish this package while the stage itself
+    # stays unpublished.
+    - acpp-stage ==${{ version }}
+  run:
+    # Declared HERE, by the package that needs them. The stage exports
+    # nothing, so nothing arrives by accident — the structural end of the
+    # run_exports leak that once put cuda-cudart, level-zero, ocl-icd and
+    # python_abi onto a ROCm metapackage.
+    - if: linux
+      then:
+        - libxml2
+        - numactl
+    - zlib
+    - zstd
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        exists:
+          - ${{ library_prefix }}bin/opt${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/llc${{ ".exe" if win else "" }}
+          - if: linux
+            then:
+              - lib/libacpp-rt.so
+              - etc/AdaptiveCpp/acpp-core.json
+          - if: osx
+            then:
+              - lib/libacpp-rt.dylib
+              - etc/AdaptiveCpp/acpp-core.json
+          - if: win
+            then:
+              - Library/bin/acpp-rt.dll
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception
+  # ⚠ NO license_file YET — OPEN QUESTION, not an oversight.
+  #
+  # The ratified rule is "point license_file at the licence inside the
+  # extracted source, so it cannot drift". That rule assumed the old design,
+  # where every output inherited the staging work dir and therefore had the
+  # source trees to point at. A carving subpackage has NO source tree: it
+  # takes the stage as a HOST dependency, which is exactly what makes it
+  # cheap, and license_file resolves against SRC_DIR/RECIPE_DIR, never against
+  # the installed prefix.
+  #
+  # Three routes, none of them free, so this is a decision rather than a
+  # default:
+  #   1. the stage installs the licence texts into _stage/.licenses/ and each
+  #      subpackage CARVES the one it needs into share/licenses/<pkg>/ —
+  #      ships the text, but not as conda's info/licenses metadata;
+  #   2. each subpackage adds a source entry for just the licence file (a URL
+  #      plus sha256 per package, and network per build);
+  #   3. re-vendor the licence texts under _shared/licenses/ — which is what
+  #      the rebuild deleted, along with the drift guard it needed.
+  # Raised rather than silently picked.
+  summary: AdaptiveCpp SYCL runtime and SSCP JIT backends

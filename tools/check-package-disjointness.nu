@@ -1,0 +1,94 @@
+# check-package-disjointness.nu — assert that no two acpp-* packages built for
+# the same platform ship the same file.
+#
+# WHY THIS EXISTS. The old single recipe expressed each output as an include
+# list plus an exclude list and had a partition audit to prove the two agreed.
+# The rebuilt tree carves each package with its own glob list, and one package
+# — acpp-llvm-dev — is defined by SUBTRACTION: everything development-shaped
+# minus every sibling's claim. Subtraction trades the risk of shipping too
+# little for the risk of shipping too much, and shipping too much means two of
+# OUR packages owning the same path, which surfaces as a clobber in a user's
+# environment rather than as a red build in ours.
+#
+# So this asserts the PROPERTY (the packages are disjoint) instead of the
+# mechanism that is supposed to produce it (the glob lists agree). It reads
+# built artifacts, which is the only thing that can be wrong in the way that
+# matters.
+#
+# NOT VACUOUS BY CONSTRUCTION. A pairwise-disjointness assertion over zero or
+# one artifact is trivially true, which is how a gate ends up green while
+# checking nothing. `--expect` is REQUIRED and the run fails when a platform
+# directory holds fewer artifacts than that, so the result is always "compared
+# N packages and found no overlap" rather than "found no overlap".
+#
+# Usage (inside the dev environment, which supplies bsdtar via libarchive):
+#   pixi run -e dev nu tools/check-package-disjointness.nu --artifacts ./out --expect 10
+
+# A .conda is a zip holding two zstd tarballs. bsdtar reads both, so the file
+# list comes out of a pipeline without unpacking anything to disk.
+#
+# The member is info/paths.json, NOT info/files: rattler-build writes
+# paths.json and no files (checked against a real artifact — an info/files
+# lookup errors with "Not found in archive").
+def package-paths [artifact: string] {
+  let raw = (^bsdtar -xOf $artifact "info-*.tar.zst" | ^bsdtar -xOf - "info/paths.json")
+  $raw | from json | get paths | get _path
+}
+
+def main [
+  --artifacts: string    # directory of platform subdirectories holding .conda files
+  --expect: int          # minimum artifacts REQUIRED in each platform subdirectory
+] {
+  if ($artifacts | is-empty) {
+    error make {msg: "check-package-disjointness: --artifacts <dir> is required"}
+  }
+  if ($expect == null) or ($expect < 2) {
+    # Below two there is no pair to compare, so any "pass" would be vacuous.
+    error make {msg: "check-package-disjointness: --expect <n> is required and must be at least 2"}
+  }
+
+  let subdirs = (ls $artifacts | where type == dir | get name)
+  if ($subdirs | is-empty) {
+    error make {msg: $"check-package-disjointness: no platform subdirectories under ($artifacts)"}
+  }
+
+  mut failures = []
+  for dir in $subdirs {
+    let platform = ($dir | path basename)
+    let pkgs = (glob $"($dir)/*.conda")
+    # NB parentheses are escaped: inside an interpolated string `(...)` is a
+    # subexpression, so a literal one runs as a command.
+    print $"($platform): ($pkgs | length) artifacts, expecting at least ($expect)"
+    if ($pkgs | length) < $expect {
+      $failures = ($failures | append $"($platform): found ($pkgs | length) artifacts, expected at least ($expect) — the check would have compared too few packages to mean anything")
+      continue
+    }
+
+    let entries = ($pkgs | each {|p| {
+      name: ($p | path basename),
+      paths: (package-paths $p)
+    }})
+
+    # Every unordered pair, once.
+    mut compared = 0
+    for i in 0..<(($entries | length) - 1) {
+      for j in ($i + 1)..<($entries | length) {
+        let a = ($entries | get $i)
+        let b = ($entries | get $j)
+        $compared = $compared + 1
+        let shared = ($a.paths | where {|p| $p in $b.paths })
+        if not ($shared | is-empty) {
+          $failures = ($failures | append $"($platform): ($a.name) and ($b.name) both ship ($shared | length) path\(s\), e.g. ($shared | first 5 | str join ', ')")
+        }
+      }
+    }
+    let total_files = ($entries | get paths | flatten | length)
+    print $"($platform): compared ($compared) package pairs over ($total_files) shipped paths"
+  }
+
+  if not ($failures | is-empty) {
+    for f in $failures { print $"FAIL ($f)" }
+    error make {msg: $"check-package-disjointness: ($failures | length) failure\(s\) — see above"}
+  }
+  print "check-package-disjointness: OK"
+}

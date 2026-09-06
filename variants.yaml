@@ -92,7 +92,7 @@ c_stdlib_version:
   # so the VS year is pinned in ONE place; vs2026_win-64 already constrains
   # vs_win-64 ==2026.1, this only makes it explicit.
   - if: win
-    then: "2026.*"
+    then: "2026"
   - if: osx
     then: "11.0"
 

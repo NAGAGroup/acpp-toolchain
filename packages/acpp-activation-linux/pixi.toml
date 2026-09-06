@@ -17,19 +17,27 @@
 # The linux clang activation is literally `cp activate-gcc.sh
 # activate-clang.sh` plus a sed, which is why it lives in the gcc lineage.
 #
-# STATUS (round 1, step 2): the fork is vendored and pinned; the recipe is
-# still upstream's and still publishes upstream NAMES. Renaming every output
-# to acpp-* is mandatory before this can be published — a transitive
-# requirement for a name our channel provides is EXCLUDED by strict channel
-# priority, a hard solve failure, not a fall-through. That port is the next
-# step, and until it lands this package stays out of the publish set.
+# TWO OUTPUTS FROM ONE RECIPE, which is why this manifest's name matches
+# neither of them. The C++ activation script only sets the CXX half and relies
+# on the C one having run first, so the pair is pinned to each other with
+# pin_subpackage(exact=True) — a function that names another output of the SAME
+# recipe and therefore exists only while they share one.
 [package]
 name = "acpp-activation-linux"
-version = "0.1.0"
-publish = false
+version = "0.dev0"
+publish = true
 
 [package.build]
 backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# THE PASSTHROUGH. The manifest tables add no dependencies — the backend
+# regards only what the recipe declares — but they supply the workspace path
+# mapping the recipe cannot know, which lets it name `acpp ==<version>` under
+# requirements.host as if it came from a channel. acpp is the compiler these
+# packages activate, and its weak run_export is what turns that host dependency
+# into an exact-build run dependency.
+[package.build-dependencies]
+acpp = { workspace = true }
 
 [package.build.config]
 recipe = "../../vendor/ctng-compiler-activation-feedstock/recipe/recipe.yaml"

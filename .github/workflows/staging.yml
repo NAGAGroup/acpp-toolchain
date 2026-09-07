@@ -435,6 +435,15 @@ jobs:
       # workspace declares for a platform is present) plus a fresh solve of
       # every artifact, pinned to its exact build, against the real channel
       # under strict priority.
+      # The completeness half of gate 5 counts a platform''s noarch packages,
+      # which land in `noarch/`. Run 34124086049 reported two of them missing
+      # from a channel the SAME run solved them from, so the rule is exercised
+      # here — against two real fixture packages — before the gate that relies
+      # on it runs.
+      - name: "Gate 5 pre-check: completeness counts noarch/"
+        shell: bash
+        run: pixi run -e packaging test-closure-completeness
+
       - name: "Gate 5: closure — every published package is installable"
         shell: bash
         run: |

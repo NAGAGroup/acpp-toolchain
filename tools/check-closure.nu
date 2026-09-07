@@ -95,10 +95,23 @@ def main [
       error make {msg: $"closure: artifacts claim subdir ($p), which this workspace does not build"}
     }
     let declared = (declared-names $p)
-    let present = ($staged | where {|a| $a.subdir == $p } | get name | uniq | sort)
+    # ⚠ `noarch/` COUNTS TOWARDS A PLATFORM'S DECLARED SET. A platform job's
+    # declared names include the `noarch: generic` packages it produces —
+    # acpp-compiler-rt_linux-64 and acpp-compiler-rt21_linux-64 are declared by
+    # the linux job and land in `noarch/`, because that is where a noarch
+    # package goes whoever built it. Filtering on `subdir == p` alone therefore
+    # reported them missing from a channel they were demonstrably on: run
+    # 34124086049 SOLVED both of them in its own closure check, one section
+    # below, while the completeness check above it called them absent.
+    #
+    # This cannot mask a real miss: the noarch names are platform-specific
+    # (`…_linux-64` vs `…_win-64`), so a name declared by one platform is never
+    # satisfied by another platform's artifact.
+    let present = ($staged | where {|a| $a.subdir == $p or $a.subdir == "noarch" } | get name | uniq | sort)
     let missing = ($declared | where {|d| $d not-in $present })
     let ok = ($missing | is-empty)
-    print $"[(if $ok { 'PASS' } else { 'FAIL' })] completeness ($p): ($present | length) of ($declared | length) declared packages present"
+    let noarch_n = ($staged | where {|a| $a.subdir == "noarch" } | get name | uniq | length)
+    print $"[(if $ok { 'PASS' } else { 'FAIL' })] completeness ($p): ($present | length) of ($declared | length) declared packages present \(looked in ($p)/ and noarch/, the latter holding ($noarch_n) name\(s\))"
     if not $ok { print $"    MISSING: ($missing | str join ', ')" }
     $results = ($results | append $ok)
   }

@@ -210,6 +210,10 @@ dependencies = { nushell = ">=0.114,<0.115", rattler-build = ">=0.75,<0.76", rat
 # One publish builds every opted-in package across the variant matrix, in
 # dependency order, into an INDEXED local channel (a bare --target-dir only
 # copies files and is not solvable).
+# The closure gate''s completeness half: a platform''s declared set includes the
+# noarch packages it produces, and those land in `noarch/`. This BUILDS two real
+# fixture packages (one arch, one noarch) because the subdir under test is read
+# out of each artifact''s own index — a hand-written file would not have one.
 [tasks.publish-local]
 cmd = "pixi publish --to {{ channel }}"
 args = [{ arg = "channel", default = "./local-channel" }]
@@ -322,6 +326,10 @@ description = "Assert every generated per-platform recipe matches its authored s
 # The in-tree clang config guard, exercised against a REAL clang: the `..`
 # build-path shape that produced a false positive must pass, a config file
 # clang does not read must fire, and the flags must reach cc1.
+[feature.packaging.tasks.test-closure-completeness]
+cmd = "nu tools/tests/exercise-closure-completeness.nu"
+description = "Assert completeness counts noarch/ and still catches a real absence"
+
 [feature.packaging.tasks.test-clang-cfg-guard]
 cmd = "nu tools/tests/exercise-clang-cfg-guard.nu"
 description = "Exercise the in-tree clang config-file guard, both branches"

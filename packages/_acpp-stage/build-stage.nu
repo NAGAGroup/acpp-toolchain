@@ -80,6 +80,20 @@
 # the separators swapped and nothing else.
 def norm-rel [p: string] { $p | str replace --all '\' '/' }
 
+# ⚠ NATIVE SEPARATORS, AND THIS IS THE EXCEPTION TO THE FORWARD-SLASH LAW.
+# Everything inside these scripts is normalised to `/` so comparisons work — but
+# an argument handed to a WINDOWS TOOL THAT SHELLS OUT THROUGH cmd.exe must be
+# native. `create-forwarder-dll` ends by running `copy <src> <dst>` via
+# `subprocess(..., shell=True)`, and cmd's `copy` reads a `/` as the start of a
+# SWITCH: `%PREFIX%/Library\bin\…` failed with exit status 1 and took
+# acpp-llvm-openmp down with it (win run 34144428676), AFTER the stage had
+# packaged and seven slicers had been accepted.
+#
+# Upstream passes `%LIBRARY_BIN%` — a native path — so this is matching, not
+# inventing. Applied at the CALL SITE of an external, never to the values used
+# for comparison inside these scripts.
+def native-path [p: string] { $p | str replace --all '/' '\' }
+
 def canon-path [p: string] {
   $p | path expand | str replace '\\?\' '' | str replace --all '\' '/'
 }
@@ -1115,7 +1129,9 @@ def clang-install-fixups-win [prefix: string] {
   if not ($versioned | path exists) {
     error make {msg: $"($versioned) not found — libclang SOVERSION changed; check clangdev patch 0007 and libclang_soversion"}
   }
-  ^create-forwarder-dll $versioned ($bin | path join "libclang.dll") --no-temp-dir
+  # Native paths: the same cmd.exe `copy` inside create-forwarder-dll that took
+  # down acpp-llvm-openmp on win run 34144428676. Same tool, same trap.
+  ^create-forwarder-dll (native-path $versioned) (native-path ($bin | path join "libclang.dll")) --no-temp-dir
 
   # Upstream''s win openmp ships omp.h in BOTH `Library/include` and the clang
   # resource dir; openmp-header-fixups puts the real headers in include/ and

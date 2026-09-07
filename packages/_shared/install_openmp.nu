@@ -39,6 +39,18 @@
 def is-windows [] { $nu.os-info.name == "windows" }
 def is-darwin [] { $nu.os-info.name == "macos" }
 def slashes [] { str replace --all '\' '/' }
+# ⚠ NATIVE SEPARATORS, THE EXCEPTION TO THE FORWARD-SLASH LAW. An argument
+# handed to a WINDOWS TOOL THAT SHELLS OUT THROUGH cmd.exe must be native:
+# `create-forwarder-dll` ends by running `copy <src> <dst>` through
+# `subprocess(..., shell=True)`, and cmd's `copy` reads a `/` as the start of a
+# SWITCH. `%PREFIX%/Library\bin\…` failed with exit status 1 and took this
+# package down (win run 34144428676) after the stage had packaged and seven
+# slicers had been accepted. Upstream passes `%LIBRARY_BIN%`, a native path.
+#
+# Applied at the CALL SITE of an external only — never to the values these
+# scripts compare with each other, which stay forward-slash.
+def native-path [p: string] { $p | str replace --all '/' '\' }
+
 
 def place [src: string, layout_root: string, stage: string] {
   let rel = ($src | path relative-to $stage)
@@ -121,7 +133,7 @@ def main [] {
   # dependency on win.
   if (is-windows) {
     let bin = ($layout_root | slashes | path join "bin")
-    ^create-forwarder-dll ($bin | path join "libomp.dll") ($bin | path join "libiomp5md.dll") --no-temp-dir
+    ^create-forwarder-dll (native-path ($bin | path join "libomp.dll")) (native-path ($bin | path join "libiomp5md.dll")) --no-temp-dir
     let fwd = ($bin | path join "libiomp5md.dll")
     if not ($fwd | path exists) {
       error make {msg: "install_openmp: create-forwarder-dll did not produce libiomp5md.dll"}

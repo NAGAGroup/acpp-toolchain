@@ -212,12 +212,19 @@ def run-fixups [root: string, layout_root: string, os: string] {
   if $os == "windows" {
     rm -rf $stub_dir
     mkdir $stub_dir
+    # ⚠ THE STUB ASSERTS ITS ARGUMENTS ARE NATIVE. The real tool ends by running
+    # `copy <src> <dst>` through cmd.exe, where a `/` starts a SWITCH — so a
+    # forward-slash path fails with exit status 1 and takes the package with it
+    # (win run 34144428676, after the stage had packaged and seven slicers had
+    # been accepted). Everything else in these scripts is forward-slash by law;
+    # this one external is the exception, and the stub is where that exception
+    # can be enforced on a laptop instead of on a runner.
     if $nu.os-info.name == "windows" {
       # %2 is the forwarder path the fixup asks for; creating it empty is all
       # the harness needs, since what is under test is our logic around it.
-      "@echo off\r\nrem fixture stub for create-forwarder-dll\r\ntype nul > %2\r\n" | save -f $"($stub_dir)/create-forwarder-dll.bat"
+      "@echo off\r\nrem fixture stub for create-forwarder-dll\r\necho %1 %2 | findstr /C:\"/\" >nul && (echo STUB: forward slash in a path handed to create-forwarder-dll: %1 %2 & exit /b 3)\r\ntype nul > %2\r\n" | save -f $"($stub_dir)/create-forwarder-dll.bat"
     } else {
-      "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for\ntouch \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
+      "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for,\n# and REFUSES a forward-slash path the way cmd.exe's `copy` effectively does.\ncase \"$1$2\" in\n  */*) echo \"STUB: forward slash in a path handed to create-forwarder-dll: $1 $2\" >&2; exit 3 ;;\nesac\n: > \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
       ^chmod +x $"($stub_dir)/create-forwarder-dll"
     }
   }

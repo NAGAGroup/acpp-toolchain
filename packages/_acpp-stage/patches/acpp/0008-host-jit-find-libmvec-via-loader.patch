@@ -21,24 +21,24 @@ record DT_NEEDED libmvec.so.1 and the loader binds the system copy.
 
 --- a/src/compiler/llvm-to-backend/Utils.cpp
 +++ b/src/compiler/llvm-to-backend/Utils.cpp
-@@ -15,5 +15,8 @@
- #include <llvm/Support/Program.h>
- 
+@@ -17,6 +17,10 @@
  #ifdef _WIN32
  #include <llvm/Support/FileSystem.h>
-+#else
+ #endif
++#ifdef __linux__
 +#include <dlfcn.h>
 +#include <link.h>
- #endif
-@@ -195,10 +198,29 @@
-   std::string lib_mvec_path = common::filesystem::join_path(LIB_MVEC_DIR, LIB_MVEC_NAME);
++#endif
+ 
+ namespace hipsycl {
+ namespace compiler {
+@@ -196,7 +200,26 @@ std::string getLibMvecDir() {
  
    if (common::filesystem::exists(lib_mvec_redistributable_path)) {
      path = lib_path;
 -  } else if (common::filesystem::exists(lib_mvec_path)) {
--    path = replacePathPlaceholders(LIB_MVEC_DIR);
-   }
-+#ifndef _WIN32
++  }
++#ifdef __linux__
 +  // libmvec is glibc: the copy the dynamic loader resolves is the one that
 +  // matches libc at runtime. LIB_MVEC_DIR is find_library()'s answer on the
 +  // build machine and need not exist on the target.
@@ -57,15 +57,12 @@ record DT_NEEDED libmvec.so.1 and the loader binds the system copy.
 +  }
 +#endif
 +  if (path.empty() && common::filesystem::exists(lib_mvec_path)) {
-+    path = replacePathPlaceholders(LIB_MVEC_DIR);
-+  }
+     path = replacePathPlaceholders(LIB_MVEC_DIR);
+   }
  #endif
- 
-   return path;
 --- a/src/compiler/llvm-to-backend/host/LLVMToHost.cpp
 +++ b/src/compiler/llvm-to-backend/host/LLVMToHost.cpp
-@@ -477,8 +477,14 @@
-         LldInvocation.push_back("-L");
+@@ -478,7 +478,13 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
          LldInvocation.push_back(mvecDir);
          LldInvocation.push_back("--rpath");
          LldInvocation.push_back(mvecDir);

@@ -186,6 +186,33 @@ def linux-args [src: string, prefix: string, deps: string] {
     # On win and osx the host compiler is already clang, so compiler-rt rides
     # LLVM_ENABLE_PROJECTS there and the bootstrap child buys nothing.
     "-DLLVM_ENABLE_RUNTIMES=compiler-rt"
+    # ⚠ THE RUNTIME LIBRARY LAYOUT, AND IT IS THE FLAG THAT KEEPS CLANG AND
+    # COMPILER-RT AGREEING WITH EACH OTHER.
+    #
+    # The runtimes sub-build defaults `LLVM_ENABLE_PER_TARGET_RUNTIME_DIR` to
+    # ON (llvm/runtimes/CMakeLists.txt: `if (NOT DEFINED …) set(… ON)`), which
+    # installs to `lib/clang/<major>/lib/<triple>/`. conda-forge's
+    # compiler-rt-feedstock builds STANDALONE, where the layout is
+    # `lib/clang/<major>/lib/<os>/` — and that artifact is where every carve
+    # list in this repo was scoped from. Run 34106820571 installed to
+    # `lib/clang/21/lib/x86_64-conda-linux-gnu/` and the compiler-rt21 carve
+    # matched nothing.
+    #
+    # OFF on the OUTER configure is the right knob because it sets BOTH halves:
+    # clang is compiled to search the same directory the runtimes install into.
+    # Per-target ON makes clang look in `lib/<triple>/` FIRST and fall back to
+    # `lib/<os>/`, so a mismatch between the two halves would NOT redden a
+    # build — it would ship a toolchain that cannot find its own builtins.
+    #
+    # It is passed on BOTH channels deliberately. Whether the outer value
+    # reaches the runtimes CHILD through LLVM's forwarding is the one thing I
+    # could not confirm at source (the upstream file's forward list would not
+    # extract), and `RUNTIMES_CMAKE_ARGS` below is the channel this build
+    # already uses and has proven. Setting the same value twice costs nothing;
+    # relying on an unverified forward would risk exactly the silent
+    # half-and-half state described above. The osx block has carried this flag
+    # since it was written.
+    "-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF"
     # compiler-rt components upstream supports on linux but not on Windows.
     # XRay has no Windows port at all; MemProf and ORC are linux-first and are
     # not built by conda-forge's own Windows clang either.
@@ -429,6 +456,11 @@ def conda-toolchain-args [] {
       $"-DCMAKE_ASM_COMPILER_TARGET=($triple)"
       $"-DCMAKE_C_FLAGS=($flags)"
       $"-DCMAKE_CXX_FLAGS=($flags)"
+      # The same layout flag the outer configure carries — see the long note
+      # there. This is the channel that certainly reaches the child; the outer
+      # one is what clang itself is compiled with. Both must agree, so both say
+      # it.
+      "-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF"
       "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER"
       "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
       "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
@@ -978,6 +1010,30 @@ def main [] {
   if ((glob $rt_glob | length) == 0) {
     dump-runtimes-logs $build
     error make {msg: "compiler-rt runtimes are HOLLOW (no asan artifacts installed) — child configure evidence dumped above"}
+  }
+
+  # ⚠ AND THE RUNTIMES MUST BE IN THE DIRECTORY THE CARVES EXPECT. The guard
+  # above uses a `**` glob, so it passed happily while compiler-rt was
+  # installing to `lib/clang/<major>/lib/<triple>/` instead of `lib/<os>/` —
+  # the per-target layout — and the defect surfaced two jobs later as a carve
+  # matching nothing (run 34106820571). A `**` glob answers "did anything get
+  # built"; this answers "is it where every consumer of this stage believes it
+  # is", which is a different question and the one that was wrong.
+  #
+  # The expected directory is not a preference: it is the layout of the
+  # conda-forge compiler-rt artifact that every carve list here was scoped
+  # from, and it is what clang — compiled with PER_TARGET_RUNTIME_DIR=OFF —
+  # searches. Both halves are set by one flag on the outer configure, and this
+  # asserts the result rather than trusting the flag.
+  if not (is-windows) {
+    let os_dir = (if (is-darwin) { "darwin" } else { "linux" })
+    let want = ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" $os_dir)
+    if not ($want | path exists) {
+      let found = (glob ($prefix | path join "lib" "clang" "*" "lib" "*") | where {|p| ($p | path type) == "dir" })
+      print $"compiler-rt runtime directories present: ($found | str join ', ')"
+      error make {msg: $"compiler-rt installed no ($os_dir)/ runtime directory at ($want). That is the PER-TARGET layout (lib/<triple>/), which every carve list in this repo — all scoped from conda-forge's artifact — will miss. LLVM_ENABLE_PER_TARGET_RUNTIME_DIR must be OFF on the outer configure AND in RUNTIMES_CMAKE_ARGS"}
+    }
+    print $"compiler-rt runtime layout: ($want) — matches the carve lists"
   }
 
   if (is-windows) {

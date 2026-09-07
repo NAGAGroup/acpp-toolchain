@@ -1,0 +1,365 @@
+schema_version: 1
+
+# acpp-activation-win — the win-64 compiler activation set:
+# acpp-clang_win-64, acpp-clangxx_win-64 and acpp-clang-cl_win-64.
+#
+# LIFTED IN-TREE from our fork of conda-forge/clang-win-activation-feedstock
+# (fork point and our own head are in vendor/PROVENANCE.md; the submodule is
+# retired, because this methodology has no submodules). Upstream serves two jobs
+# at once: cross-compiling Windows binaries FROM linux (which needs the Windows
+# SDK and the MSVC headers downloaded, and ships .sh activation), and native
+# win-64 builds (.bat and .ps1 only). We do the second alone, pointed at the
+# clang WE ship (acpp).
+#
+# WHAT CHANGED, and why:
+#   * The winsdk and msvc-headers-libs outputs are gone, with the vsdownload.py
+#     source and its patch. Both are `skip: win` upstream — they exist to feed
+#     the cross path. Removing them removes python, six, ripgrep, msitools,
+#     p7zip and a network download from the build.
+#   * The cross axis is gone. cross_target_platform is a HARD LITERAL below,
+#     not ${{ target_platform }}: a literal makes the linux and osx jobs skip
+#     this recipe, whereas target_platform would make them render it under
+#     their own names. win-arm64 goes with it, which is why BUILTINS_ARCH is a
+#     constant in install-pkg.bat.
+#   * The .sh activation family is GONE from this directory. It is the cross
+#     script — it demands CONDA_BUILD_WINSDK, points INCLUDE and LIB into a
+#     downloaded SDK, exports CONDA_BUILD_CROSS_COMPILATION=1 and sets CC to a
+#     triplet-prefixed driver a native win prefix does not contain — and
+#     `main`'s render script globbing for it instead of following upstream's
+#     install-pkg.sh/.bat split is exactly how the currently published
+#     acpp-clang{,xx}_win-64 came to ship it. It is one `git diff` away in the
+#     fork; keeping it in tree only invites the same glob.
+#   * MAJOR_VER reaches install-pkg.bat from the recipe instead of being parsed
+#     out of PKG_VERSION. This lane's version is a DATE, so the parse would put
+#     the year into the clang resource directory path.
+#   * The clang resource directory path in the activation templates gained its
+#     Library/ component, which is where conda puts it on Windows.
+#   * CLANG_VERSION is llvm_version: the clang being activated is the clang
+#     this toolchain ships. The `clang`/`llvm-tools`/`lld`/`compiler-rt` run
+#     dependencies collapse into `acpp`, taken as a HOST dependency so its
+#     exact-build run_export computes the run spec.
+#   * FINAL_CFLAGS / FINAL_CXXFLAGS / FINAL_CL_FLAGS are recipe constants, not
+#     variant keys. Upstream needs a variant because its two rows are win-64
+#     and win-arm64; with one natively-built platform the value is fixed.
+
+context:
+  # ── the platform, as constants ────────────────────────────────────────────
+  # A LITERAL, never ${{ target_platform }}. See the note above.
+  cross_target_platform: win-64
+  CHOST: x86_64-pc-windows-msvc
+
+  # ── the toolchain being activated ─────────────────────────────────────────
+  llvm_version: ${{ llvm_version }}
+  llvm_major: ${{ llvm_major }}
+  # THE ACTIVATION VERSION IS MAJOR.MINOR, not the full patch and not a date —
+  # measured in conda-forge's own tree, where clang_<plat> carries 21.1 while
+  # the content packages carry 21.1.8. An activation package is a contract about
+  # which compiler SERIES it configures; a patch bump does not change it.
+  version: ${{ (llvm_version | split(".") | first) ~ "." ~ (llvm_version | split("."))[1] }}
+  # AdaptiveCpp's own version, which is a DATE — a different axis from the LLVM
+  # one above. `acpp` is ours and date-versioned, so the host dependency below
+  # cannot be written in terms of `version`.
+  acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Read from the env ONCE, into context: `build_number` is undefined inside
+  # requirements, and the outputs below need the same value build.number uses.
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+
+  # ── the Visual Studio axis ────────────────────────────────────────────────
+  # These ARE variant keys: which VS toolset our binaries are ABI-compatible
+  # with is a choice, and it is made once for the workspace in variants.yaml.
+  #
+  # The `if win else` dummies are load-bearing. Every output here is skipped off
+  # win-64, but `context:` is evaluated before any skip, and variants.yaml scopes
+  # these keys to win — so a linux or osx job walking the workspace would die on
+  # an undefined name. A conditional expression evaluates only the branch it
+  # takes, so the real value is still required on win.
+  VCVER: ${{ VCVER if win else "0.0" }}
+  vc_major: ${{ (VCVER if win else "0.0") | split(".") | first | int }}
+  vc_major_next: ${{ ((VCVER if win else "0.0") | split(".") | first | int) + 1 }}
+  VSYEAR: ${{ VSYEAR if win else "0000" }}
+  RUNTIME_VERSION: ${{ RUNTIME_VERSION if win else "0.0.0" }}
+  CL_VERSION: ${{ CL_VERSION if win else "0.0.0" }}
+
+  # ── the flag sets, as constants ───────────────────────────────────────────
+  # Lifted from upstream's conda_build_config.yaml, win-64 row. They are the
+  # ctng linux-64 flags minus -fPIC and -fno-plt, which have no meaning here.
+  FINAL_CFLAGS: -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe -march=nocona -mtune=haswell
+  # -std=c++17 is dropped, matching the linux activation. It is not a default
+  # flag; upstream carries it for gcc 8/9/10, where some package ABIs change
+  # with the C++ standard, and the clang this activates is well past that
+  # boundary. See ctng-compiler-activation-feedstock issue 42.
+  FINAL_CXXFLAGS: -fvisibility-inlines-hidden -fmessage-length=0 -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe -march=nocona -mtune=haswell
+  # clang-cl takes MSVC-style flags, and one set covers both languages:
+  # /Oi=-ftree-vectorize, /O2, /GS=-fstack-protector-strong,
+  # /Gy=-ffunction-sections, /MD=-fms-runtime-lib=dll. -pipe has no equivalent.
+  FINAL_CL_FLAGS: /Oi /O2 /GS /Gy /MD -fuse-ld=lld -march=nocona -mtune=haswell
+
+  # Output names, spelled once so the recipe, the installed script filenames
+  # and the tests cannot disagree.
+  pkg_clang: acpp-clang_${{ cross_target_platform }}
+  pkg_clangxx: acpp-clangxx_${{ cross_target_platform }}
+  pkg_clang_cl: acpp-clang-cl_${{ cross_target_platform }}
+
+recipe:
+  name: acpp-activation-win
+  version: ${{ version }}
+
+source:
+  # The activation templates, install-pkg.bat and the tests — this directory.
+  - path: .
+
+build:
+  number: ${{ build_num }}
+
+outputs:
+  - package:
+      name: ${{ pkg_clang }}
+      version: ${{ version }}
+    build:
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        file: install-pkg.bat
+        env:
+          # These are recipe constants, so they do not reach the build
+          # environment on their own; install-pkg.bat reads them as variables.
+          cross_target_platform: ${{ cross_target_platform }}
+          CHOST: ${{ CHOST }}
+          VSYEAR: ${{ VSYEAR }}
+          MAJOR_VER: ${{ llvm_major }}
+          FINAL_CFLAGS: ${{ FINAL_CFLAGS }}
+          PKG_NAME: ${{ pkg_clang }}
+    requirements:
+      build:
+        - m2-sed
+      host:
+        # The compiler being activated. HOST, not run: acpp's weak run_export
+        # states its own exact build (version, LLVM tag, build number), so the
+        # run dependency on it is COMPUTED rather than transcribed, and acpp's
+        # strong export adds the matching acpp-runtime.
+        - acpp ==${{ acpp_version }}
+      run:
+        # The MSVC toolset this activation composes with. Its activation
+        # scripts set INCLUDE, LIB and PATH; ours sort after them by filename.
+        - vs${{ VSYEAR }}_${{ cross_target_platform }} ==${{ CL_VERSION }}
+        # vs${{ VSYEAR }}_${{ cross_target_platform }} locates the installed
+        # Visual Studio through it.
+        - vswhere
+      run_exports:
+        strong:
+          # THE RUNTIME EXPORT, RESTATED IN EVERY OUTPUT ON PURPOSE. Anything
+          # compiled with this toolchain links AdaptiveCpp's runtime, and
+          # upstream's own comment on the equivalent line says why it cannot be
+          # inherited: "Because transitive run_exports do not work" — an export
+          # reaches DIRECT dependents only, so the toolchain package carries it
+          # itself even though `acpp` (a host dependency above) exports it too.
+          # A FLOOR, not a pin, exactly as upstream writes libgcc: this spec
+          # lands in third-party packages, and pinning their runtime to one
+          # build of ours would make them unsolvable against every later build.
+          - acpp-runtime >=${{ acpp_version }}
+          # Restated rather than inherited: vs${{ VSYEAR }}_${{ cross_target_platform }}
+          # exports these, but it is a RUN dependency here, and run_exports
+          # propagate from HOST dependencies only.
+          - vc >=${{ VCVER }},<${{ vc_major_next }}
+          - vc${{ vc_major }}_runtime >=${{ RUNTIME_VERSION }}
+          # UCRT is part of the OS from Windows 10 on, but not before, and the
+          # VC runtime does not always bundle it.
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        # DELIBERATELY BLANKET, not a same-major window. An activation package
+        # owns CC/CXX/AR/... in the environment's activate.d, and two packages
+        # claiming that role fight regardless of which LLVM they point at.
+        - clang_${{ cross_target_platform }} <0.0a0
+        # clang-cl installs a vs*_y-* script too, and sets CC to a different
+        # driver.
+        - clang-cl_${{ cross_target_platform }} <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs${{ VSYEAR }}_y-${{ pkg_clang }}.bat
+              - etc/conda/activate.d/vs${{ VSYEAR }}_y-${{ pkg_clang }}.ps1
+      - requirements:
+          run:
+            - cmake
+            - ninja
+        files:
+          recipe:
+            - cmake_test_c/
+            - test.c
+            - run_test_clang.bat
+        script:
+          file: run_test_clang
+    about:
+      summary: Clang compiler activation for the acpp toolchain (C, win-64)
+      license: BSD-3-Clause
+      license_file: LICENSE.txt
+      homepage: https://github.com/NAGAGroup/clang-win-activation-feedstock
+
+  - package:
+      name: ${{ pkg_clangxx }}
+      version: ${{ version }}
+    build:
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        file: install-pkg.bat
+        env:
+          cross_target_platform: ${{ cross_target_platform }}
+          CHOST: ${{ CHOST }}
+          VSYEAR: ${{ VSYEAR }}
+          MAJOR_VER: ${{ llvm_major }}
+          FINAL_CXXFLAGS: ${{ FINAL_CXXFLAGS }}
+          PKG_NAME: ${{ pkg_clangxx }}
+    requirements:
+      build:
+        - m2-sed
+      host:
+        - acpp ==${{ acpp_version }}
+      run:
+        # The C++ activation script sets only the CXX half; it relies on the C
+        # script having run first for CPPFLAGS_USED. Both live in the same
+        # recipe, so this is a real exact pin.
+        - ${{ pin_subpackage(pkg_clang, exact=True) }}
+      run_exports:
+        strong:
+          # THE RUNTIME EXPORT, RESTATED IN EVERY OUTPUT ON PURPOSE. Anything
+          # compiled with this toolchain links AdaptiveCpp's runtime, and
+          # upstream's own comment on the equivalent line says why it cannot be
+          # inherited: "Because transitive run_exports do not work" — an export
+          # reaches DIRECT dependents only, so the toolchain package carries it
+          # itself even though `acpp` (a host dependency above) exports it too.
+          # A FLOOR, not a pin, exactly as upstream writes libgcc: this spec
+          # lands in third-party packages, and pinning their runtime to one
+          # build of ours would make them unsolvable against every later build.
+          - acpp-runtime >=${{ acpp_version }}
+          - vc >=${{ VCVER }},<${{ vc_major_next }}
+          - vc${{ vc_major }}_runtime >=${{ RUNTIME_VERSION }}
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        - clangxx_${{ cross_target_platform }} <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs${{ VSYEAR }}_z-${{ pkg_clangxx }}.bat
+              - etc/conda/activate.d/vs${{ VSYEAR }}_z-${{ pkg_clangxx }}.ps1
+      - requirements:
+          run:
+            - cmake
+            - ninja
+        files:
+          recipe:
+            - cmake_test_cxx/
+            - test.cpp
+            - run_test_clangxx.bat
+        script:
+          file: run_test_clangxx
+      - script:
+          # The ACPP delta: the SYCL environment this activation adds on top of
+          # the upstream contract. The test environment has already sourced the
+          # activate.d script, so these are live values.
+          - if not defined ACPP_TARGETS exit 1
+          - if not defined ACPP_COMPILER_DIR exit 1
+          - if not exist "%ACPP_CLANG%" exit 1
+          - if not exist "%ACPP_CPU_CXX%" exit 1
+    about:
+      summary: Clang compiler activation for the acpp toolchain (C++ and SYCL, win-64)
+      license: BSD-3-Clause
+      license_file: LICENSE.txt
+      homepage: https://github.com/NAGAGroup/clang-win-activation-feedstock
+
+  # The MSVC-CLI-compatible driver, which most existing Windows build systems
+  # expect. There is no clangxx-cl anywhere, so this one output covers both
+  # languages, and it is an ALTERNATIVE to the clang/clangxx pair rather than
+  # an addition to it.
+  - package:
+      name: ${{ pkg_clang_cl }}
+      version: ${{ version }}
+    build:
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+      skip:
+        - target_platform != "win-64"
+      script:
+        file: install-pkg.bat
+        env:
+          cross_target_platform: ${{ cross_target_platform }}
+          CHOST: ${{ CHOST }}
+          VSYEAR: ${{ VSYEAR }}
+          MAJOR_VER: ${{ llvm_major }}
+          FINAL_CL_FLAGS: ${{ FINAL_CL_FLAGS }}
+          PKG_NAME: ${{ pkg_clang_cl }}
+    requirements:
+      build:
+        - m2-sed
+      host:
+        - acpp ==${{ acpp_version }}
+      run:
+        - vs${{ VSYEAR }}_${{ cross_target_platform }} ==${{ CL_VERSION }}
+        - vswhere
+      run_exports:
+        strong:
+          # THE RUNTIME EXPORT, RESTATED IN EVERY OUTPUT ON PURPOSE. Anything
+          # compiled with this toolchain links AdaptiveCpp's runtime, and
+          # upstream's own comment on the equivalent line says why it cannot be
+          # inherited: "Because transitive run_exports do not work" — an export
+          # reaches DIRECT dependents only, so the toolchain package carries it
+          # itself even though `acpp` (a host dependency above) exports it too.
+          # A FLOOR, not a pin, exactly as upstream writes libgcc: this spec
+          # lands in third-party packages, and pinning their runtime to one
+          # build of ours would make them unsolvable against every later build.
+          - acpp-runtime >=${{ acpp_version }}
+          - vc >=${{ VCVER }},<${{ vc_major_next }}
+          - vc${{ vc_major }}_runtime >=${{ RUNTIME_VERSION }}
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        - clang-cl_${{ cross_target_platform }} <0.0a0
+        - clang_${{ cross_target_platform }} <0.0a0
+        # Ours, for the same reason as upstream's: both would install a
+        # vs*_y-* script and fight over CC and CXX.
+        - ${{ pkg_clang }} <0.0a0
+        - ${{ pkg_clangxx }} <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs${{ VSYEAR }}_y-${{ pkg_clang_cl }}.bat
+              - etc/conda/activate.d/vs${{ VSYEAR }}_y-${{ pkg_clang_cl }}.ps1
+      - requirements:
+          run:
+            - cmake
+            - ninja
+        files:
+          recipe:
+            - cmake_test_c/
+            - cmake_test_cxx/
+            - test.c
+            - test.cpp
+            - run_test_clang.bat
+            - run_test_clangxx.bat
+        script:
+          - run_test_clang.bat
+          - run_test_clangxx.bat
+          - if not defined ACPP_TARGETS exit 1
+          - if not exist "%ACPP_CLANG%" exit 1
+    about:
+      summary: clang-cl compiler activation for the acpp toolchain (win-64)
+      license: BSD-3-Clause
+      license_file: LICENSE.txt
+      homepage: https://github.com/NAGAGroup/clang-win-activation-feedstock
+
+about:
+  homepage: https://github.com/NAGAGroup/clang-win-activation-feedstock
+  license: BSD-3-Clause
+  license_file: LICENSE.txt
+  summary: Compiler activation scripts for the acpp clang toolchain on win-64
+
+extra:
+  feedstock-name: clang-win-activation
+  recipe-maintainers:
+    - isuruf
+    - xhochy
+    - h-vetinari

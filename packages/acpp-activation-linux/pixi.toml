@@ -1,30 +1,33 @@
 # acpp-activation-linux — the linux compiler-activation packages
-# (acpp-clang_linux-64 / acpp-clangxx_linux-64), built from our fork of
-# conda-forge's ctng-compiler-activation-feedstock.
+# (acpp-clang_linux-64 / acpp-clangxx_linux-64), lifted in-tree from our fork
+# of conda-forge's ctng-compiler-activation-feedstock. The fork point, our own
+# head and what the lift kept are recorded in vendor/PROVENANCE.md.
 #
 # PACKAGE-ONLY manifest. The single workspace at the repo root owns the
 # environments, the tasks and the variant matrix.
 #
-# WHY THE MANIFEST LIVES HERE AND NOT IN THE SUBMODULE: `pixi publish` skips
-# any subdirectory that contains its own [workspace], and conda-forge
-# feedstocks do ship pixi.toml files. package.build.config.recipe takes a
-# PATH, so the wrapper sits outside the fork and points into it — which also
-# keeps our packaging metadata out of the diff we take against upstream.
+# THE RECIPE AND ITS ASSETS LIVE HERE, not behind a `recipe =` redirect into a
+# submodule. This methodology has no submodules: the recipe is a lift, edited
+# in tree, and its provenance is a recorded ref rather than a gitlink.
 #
 # WHY THIS FEEDSTOCK FOR LINUX: the clang_linux-* / clangxx_linux-* family is
 # produced by ctng-compiler-activation, NOT by clang-compiler-activation
-# (which owns osx) and not by clangdev (which owns the NATIVE clang_impl_*).
-# The linux clang activation is literally `cp activate-gcc.sh
-# activate-clang.sh` plus a sed, which is why it lives in the gcc lineage.
+# (which owns osx) and not by clangdev (which owns the NATIVE clang_impl_*,
+# which we now ship as acpp-clang_impl_linux-64).
 #
 # TWO OUTPUTS FROM ONE RECIPE, which is why this manifest's name matches
 # neither of them. The C++ activation script only sets the CXX half and relies
 # on the C one having run first, so the pair is pinned to each other with
 # pin_subpackage(exact=True) — a function that names another output of the SAME
 # recipe and therefore exists only while they share one.
+#
+# THE VERSION IS 21.1, MAJOR.MINOR. Activation packages carry the compiler
+# SERIES they configure (conda-forge's own split: clang_<plat> is 21.1 where
+# clangdev is 21.1.8), while `acpp` is date-versioned. Both numbers appear in
+# the recipe, which is the sole authority for what any dependency IS.
 [package]
 name = "acpp-activation-linux"
-version = "0.dev0"
+version = "21.1"
 publish = true
 
 [package.build]
@@ -32,12 +35,15 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 # THE PASSTHROUGH. The manifest tables add no dependencies — the backend
 # regards only what the recipe declares — but they supply the workspace path
-# mapping the recipe cannot know, which lets it name `acpp ==<version>` under
-# requirements.host as if it came from a channel. acpp is the compiler these
-# packages activate, and its weak run_export is what turns that host dependency
-# into an exact-build run dependency.
+# mapping the recipe cannot know, which lets it name these siblings under
+# requirements as if they came from a channel.
+#
+# acpp is the compiler these packages activate, taken as a HOST dependency so
+# its weak run_export computes the exact-build run dependency. The two impl
+# packages own bin/<triplet>-clang{,-cpp,++}, the names the activation exports
+# as CC/CPP/CXX; they are RUN dependencies, restored when the symlink fold came
+# back out of install-clang{,++}.sh.
 [package.build-dependencies]
 acpp = { workspace = true }
-
-[package.build.config]
-recipe = "../../vendor/ctng-compiler-activation-feedstock/recipe/recipe.yaml"
+acpp-clang-impl = { workspace = true }
+acpp-clangxx-impl = { workspace = true }

@@ -1,14 +1,23 @@
 # acpp-activation-osx — the osx-arm64 compiler-activation packages
-# (acpp-clang_osx-arm64 / acpp-clangxx_osx-arm64), built from our fork of
-# conda-forge's clang-compiler-activation-feedstock.
+# (acpp-clang_osx-arm64 / acpp-clangxx_osx-arm64), lifted in-tree from our fork
+# of conda-forge's clang-compiler-activation-feedstock. The fork point, our own
+# head and what the lift kept are recorded in vendor/PROVENANCE.md.
 #
-# PACKAGE-ONLY manifest; the sole [workspace] is the repo root. The manifest
-# sits outside the submodule and points into it — `pixi publish` skips any
-# subdirectory carrying its own workspace, and feedstocks ship pixi.toml files.
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+#
+# THE RECIPE AND ITS ASSETS LIVE HERE, not behind a `recipe =` redirect into a
+# submodule. This methodology has no submodules: the recipe is a lift, edited
+# in tree, and its provenance is a recorded ref rather than a gitlink.
+#
+# THE VERSION IS 21.1, MAJOR.MINOR — the compiler SERIES this activation
+# configures, conda-forge's own split (clang_<plat> 21.1, clangdev 21.1.8).
+# `acpp` is date-versioned, and both numbers appear in the recipe, which is the
+# sole authority for what any dependency IS.
 #
 # WHY THIS FEEDSTOCK FOR macOS: the clang_osx-* / clangxx_osx-* family is
 # produced by clang-compiler-activation, NOT by ctng-compiler-activation
-# (which owns linux) and not by clangdev (which owns the NATIVE clang_impl_*).
+# (which owns linux) and not by clangdev (which owns the NATIVE clang_impl_*,
+# which we now ship as acpp-clang_impl_osx-arm64).
 #
 # TWO OUTPUTS FROM ONE RECIPE, which is why this manifest's name matches
 # neither of them. The C++ activation script only sets the CXX half and relies
@@ -17,7 +26,7 @@
 # recipe and therefore exists only while they share one.
 [package]
 name = "acpp-activation-osx"
-version = "0.dev0"
+version = "21.1"
 publish = true
 
 [package.build]
@@ -31,6 +40,6 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # into an exact-build run dependency.
 [package.build-dependencies]
 acpp = { workspace = true }
-
-[package.build.config]
-recipe = "../../vendor/clang-compiler-activation-feedstock/recipe/recipe.yaml"
+acpp-clang-impl = { workspace = true }
+acpp-clangxx-impl = { workspace = true }
+acpp-libcxx-devel = { workspace = true }

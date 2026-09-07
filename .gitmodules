@@ -1,9 +1,0 @@
-[submodule "vendor/ctng-compiler-activation-feedstock"]
-	path = vendor/ctng-compiler-activation-feedstock
-	url = https://github.com/NAGAGroup/ctng-compiler-activation-feedstock.git
-[submodule "vendor/clang-win-activation-feedstock"]
-	path = vendor/clang-win-activation-feedstock
-	url = https://github.com/NAGAGroup/clang-win-activation-feedstock.git
-[submodule "vendor/clang-compiler-activation-feedstock"]
-	path = vendor/clang-compiler-activation-feedstock
-	url = https://github.com/NAGAGroup/clang-compiler-activation-feedstock.git

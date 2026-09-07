@@ -1,10 +1,14 @@
 # acpp-activation-win — the Windows compiler-activation packages
-# (acpp-clang_win-64, acpp-clangxx_win-64, acpp-clang-cl_win-64), built from
-# our fork of conda-forge's clang-win-activation-feedstock.
+# (acpp-clang_win-64, acpp-clangxx_win-64, acpp-clang-cl_win-64), lifted
+# in-tree from our fork of conda-forge's clang-win-activation-feedstock.
+# The fork point, our own head and what the lift kept are recorded in
+# vendor/PROVENANCE.md.
 #
-# PACKAGE-ONLY manifest; the sole [workspace] is the repo root. The manifest
-# sits outside the submodule and points into it — `pixi publish` skips any
-# subdirectory carrying its own workspace, and feedstocks ship pixi.toml files.
+# PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+#
+# THE RECIPE AND ITS ASSETS LIVE HERE, not behind a `recipe =` redirect into a
+# submodule. This methodology has no submodules: the recipe is a lift, edited
+# in tree, and its provenance is a recorded ref rather than a gitlink.
 #
 # WHY THREE OUTPUTS AND NOT FOUR: there is no clangxx-cl. Upstream says why in
 # the recipe — "no distinction between C/C++ because clangxx-cl exists
@@ -23,7 +27,7 @@
 # for their ordering, not merely written in an order.
 [package]
 name = "acpp-activation-win"
-version = "0.dev0"
+version = "21.1"
 publish = true
 
 [package.build]
@@ -37,6 +41,3 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # into an exact-build run dependency.
 [package.build-dependencies]
 acpp = { workspace = true }
-
-[package.build.config]
-recipe = "../../vendor/clang-win-activation-feedstock/recipe/recipe.yaml"

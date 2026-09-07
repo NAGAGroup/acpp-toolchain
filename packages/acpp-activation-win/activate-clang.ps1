@@ -1,0 +1,10 @@
+$Env:CC="clang.exe"
+$Env:NM="llvm-nm.exe"
+$Env:LD="lld-link.exe"
+$Env:AR="llvm-ar.exe"
+$Env:RANLIB="llvm-ranlib.exe"
+
+$Env:CPPFLAGS_USED="-DNDEBUG -D_CRT_SECURE_NO_WARNINGS -nostdlib -fms-runtime-lib=dll -fuse-ld=lld -fno-aligned-allocation"
+# The clang resource directory lives UNDER Library on Windows; see the .bat.
+$Env:LDFLAGS="-nostdlib -Wl,-defaultlib:" + $Env:CONDA_PREFIX.Replace("\","/") +"/Library/lib/clang/@MAJOR_VER@/lib/windows/clang_rt.builtins-@BUILTINS_ARCH@.lib"
+$Env:CFLAGS="@CFLAGS@ " + $Env:CPPFLAGS_USED

@@ -4,10 +4,6 @@
 # would have done the same to every nushell script and licence text.
 * text=auto eol=lf
 
-# License texts must ship byte-identical to upstream (build-stage.nu asserts
-# this against the extracted trees); never EOL-convert them on checkout.
-packages/_shared/licenses/** -text
-
 # Windows shell scripts stay CRLF regardless of checkout platform.
 *.bat text eol=crlf
 *.ps1 text eol=crlf

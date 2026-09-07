@@ -813,6 +813,58 @@ def clang-install-fixups-win [layout_root: string] {
 }
 
 # openmp/install_pkg.sh, unix.
+# compiler-rt-feedstock's POST-INSTALL COPIES. `cmake --install` puts the
+# sanitizer runtimes in the clang resource directory and nowhere else; upstream
+# then copies them to a second home, and the published artifact — which is
+# where every carve list in this repo was scoped from — shows the result.
+#
+#   build.sh 88-93:  cp lib/<os>/libclang_rt*.{so,dylib}  ->  $PREFIX/lib
+#   bld.bat 77:      copy lib\windows\*.dll               ->  %LIBRARY_BIN%
+#
+# `acpp-libcompiler-rt` carves exactly those three shapes — `lib/libclang_rt*.so`,
+# `lib/libclang_rt*.dylib`, `Library/bin/clang_rt*.dll` — and matched nothing in
+# run 34111603422 because the stage never ran the copy. Same class as the lld
+# patch and the per-target runtime directory: an upstream BUILD-LAYER step the
+# artifact reflects and the stage did not reproduce.
+#
+# COPIES, NOT MOVES — upstream uses `cp`, so the originals stay in the resource
+# directory and compiler-rt21 keeps carving them from there. The two packages
+# ship the same bytes under different paths, which is upstream's shape and not
+# a clobber; the disjointness gate compares paths and is content with it.
+#
+# NOT REPRODUCED, deliberately: bld.bat's other copy, `lib\windows\*` into a
+# `%PREFIX%\lib\clang\<major>` tree without the `Library\` segment. That exists
+# because compiler-rt_win-64 is noarch and must be installable on linux — and
+# our carve already does that relocation with `ACPP_CARVE_DEST: prefix`, which
+# is the same idea expressed once instead of per-file.
+def compiler-rt-install-fixups [prefix: string, layout_root: string] {
+  if (is-windows) {
+    let src = (glob ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" "windows" "*.dll"))
+    let dest = ($layout_root | path join "bin")
+    mkdir $dest
+    for f in $src { cp -f $f ($dest | path join ($f | path basename)) }
+    print $"compiler-rt fixups: copied ($src | length) clang_rt DLL\(s\) to ($dest)"
+    if ($src | is-empty) {
+      error make {msg: $"compiler-rt fixups: no clang_rt DLLs under lib/clang/($env.ACPP_LLVM_MAJOR)/lib/windows — acpp-libcompiler-rt carves Library/bin/clang_rt*.dll and would match nothing"}
+    }
+  } else {
+    let os_dir = (if (is-darwin) { "darwin" } else { "linux" })
+    let ext = (if (is-darwin) { "dylib" } else { "so" })
+    let src = (glob ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" $os_dir $"libclang_rt*.($ext)"))
+    let dest = ($prefix | path join "lib")
+    mkdir $dest
+    for f in $src { cp -f $f ($dest | path join ($f | path basename)) }
+    print $"compiler-rt fixups: copied ($src | length) libclang_rt*.($ext) to ($dest)"
+    # conda-forge's libcompiler-rt artifact carries ten of these on linux. An
+    # empty copy means the shared sanitizer runtimes were not built at all,
+    # which the hollow-runtimes guard above would not catch — it only looks for
+    # the static archives.
+    if ($src | is-empty) {
+      error make {msg: $"compiler-rt fixups: no libclang_rt*.($ext) under lib/clang/($env.ACPP_LLVM_MAJOR)/lib/($os_dir) — acpp-libcompiler-rt carves lib/libclang_rt*.($ext) and would match nothing"}
+    }
+  }
+}
+
 def openmp-install-fixups [prefix: string] {
   let libdir = ($prefix | path join "lib")
   for f in (glob $"($libdir)/libgomp*") { rm -f $f }
@@ -1035,6 +1087,8 @@ def main [] {
     }
     print $"compiler-rt runtime layout: ($want) — matches the carve lists"
   }
+
+  compiler-rt-install-fixups $prefix $layout_root
 
   if (is-windows) {
     clang-install-fixups-win $layout_root

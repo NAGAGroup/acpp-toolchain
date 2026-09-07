@@ -66,15 +66,13 @@ package:
   version: ${{ stage_version }}
 
 source:
-  # THE LICENCES MUST BE A SOURCE, NOT A `../` PATH. rattler-build resolves
-  # `license_file` against the rendered SOURCE directory, and a parent-relative
-  # path never resolves — measured both ways on a throwaway recipe: with no
-  # source and with one present, `../_shared/licenses/…` fails identically with
-  # "No license files were copied", which is what stopped every slicer in run
-  # 34107933036 AFTER its carve had succeeded. Bringing the directory in as a
-  # source is the shape `_acpp-stage` has always used.
-  - path: ../_shared/licenses
-    target_directory: licenses
+  # NB this stage has no `license_file` at all — it is `publish = false`
+  # internal scaffolding — so it needs no licence source HERE. The licence
+  # sweep gave it one anyway; it is removed in the same commit that changes the
+  # build script, because the `.pixi/bld` key hashes this whole directory and a
+  # cosmetic edit on its own would have cost a full LLVM rebuild. The vendored
+  # copy further down is a different thing and stays: it is the input to the
+  # drift assertion.
   # ---------------------------------------------------------------------------
   # llvm-project. The monolith lifts the GitHub auto-generated tag archive
   # (archive/refs/tags/llvmorg-<v>.tar.gz); we take the RELEASE ASSET

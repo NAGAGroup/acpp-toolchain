@@ -1,6 +1,23 @@
 # build-platform.nu — build and publish every package of ONE platform into a
 # local channel, in dependency order, in ONE process.
 #
+# ⚠ SUPERSEDED, AND NOT YET REWRITTEN. Two of its premises died with the E2E
+# lift and are left below only because the reasoning is worth reading:
+#
+#   * THE `--path` LOOP. It existed because a whole-workspace publish refused
+#     the set. It does not any more — the whole-workspace form is what renders
+#     and publishes this tree today, and it is the only form that tolerates a
+#     source sibling named in run_exports.
+#   * THE HARDCODED `ORDER`. The set is now ~45 packages, not fourteen, and
+#     pixi computes the build order itself from the workspace dependency graph.
+#     The list here is a fossil; its set-agreement guard would fail on the
+#     first run, which is the correct behaviour for a stale list and the reason
+#     this file cannot silently do the wrong thing in the meantime.
+#
+# What survives the rewrite is the ONE-JOB-PER-PLATFORM rule below, the
+# set-agreement guard and the artifact collection. Step E2E-4 writes the real
+# thing (staging.yml, each platform independently dispatchable).
+#
 # WHY ONE JOB PER PLATFORM. The expensive _acpp-stage build is reused across
 # every carving package through pixi's .pixi/bld cache, and that cache does
 # not cross runners. Parallelise by PLATFORM, never by package: a job per
@@ -30,8 +47,6 @@ const ORDER = [
   "acpp-runtime-rocm"
   "acpp"
   "acpp-compiler-rt"
-  "acpp-tools"
-  "acpp-llvm-dev"
   "acpp-lldb"
   "acpp-llvm-spirv"
   "acpp-activation-linux"

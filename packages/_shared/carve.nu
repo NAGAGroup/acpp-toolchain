@@ -13,16 +13,21 @@
 # package, so the "what to copy" list and the "what to ship" list are the same
 # list and cannot drift apart.
 #
-# ACPP_CARVE_EXCLUDE, same format, subtracts from that set. It exists for ONE
-# package: acpp-llvm-dev is the development REMAINDER of an LLVM install
-# (bin/**, include/**, lib/**/*.a, lib/cmake/**, share/man/**) minus everything
-# its siblings claim. Enumerating that remainder positively would mean listing
-# ~150 tool binaries and every header directory — an LLVM VERSION detail, not a
-# contract of ours — and the failure mode would be invisible, since a glob that
-# matches nothing is the only thing this script can detect and a header nobody
-# listed matches nothing at all. Subtraction keeps the list short and the
-# failure loud. Include-minus-exclude is still ONE list in ONE place driving
-# both the copy and the ship, so the single-source-of-truth property holds.
+# ACPP_CARVE_EXCLUDE, same format, subtracts from that set. Its user today is
+# acpp-clang-21, which owns the clang resource directory MINUS the five
+# subtrees compiler-rt21 owns (fuzzer/, orc/, profile/, sanitizer/, xray/):
+# subtraction is short, and it is self-asserting, because an exclude glob that
+# matches nothing fails the build the moment a sibling renames or drops a file.
+# Enumerating the remainder positively would mean listing 235 headers — an LLVM
+# VERSION detail, not a contract of ours — with an invisible failure mode, since
+# a header nobody listed matches nothing at all. Include-minus-exclude is still
+# ONE list in ONE place driving both the copy and the ship, so the
+# single-source-of-truth property holds.
+#
+# (The original user was acpp-llvm-dev, the pre-methodology development
+# REMAINDER package. The lift replaced it with acpp-llvmdev, whose scope is a
+# positive list derived from conda-forge's published artifact, so no package is
+# defined by subtraction from the whole prefix any more.)
 #
 # The trade it makes is under-shipping for OVER-shipping: a sibling's file
 # leaking in here is an install-time clobber between two of our own packages.

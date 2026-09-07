@@ -27,6 +27,13 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # run_export, which pixi does not see, so this applies to acpp alone.
 [package.build-dependencies]
 _acpp-stage = { workspace = true }
+# The compiler this package used to CARVE and now depends on. Mapped here
+# because every source-package dependency is mapped in this table and only
+# here; the recipe stays the sole authority for what each one IS.
+acpp-clang = { workspace = true }
+acpp-clangxx = { workspace = true }
+acpp-llvm-tools = { workspace = true }
+acpp-lld = { workspace = true }
 
 [package.build.config]
 extra-input-globs = ["../_shared/carve.nu"]

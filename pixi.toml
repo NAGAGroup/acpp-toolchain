@@ -70,8 +70,6 @@ _acpp-stage = { path = "packages/_acpp-stage" }
 acpp-runtime = { path = "packages/acpp-runtime" }
 acpp = { path = "packages/acpp" }
 acpp-compiler-rt = { path = "packages/acpp-compiler-rt" }
-acpp-llvm-dev = { path = "packages/acpp-llvm-dev" }
-acpp-tools = { path = "packages/acpp-tools" }
 acpp-runtime-cuda = { path = "packages/acpp-runtime-cuda" }
 acpp-runtime-level-zero = { path = "packages/acpp-runtime-level-zero" }
 acpp-runtime-ocl = { path = "packages/acpp-runtime-ocl" }
@@ -123,6 +121,12 @@ acpp-llvm-openmp = { path = "packages/acpp-llvm-openmp" }
 # recipes — so both are SCRIPT-form slicers, like llvm-openmp above.
 # `acpp-lldb` reuses the pre-methodology directory, whose contents this replaces.
 acpp-lld = { path = "packages/acpp-lld" }
+
+# BOLT. No conda-forge counterpart exists — it is the one package in this set
+# with no upstream output to lift — but our stage builds it on linux and `main`
+# ships it, so it keeps a name of its own rather than disappearing with the
+# retired acpp-tools. Reasoning in its recipe.
+acpp-bolt = { path = "packages/acpp-bolt" }
 
 # llvm-spirv family — the SECOND STAGE and its four slicers. The four outputs
 # must come out of ONE build (a symlink whose target another of them ships, and

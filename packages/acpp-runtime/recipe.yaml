@@ -1,8 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
 #
-# acpp-runtime — the SYCL runtime: the shared libraries, the JIT backend
-# plugins and SSCP bitcode, the runtime JSON configs, and the LLVM tools the
-# SSCP JIT actually executes at run time.
+# acpp-runtime — the SYCL runtime: AdaptiveCpp's shared libraries, the JIT
+# backend plugins and SSCP bitcode, and the runtime JSON configs. The LLVM
+# tools the SSCP JIT executes at run time are DEPENDENCIES, not content — see
+# the carve note below.
 #
 # THIS IS THE PATTERN every carving subpackage follows:
 #   * single output, no `staging:`, no `experimental`
@@ -41,24 +42,35 @@ context:
   # Final package paths, semicolon-separated. Each platform names its own set
   # explicitly; there is no fall-through branch.
   #
-  # linux/osx: the SSCP JIT external tools (ptx JIT execs opt+llc; the CPU JIT
-  # execs opt+llc+lld — verified in llvm-to-backend/{ptx,host}/*.cpp), the
-  # versioned shared libraries, the JIT backend plugins + SSCP bitcode under
-  # lib/hipSYCL, the runtime JSON configs, and on linux the OMP debugger
-  # extension. The SPIR-V translator the spirv plugin execs is NOT here — it
-  # is acpp-llvm-spirv, and the backend metapackages that need it depend on it.
+  # ⚠ THIS LIST IS ADAPTIVECPP'S CONTENT AND NOTHING ELSE. Before the lift it
+  # also claimed the LLVM binaries the SSCP JIT executes (opt, llc, the lld
+  # drivers), the whole of `lib/*.so*` — libLLVM included — and on Windows the
+  # C-API/LTO/Remarks/libclang DLLs. Every one of those now belongs to a lifted
+  # package: opt and llc are two of acpp-llvm-tools' eighty, the lld drivers are
+  # acpp-lld's, libLLVM is acpp-libllvm21's, libclang acpp-libclang's, LLVM-C
+  # acpp-libllvm-c21's. Keeping them here would be an install-time clobber
+  # between two of our own packages. They arrive as RUN DEPENDENCIES instead —
+  # the JIT execs them by name off PATH, which a dependency satisfies exactly as
+  # well as a copy, and only one package ships each file.
+  #
+  # What is left is what a conda-forge LLVM never contained: the AdaptiveCpp
+  # runtime libraries, the JIT backend plugins and SSCP bitcode under
+  # lib/hipSYCL, and the runtime JSON configs. The SPIR-V translator the spirv
+  # plugin execs is NOT here either — it is acpp-llvm-spirv, and the backend
+  # metapackages that need it depend on it.
   carve_linux: >-
-    bin/opt;bin/llc;bin/lld;bin/ld.lld;lib/*.so*;lib/hipSYCL/**;etc/AdaptiveCpp/**;share/gdb/**
+    lib/libacpp-rt.so*;lib/libacpp-common.so*;lib/hipSYCL/**;etc/AdaptiveCpp/**
   carve_osx: >-
-    bin/opt;bin/llc;bin/lld;bin/ld64.lld;lib/*.dylib*;lib/hipSYCL/**;etc/AdaptiveCpp/**
-  # win: no LLVM dylib (tools link static), so the shipped DLLs are the
-  # C-API/LTO/Remarks surface, libclang and acpp's own runtime; import .lib
-  # files travel with their DLL. The host JIT drives the native COFF linker,
-  # so lld-link and the lld driver live here, while the cross flavours
-  # (ld.lld/ld64.lld/wasm-ld) belong to acpp. DLLs are RUNTIME artifacts on
-  # win, so the hipSYCL plugins appear under both bin and lib.
+    lib/libacpp-rt*.dylib;lib/libacpp-common*.dylib;lib/hipSYCL/**;etc/AdaptiveCpp/**
+  # win: DLLs are RUNTIME artifacts and live under bin, so the hipSYCL plugins
+  # appear under both bin and lib; the import .lib files travel with their DLL.
+  #
+  # NO etc/AdaptiveCpp ON WIN, carried over from the pre-lift list unchanged:
+  # where AdaptiveCpp puts the runtime JSON on Windows is unverified, and a
+  # carve glob matching nothing FAILS the build. Read the first real Windows
+  # build's stage listing and add it there rather than guessing here.
   carve_win: >-
-    Library/bin/opt.exe;Library/bin/llc.exe;Library/bin/lld.exe;Library/bin/lld-link.exe;Library/bin/LLVM-C.dll;Library/bin/LTO.dll;Library/bin/Remarks.dll;Library/bin/libclang.dll;Library/bin/acpp-rt.dll;Library/bin/acpp-common.dll;Library/lib/LLVM-C.lib;Library/lib/LTO.lib;Library/lib/Remarks.lib;Library/lib/libclang.lib;Library/lib/acpp-rt.lib;Library/lib/acpp-common.lib;Library/bin/hipSYCL/**;Library/lib/hipSYCL/**
+    Library/bin/acpp-rt.dll;Library/bin/acpp-common.dll;Library/lib/acpp-rt.lib;Library/lib/acpp-common.lib;Library/bin/hipSYCL/**;Library/lib/hipSYCL/**
   # Every platform names itself. The final branch is deliberately EMPTY, not
   # carve_osx: an unknown platform must fail loudly (carve.nu errors on an
   # empty list) rather than silently receive the macOS carve.
@@ -102,6 +114,28 @@ requirements:
     # nothing, so nothing arrives by accident — the structural end of the
     # run_exports leak that once put cuda-cudart, level-zero, ocl-icd and
     # python_abi onto a ROCm metapackage.
+    #
+    # THE TOOLS THE SSCP JIT EXECUTES, as dependencies rather than as copies.
+    # The ptx JIT execs opt and llc; the CPU (host) JIT execs opt, llc and lld
+    # — read at source in llvm-to-backend/{ptx,host}/*.cpp. They are looked up
+    # by NAME in the prefix, so the requirement is that the file be installed,
+    # not that this package ship it. Exact-build bracket form, the workspace
+    # idiom: our build strings LEAD with the LLVM tag, so the glob pins the
+    # whole family to one LLVM.
+    - acpp-llvm-tools[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-lld[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # The LLVM the runtime and its JIT plugins LINK against. Unix only: the
+    # stage builds the LLVM dylib on linux and osx (LLVM_BUILD_LLVM_DYLIB) and
+    # the Windows tools link the static libraries instead, which is also why
+    # win's carve above ships no LLVM library at all.
+    - if: not win
+      then: acpp-libllvm21[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # The stage's own host libraries that the AdaptiveCpp runtime links. Kept
+    # from the pre-lift list: libLLVM used to be inside this package and
+    # dragged them, and whether libacpp-rt itself still needs each of them is a
+    # LINKAGE question the first real build answers — rattler-build fails a
+    # build whose binaries need a library no dependency provides, which is the
+    # loud form of this question.
     - if: linux
       then:
         - libxml2
@@ -157,8 +191,6 @@ tests:
   - package_contents:
       files:
         exists:
-          - ${{ library_prefix }}bin/opt${{ ".exe" if win else "" }}
-          - ${{ library_prefix }}bin/llc${{ ".exe" if win else "" }}
           - if: linux
             then:
               - lib/libacpp-rt.so
@@ -170,6 +202,14 @@ tests:
           - if: win
             then:
               - Library/bin/acpp-rt.dll
+        not_exists:
+          # The tools this package used to ship and now depends on. Asserted
+          # ABSENT from THIS side of the partition: they are acpp-llvm-tools'
+          # and acpp-lld's, two packages shipping one path clobber at install
+          # time, and no render can see it.
+          - ${{ library_prefix }}bin/opt${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/llc${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/lld${{ ".exe" if win else "" }}
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

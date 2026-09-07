@@ -1,0 +1,259 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-clang-tools — the clang-tools-extra binaries plus the scan-build /
+# intercept-build family. Lifted from the reference monolith's `clang-tools`
+# output (clangdev-feedstock).
+#
+# ⚠ SCOPE DERIVED FROM CONDA-FORGE'S clang-tools-21.1.8 ARTIFACT, NOT FROM
+# UPSTREAM'S GLOB, because our union stage removes the per-project scoping the
+# glob relied on. Upstream writes an include list of `bin/*`, `libexec/*` and
+# `share/*` minus an exclude list — which is exact inside clangdev's own build
+# prefix, where `bin/` holds nothing but clang's own tools. Against our stage
+# `bin/*` would additionally select all 80 LLVM tools, lld, lldb, acpp and
+# acpp-info, and `libexec/*` would take acpp-llvmdev's `libexec/llvm`. The
+# contract is what the artifact ships, and this is that list, read with
+# tools/upstream-paths.nu: 83 paths on linux-64, 87 on osx-arm64, 67 on win-64.
+#
+# TWO PLACES WHERE THE ARTIFACT AND HEAD DISAGREE, and the rule is ARTIFACT FOR
+# SCOPE, HEAD FOR EXCLUSIONS:
+#
+#   * The artifact ships `bin/clang-scan-deps` and `bin/clang-scan-deps-21`;
+#     HEAD's exclude list removes both, because acpp-clang-scan-deps ships them.
+#     HEAD wins — shipping them here would be an install-time clobber. On WIN
+#     they stay, because acpp-clang-scan-deps is skipped there and HEAD's win
+#     exclude list does not name them.
+#   * Upstream's include list has `share/*`; the artifact has NO share paths on
+#     any platform. The artifact wins, so nothing under share/ is claimed —
+#     which also keeps this package away from acpp-llvm-tools' and
+#     acpp-llvmdev's `share/opt-viewer`.
+#
+# The `-${{ llvm_major }}` twins exist because clangdev's build re-versions
+# every `bin/clang-*` and leaves a symlink at the unversioned name; `clangd`,
+# `c-index-test` and `diagtool` have no twin because they do not match that
+# glob. Windows has no twins at all — its build copies only clang and clang++.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+  # The unix slice: 55 binaries on linux-64 (57 on osx-arm64), the two python
+  # support trees, and the six analyzer shims in libexec.
+  tools_unix: >-
+    bin/amdgpu-arch;
+    bin/analyze-build;
+    bin/c-index-test;
+    bin/clangd;
+    bin/diagtool;
+    bin/find-all-symbols;
+    bin/git-clang-format;
+    bin/hmaptool;
+    bin/intercept-build;
+    bin/modularize;
+    bin/nvptx-arch;
+    bin/offload-arch;
+    bin/pp-trace;
+    bin/run-clang-tidy;
+    bin/scan-build;
+    bin/scan-build-py;
+    bin/scan-view;
+    bin/clang-apply-replacements;
+    bin/clang-apply-replacements-${{ llvm_major }};
+    bin/clang-change-namespace;
+    bin/clang-change-namespace-${{ llvm_major }};
+    bin/clang-check;
+    bin/clang-check-${{ llvm_major }};
+    bin/clang-doc;
+    bin/clang-doc-${{ llvm_major }};
+    bin/clang-extdef-mapping;
+    bin/clang-extdef-mapping-${{ llvm_major }};
+    bin/clang-include-cleaner;
+    bin/clang-include-cleaner-${{ llvm_major }};
+    bin/clang-include-fixer;
+    bin/clang-include-fixer-${{ llvm_major }};
+    bin/clang-installapi;
+    bin/clang-installapi-${{ llvm_major }};
+    bin/clang-linker-wrapper;
+    bin/clang-linker-wrapper-${{ llvm_major }};
+    bin/clang-move;
+    bin/clang-move-${{ llvm_major }};
+    bin/clang-nvlink-wrapper;
+    bin/clang-nvlink-wrapper-${{ llvm_major }};
+    bin/clang-offload-bundler;
+    bin/clang-offload-bundler-${{ llvm_major }};
+    bin/clang-offload-packager;
+    bin/clang-offload-packager-${{ llvm_major }};
+    bin/clang-query;
+    bin/clang-query-${{ llvm_major }};
+    bin/clang-refactor;
+    bin/clang-refactor-${{ llvm_major }};
+    bin/clang-reorder-fields;
+    bin/clang-reorder-fields-${{ llvm_major }};
+    bin/clang-repl;
+    bin/clang-repl-${{ llvm_major }};
+    bin/clang-sycl-linker;
+    bin/clang-sycl-linker-${{ llvm_major }};
+    bin/clang-tidy;
+    bin/clang-tidy-${{ llvm_major }};
+    lib/libear/**;
+    lib/libscanbuild/**;
+    libexec/analyze-c++;
+    libexec/analyze-cc;
+    libexec/c++-analyzer;
+    libexec/ccc-analyzer;
+    libexec/intercept-c++;
+    libexec/intercept-cc
+
+  # osx additions, "osx-specific, see #420" in upstream's own words: the clangd
+  # XPC library and its test client, plus the Xcode analyzer helper.
+  tools_osx: >-
+    bin/clangd-xpc-test-client;
+    bin/set-xcode-analyzer;
+    lib/libClangdXPCLib.${{ llvm_maj_min }}.dylib;
+    lib/libClangdXPCLib.dylib
+
+  # The win slice: no `-${{ llvm_major }}` twins, clang-scan-deps STAYS (see the
+  # header), and the shell shims arrive with `.bat` companions.
+  tools_win: >-
+    Library/bin/amdgpu-arch.exe;
+    Library/bin/analyze-build;
+    Library/bin/c-index-test.exe;
+    Library/bin/clang-apply-replacements.exe;
+    Library/bin/clang-change-namespace.exe;
+    Library/bin/clang-check.exe;
+    Library/bin/clang-doc.exe;
+    Library/bin/clang-extdef-mapping.exe;
+    Library/bin/clang-include-cleaner.exe;
+    Library/bin/clang-include-fixer.exe;
+    Library/bin/clang-installapi.exe;
+    Library/bin/clang-linker-wrapper.exe;
+    Library/bin/clang-move.exe;
+    Library/bin/clang-nvlink-wrapper.exe;
+    Library/bin/clang-offload-bundler.exe;
+    Library/bin/clang-offload-packager.exe;
+    Library/bin/clang-query.exe;
+    Library/bin/clang-refactor.exe;
+    Library/bin/clang-reorder-fields.exe;
+    Library/bin/clang-repl.exe;
+    Library/bin/clang-scan-deps.exe;
+    Library/bin/clang-sycl-linker.exe;
+    Library/bin/clang-tidy.exe;
+    Library/bin/clangd.exe;
+    Library/bin/diagtool.exe;
+    Library/bin/find-all-symbols.exe;
+    Library/bin/git-clang-format;
+    Library/bin/git-clang-format.bat;
+    Library/bin/hmaptool;
+    Library/bin/intercept-build;
+    Library/bin/modularize.exe;
+    Library/bin/nvptx-arch.exe;
+    Library/bin/offload-arch.exe;
+    Library/bin/pp-trace.exe;
+    Library/bin/run-clang-tidy;
+    Library/bin/scan-build;
+    Library/bin/scan-build-py;
+    Library/bin/scan-build.bat;
+    Library/bin/scan-view;
+    Library/lib/libear/**;
+    Library/lib/libscanbuild/**;
+    Library/libexec/analyze-c++;
+    Library/libexec/analyze-cc;
+    Library/libexec/c++-analyzer;
+    Library/libexec/c++-analyzer.bat;
+    Library/libexec/ccc-analyzer;
+    Library/libexec/ccc-analyzer.bat;
+    Library/libexec/intercept-c++;
+    Library/libexec/intercept-cc
+
+package:
+  name: acpp-clang-tools
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        ${{ tools_unix if unix else tools_win }}
+        ${{ ";" ~ tools_osx if osx else "" }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
+    - if: unix
+      then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "Use the same requirements as the top-level requirements, but only the
+    # ones required for run_exports"
+    - acpp-llvm ==${{ llvm_version }}
+    - libxml2-devel
+    - if: win
+      then:
+        - zlib
+        - zstd
+  run:
+    # UPSTREAM: pin_subpackage("clang-format", exact=True)
+    - acpp-clang-format[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - if: unix
+      then:
+        # UPSTREAM: pin_subpackage("clang-scan-deps", exact=True)
+        - acpp-clang-scan-deps[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+        # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
+        - acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ llvm_version }}
+    - if: win
+      then: ucrt
+  run_constraints:
+    # Upstream names `clangdev`; ours names ours, because nothing ships under a
+    # conda-forge name and a constraint on a name our channel provides would be
+    # a hard solve failure under strict channel priority rather than a
+    # fall-through.
+    - acpp-clangdev ==${{ llvm_version }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - ${{ library_prefix }}bin/clang-tidy${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/clangd${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}lib/libscanbuild/analyze.py
+          - ${{ library_prefix }}libexec/ccc-analyzer
+        not_exists:
+          # the drivers are acpp-clang's / acpp-clangxx's / acpp-clang-21's,
+          # clang-format is acpp-clang-format's, and on unix clang-scan-deps is
+          # acpp-clang-scan-deps'
+          - ${{ library_prefix }}bin/clang${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/clang-${{ llvm_major }}${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/clang-format${{ ".exe" if win else "" }}
+          - if: unix
+            then:
+              - bin/clang-scan-deps
+              - bin/clang-scan-deps-${{ llvm_major }}
+              # llvm's own tools stay in acpp-llvm-tools
+              - bin/llvm-config
+              - bin/opt
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Extra tools built using clang's tooling APIs

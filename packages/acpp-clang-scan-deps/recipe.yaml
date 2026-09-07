@@ -1,0 +1,83 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-clang-scan-deps — the C++ module dependency scanner, in its three names.
+# Lifted from the reference monolith's `clang-scan-deps` output
+# (clangdev-feedstock).
+#
+# SLICING FORM: GLOB LIST, upstream's own — three named binaries, all
+# name-scoped. Cross-checked against conda-forge's clang-scan-deps-21.1.8
+# artifacts: linux-64 and osx-arm64 ship exactly `bin/clang-scan-deps`,
+# `bin/clang-scan-deps-21` and `bin/<TARGET>-clang-scan-deps`, and there is no
+# win-64 artifact, which is the same fact as the `skip: win` below.
+#
+# Upstream writes the triplet-prefixed name as an eight-way `if:` ladder over
+# platform and arch. TARGET is a recipe constant here, so the ladder collapses;
+# note it takes the VERSIONED darwin triplet, unlike the cfg files in
+# acpp-clang, which take TARGET_NO_VER.
+#
+# ON WIN THIS PACKAGE DOES NOT EXIST, so acpp-clang-tools keeps
+# `clang-scan-deps.exe` there. That asymmetry is upstream's, and it is why the
+# clang-tools slice takes HEAD's exclusions on unix only.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  target: ${{ "x86_64-conda-linux-gnu" if linux else "arm64-apple-darwin20.0.0" if osx else "x86_64-pc-windows-msvc" }}
+
+package:
+  name: acpp-clang-scan-deps
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  skip: win
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        bin/clang-scan-deps;
+        bin/clang-scan-deps-${{ llvm_major }};
+        bin/${{ target }}-clang-scan-deps
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
+    - acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-llvm ==${{ llvm_version }}
+  run:
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
+    - acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ llvm_version }}
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - bin/clang-scan-deps
+        - bin/clang-scan-deps-${{ llvm_major }}
+        - bin/${{ target }}-clang-scan-deps
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Clang tool for scanning C++ module dependencies

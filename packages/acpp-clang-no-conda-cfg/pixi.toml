@@ -1,0 +1,26 @@
+# acpp-clang-no-conda-cfg — the selector metapackage for the nocfg clang build.
+#
+# NOT a slicer: it ships nothing and takes no stage. PACKAGE-ONLY manifest; the
+# sole [workspace] is the repo root.
+#
+# Lifted from the reference monolith (llvm-feedstocks-monolith@cb9f3be): the
+# run / run_exports / run_constraints / ignore_run_exports in the recipe are
+# upstream's, transcribed.
+#
+# EVERY source-package dependency is mapped here and ONLY here, whatever it
+# really is: this table is a source-path MAPPING and the recipe is the sole
+# authority for what a dependency IS. [package.run-dependencies] is accepted by
+# this backend and SILENTLY IGNORED.
+[package]
+name = "acpp-clang-no-conda-cfg"
+version = "21.1.8"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+[package.build-dependencies]
+acpp-clang = { workspace = true }
+
+[package.build.config]
+extra-input-globs = ["../_shared/licenses/**"]

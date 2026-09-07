@@ -98,6 +98,17 @@ acpp-libclang13 = { path = "packages/acpp-libclang13" }
 acpp-libclang = { path = "packages/acpp-libclang" }
 acpp-clang-format-21 = { path = "packages/acpp-clang-format-21" }
 acpp-clang-format = { path = "packages/acpp-clang-format" }
+# `acpp-clang-impl` and `acpp-clangxx-impl` are DIRECTORY names, like the two
+# compiler-rt ones above: those recipes emit `acpp-clang{,xx}_impl_<platform>`.
+acpp-clang-21 = { path = "packages/acpp-clang-21" }
+acpp-clang-impl = { path = "packages/acpp-clang-impl" }
+acpp-clang = { path = "packages/acpp-clang" }
+acpp-clang-no-conda-cfg = { path = "packages/acpp-clang-no-conda-cfg" }
+acpp-clangxx-impl = { path = "packages/acpp-clangxx-impl" }
+acpp-clangxx = { path = "packages/acpp-clangxx" }
+acpp-clang-scan-deps = { path = "packages/acpp-clang-scan-deps" }
+acpp-clang-tools = { path = "packages/acpp-clang-tools" }
+acpp-clangdev = { path = "packages/acpp-clangdev" }
 
 acpp-libllvm21 = { path = "packages/acpp-libllvm21" }
 acpp-llvm = { path = "packages/acpp-llvm" }

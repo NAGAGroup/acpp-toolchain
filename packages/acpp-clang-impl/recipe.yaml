@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-clang_impl_<platform> — the TRIPLET-PREFIXED clang and clang-cpp
+# drivers. Lifted from the reference monolith's
+# `clang_impl_${{ target_platform }}` output (clangdev-feedstock).
+#
+# THIS IS A CLANGDEV OUTPUT, NOT AN ACTIVATION ONE. Upstream declares the same
+# name in three feedstocks with disjoint skips: clangdev builds the NATIVE one,
+# ctng-compiler-activation and clang-compiler-activation build the CROSS ones
+# and skip when target == cross_target. We build natively only, so this is the
+# only producer — and it is why the symlink fold that was added to our forked
+# ctng activation has to come back out: two packages shipping
+# `bin/<TARGET>-clang` is an install-time clobber.
+#
+# SLICING FORM: GLOB LIST, upstream's own — two named symlinks. Cross-checked
+# against conda-forge's clang_impl_linux-64 / clang_impl_osx-arm64 21.1.8
+# artifacts, which ship exactly `bin/<TARGET>-clang` and
+# `bin/<TARGET>-clang-cpp` and nothing else. No win-64 artifact exists, which is
+# the same fact as the `skip: win` below.
+#
+# TARGET is a recipe CONSTANT. Upstream carries an eight-row variant key; we
+# build three platforms natively, so the value is fixed per platform and is the
+# same string the stage derives from CONDA_TOOLCHAIN_HOST when it creates these
+# symlinks. TARGET_NO_VER (used by acpp-clang / acpp-clangxx for the cfg files)
+# differs only on osx.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  target: ${{ "x86_64-conda-linux-gnu" if linux else "arm64-apple-darwin20.0.0" if osx else "x86_64-pc-windows-msvc" }}
+
+package:
+  name: acpp-clang_impl_${{ target_platform }}
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  skip: win
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        bin/${{ target }}-clang;
+        bin/${{ target }}-clang-cpp
+
+requirements:
+  build:
+    # Upstream declares no build requirements here — the package is two
+    # symlinks — so only the interpreter our copy step needs is added.
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+  run:
+    # "cannot use exact pins on osx due to separation of compiler activation;
+    # see #437" — upstream pins only version + variant there, and the exact
+    # build elsewhere. Our build strings LEAD with the LLVM tag, so the loose
+    # form is the tag+variant prefix and the exact form is the tag glob.
+    # UPSTREAM osx: `clang-${{ major_version }} ==${{ version }} ${{ variant }}_*`
+    # UPSTREAM else: pin_subpackage("clang-" ~ major_version, exact=True)
+    - if: osx
+      then: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_${{ variant }}_*"]
+      else: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-compiler-rt_${{ target_platform }} ==${{ llvm_version }}
+    - acpp-compiler-rt ==${{ llvm_version }}
+    - if: linux
+      then:
+        # conda-forge names, kept as upstream has them: these are the binutils
+        # and sysroot our toolchain drives, not packages of ours.
+        - binutils_impl_${{ target_platform }}
+        - libgcc-devel_${{ target_platform }}
+        - sysroot_${{ target_platform }}
+      else:
+        - cctools_impl_${{ target_platform }}
+        # UPSTREAM: `ld64_${{ target_platform }} * llvm21_1_*`. Rewritten to
+        # bracket form so the version field is not a bare wildcard; the build
+        # glob is unchanged and still selects conda-forge's ld64 built against
+        # this LLVM series.
+        - ld64_${{ target_platform }}[build="llvm${{ llvm_maj_min | replace(".", "_") }}_*"]
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - bin/${{ target }}-clang
+        - bin/${{ target }}-clang-cpp
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Triplet-prefixed clang drivers for one target platform

@@ -330,6 +330,13 @@ description = "Exercise the in-tree clang config-file guard, both branches"
 # and a `license_file` resolve by DIFFERENT rules — recipe dir vs rendered
 # source dir — and applying one rule to the other is what failed run
 # 34109157780 at fetch time.
+# The stage''s post-install fixups must be a NO-OP on a second pass: a
+# cache-restored run re-executes the whole script against an already-fixed
+# prefix. Runs them twice against a synthetic tree and diffs.
+[feature.packaging.tasks.test-stage-fixups]
+cmd = "nu tools/tests/exercise-stage-fixups.nu"
+description = "Assert every stage fixup is idempotent"
+
 [feature.packaging.tasks.check-source-paths]
 cmd = "nu tools/check-source-paths.nu"
 description = "Assert every path: source resolves from its own recipe directory"

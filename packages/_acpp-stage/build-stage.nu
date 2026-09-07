@@ -732,6 +732,14 @@ def clang-install-fixups-unix [prefix: string] {
     if ($name | str starts-with "clang-offload-packager-") { continue }
     if $name == $"clang-($major)" { continue }
     if ($name | str ends-with $"-($major)") { continue }
+    # ⚠ IDEMPOTENCE, AND THIS ONE WAS DESTRUCTIVE. A cached run re-executes this
+    # whole script against a prefix that is ALREADY fixed up, where this name is
+    # the SYMLINK pass one left behind. Without this guard pass two deleted the
+    # real versioned binary, moved the symlink onto its name, and relinked —
+    # producing a symlink that points at itself and no binary at all, silently,
+    # in a package that would then ship. Found by auditing for the property
+    # after the openmp move failed the same way (run 34115417814).
+    if (($f | path type) == "symlink") { continue }
     let versioned = ($bin | path join $"($name)-($major)")
     if ($versioned | path exists) { rm -f $versioned }
     mv $f $versioned
@@ -768,25 +776,28 @@ def clang-install-fixups-unix [prefix: string] {
   # The conda config files that make clang prefix-aware. Their PRESENCE is what
   # distinguishes upstream's `clang` (default_cfg_*) from `clang-no-conda-cfg`
   # (default_nocfg_*), so they are a packaging seam as well as a build output.
-  for driver in [clang "clang++" clang-cpp] {
-    "-isystem <CFGDIR>/../include\n" | save -f ($bin | path join $"($target_no_ver)-($driver).cfg")
-  }
-  for driver in [clang "clang++" flang] {
-    let cfg = ($bin | path join $"($target_no_ver)-($driver).cfg")
-    let extra = (if (is-darwin) {
-      "$-Wl,-L,<CFGDIR>/../lib\n$-Wl,-rpath,<CFGDIR>/../lib\n"
-    } else {
-      "$-Wl,-L,<CFGDIR>/../lib\n$-Wl,-rpath,<CFGDIR>/../lib\n$-Wl,-rpath-link,<CFGDIR>/../lib\n"
-    })
-    let head = (if ($cfg | path exists) { open --raw $cfg } else { "" })
-    $"($head)($extra)" | save -f $cfg
-  }
-  if not (is-darwin) {
-    for driver in [clang "clang++" flang clang-cpp] {
-      let cfg = ($bin | path join $"($target_no_ver)-($driver).cfg")
-      let head = (if ($cfg | path exists) { open --raw $cfg } else { "" })
-      $"($head)--sysroot=<CFGDIR>/../($target)/sysroot\n" | save -f $cfg
-    }
+  # ⚠ EACH CFG IS COMPOSED WHOLE AND WRITTEN ONCE, never appended to. The
+  # earlier form read the existing file and appended, which is not idempotent:
+  # on a cached run the script re-executes against a prefix that already has
+  # these files, and every pass added another copy of the linker flags. It
+  # happened not to bite the three drivers that were truncated first, and did
+  # bite flang, whose cfg grew by a line per run. Composing the content from
+  # the values rather than from the file on disk makes the question moot.
+  let link_flags = (if (is-darwin) {
+    "$-Wl,-L,<CFGDIR>/../lib\n$-Wl,-rpath,<CFGDIR>/../lib\n"
+  } else {
+    "$-Wl,-L,<CFGDIR>/../lib\n$-Wl,-rpath,<CFGDIR>/../lib\n$-Wl,-rpath-link,<CFGDIR>/../lib\n"
+  })
+  let sysroot_flag = (if (is-darwin) { "" } else { $"--sysroot=<CFGDIR>/../($target)/sysroot\n" })
+  # Upstream's own composition: the include line for the three C/C++ drivers,
+  # the linker flags for clang/clang++/flang, the sysroot for everything but
+  # darwin. flang gets no include line, which is why it is not in the first set.
+  for driver in [clang "clang++" clang-cpp flang] {
+    let include_line = (if $driver == "flang" { "" } else { "-isystem <CFGDIR>/../include\n" })
+    let links = (if $driver == "clang-cpp" { "" } else { $link_flags })
+    let body = $"($include_line)($links)($sysroot_flag)"
+    if $body == "" { continue }
+    $body | save -f ($bin | path join $"($target_no_ver)-($driver).cfg")
   }
 }
 
@@ -901,10 +912,20 @@ def openmp-header-fixups [prefix: string, layout_root: string] {
   mut moved = []
   for n in $names {
     let src = ($res_inc | path join $n)
-    if ($src | path exists) {
-      mv -f $src ($inc | path join $n)
-      $moved = ($moved | append $n)
-    }
+    let dest = ($inc | path join $n)
+    # ⚠ IDEMPOTENCE. A cached run re-executes this script against a prefix that
+    # is ALREADY fixed up: ninja is a no-op, `cmake --install` reports
+    # Up-to-date, and every fixup runs a second time. By then clang's own fixup
+    # has replaced this source with a SYMLINK pointing at the destination, so
+    # moving it onto its own target is `mv-error-same-file` — which is exactly
+    # how run 34115417814 died, with zero archives.
+    #
+    # Three states, and only the first does anything: a real file to move, a
+    # symlink that already resolves to the destination, or nothing at all.
+    if not ($src | path exists) { continue }
+    if (($src | path type) == "symlink") and (($src | path expand) == ($dest | path expand)) { continue }
+    mv -f $src $dest
+    $moved = ($moved | append $n)
   }
   print $"openmp headers: moved ($moved | length) to ($inc) — ($moved | str join ', ')"
   # omp.h and ompx.h are install_openmp.nu's REQUIRED paths, so their absence

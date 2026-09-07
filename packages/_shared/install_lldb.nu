@@ -26,6 +26,33 @@
 # exactly one such directory is also the check that the stage built them at all;
 # zero or several is a defect and fails here.
 
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 def is-windows [] { $nu.os-info.name == "windows" }
 def is-darwin [] { $nu.os-info.name == "macos" }
 def slashes [] { str replace --all '\' '/' }
@@ -45,7 +72,7 @@ def place-tree [rel: string, dest_root: string, stage: string, required: bool] {
     }
     return 0
   }
-  let files = (glob $"($src)/**/*" | where {|p| ($p | path type) != "dir" })
+  let files = (glob-native $"($src)/**/*" | where {|p| ($p | path type) != "dir" })
   if ($files | is-empty) {
     error make {msg: $"install_lldb: ($rel) exists in the stage but contains no files"}
   }
@@ -128,9 +155,9 @@ def main [] {
   # THE PYTHON BINDINGS, and the one place the destination is %PREFIX% rather
   # than the layout root.
   let sp_dirs = (if (is-windows) {
-    glob $"($stage)/Lib/site-packages/lldb" | where {|p| ($p | path type) == "dir" }
+    glob-native $"($stage)/Lib/site-packages/lldb" | where {|p| ($p | path type) == "dir" }
   } else {
-    glob $"($stage)/lib/python*/site-packages/lldb" | where {|p| ($p | path type) == "dir" }
+    glob-native $"($stage)/lib/python*/site-packages/lldb" | where {|p| ($p | path type) == "dir" }
   })
   if ($sp_dirs | length) != 1 {
     error make {msg: $"install_lldb: expected exactly one lldb python-bindings directory in the stage, found ($sp_dirs | length) — LLDB_ENABLE_PYTHON or LLDB_PYTHON_RELATIVE_PATH in build-stage.nu is not producing what this slice expects: ($sp_dirs)"}

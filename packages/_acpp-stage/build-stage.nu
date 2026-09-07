@@ -48,6 +48,33 @@
 # It is deliberately NOT a general platform override: the build itself reads
 # real paths, real compilers and a real prefix, and a build that believed it was
 # on another OS would be nonsense. Only these three predicates consult it.
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 def detected-os [] { $env.ACPP_FAKE_OS? | default $nu.os-info.name }
 
 def is-windows [] { (detected-os) == "windows" }
@@ -691,7 +718,7 @@ def outer-flag-args [] {
 # lives in CMakeFiles/CMakeConfigureLog.yaml.
 def dump-runtimes-logs [build: string] {
   let root = (fwd ($build | path join "runtimes"))
-  for f in (glob $"($root)/**/CMakeConfigureLog.yaml") {
+  for f in (glob-native $"($root)/**/CMakeConfigureLog.yaml") {
     print $"===== child configure evidence: ($f) ====="
     let text = (open --raw $f | lines)
     $text | first 500 | str join "\n" | print
@@ -744,7 +771,7 @@ def clang-install-fixups-unix [prefix: string] {
   # unversioned name. clang-offload-packager-* is skipped upstream because it
   # links to llvm-offload-binary; clang-<major> is skipped because the install
   # already created it.
-  for f in (glob $"($bin)/clang-*") {
+  for f in (glob-native $"($bin)/clang-*") {
     let name = ($f | path basename)
     if ($name | str starts-with "clang-offload-packager-") { continue }
     if $name == $"clang-($major)" { continue }
@@ -867,7 +894,7 @@ def clang-install-fixups-win [layout_root: string] {
 # is the same idea expressed once instead of per-file.
 def compiler-rt-install-fixups [prefix: string, layout_root: string] {
   if (is-windows) {
-    let src = (glob ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" "windows" "*.dll"))
+    let src = (glob-native ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" "windows" "*.dll"))
     let dest = ($layout_root | path join "bin")
     mkdir $dest
     for f in $src { cp -f $f ($dest | path join ($f | path basename)) }
@@ -878,7 +905,7 @@ def compiler-rt-install-fixups [prefix: string, layout_root: string] {
   } else {
     let os_dir = (if (is-darwin) { "darwin" } else { "linux" })
     let ext = (if (is-darwin) { "dylib" } else { "so" })
-    let src = (glob ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" $os_dir $"libclang_rt*.($ext)"))
+    let src = (glob-native ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" $os_dir $"libclang_rt*.($ext)"))
     let dest = ($prefix | path join "lib")
     mkdir $dest
     for f in $src { cp -f $f ($dest | path join ($f | path basename)) }
@@ -956,7 +983,7 @@ def openmp-header-fixups [prefix: string, layout_root: string] {
 
 def openmp-install-fixups [prefix: string] {
   let libdir = ($prefix | path join "lib")
-  for f in (glob $"($libdir)/libgomp*") { rm -f $f }
+  for f in (glob-native $"($libdir)/libgomp*") { rm -f $f }
   if not (is-darwin) {
     let archer = ($libdir | path join "libarcher.so")
     # "move libarcher.so so that it doesn't interfere"
@@ -1008,7 +1035,7 @@ def main [] {
   # lifting it costs nothing and losing it would be invisible the day that flag
   # moves.
   if (not (is-windows)) and (not (is-darwin)) {
-    for f in (glob $"(fwd ($llvm_src | path join 'openmp'))/**/CMakeLists.txt") {
+    for f in (glob-native $"(fwd ($llvm_src | path join 'openmp'))/**/CMakeLists.txt") {
       open --raw $f
         | str replace --all "LLVM_LINK_LLVM_DYLIB" "LLVM_LINK_LLVM_DYLIB2"
         | str replace --all "NO_INSTALL_RPATH" "NO_INSTALL_RPATH DISABLE_LLVM_LINK_LLVM_DYLIB"
@@ -1148,7 +1175,7 @@ def main [] {
   } else {
     ($prefix | path join "lib" "clang" "**" "libclang_rt.asan*")
   })
-  if ((glob $rt_glob | length) == 0) {
+  if ((glob-native $rt_glob | length) == 0) {
     dump-runtimes-logs $build
     error make {msg: "compiler-rt runtimes are HOLLOW (no asan artifacts installed) — child configure evidence dumped above"}
   }
@@ -1170,7 +1197,7 @@ def main [] {
     let os_dir = (if (is-darwin) { "darwin" } else { "linux" })
     let want = ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" $os_dir)
     if not ($want | path exists) {
-      let found = (glob ($prefix | path join "lib" "clang" "*" "lib" "*") | where {|p| ($p | path type) == "dir" })
+      let found = (glob-native ($prefix | path join "lib" "clang" "*" "lib" "*") | where {|p| ($p | path type) == "dir" })
       print $"compiler-rt runtime directories present: ($found | str join ', ')"
       error make {msg: $"compiler-rt installed no ($os_dir)/ runtime directory at ($want). That is the PER-TARGET layout (lib/<triple>/), which every carve list in this repo — all scoped from conda-forge's artifact — will miss. LLVM_ENABLE_PER_TARGET_RUNTIME_DIR must be OFF on the outer configure AND in RUNTIMES_CMAKE_ARGS"}
     }
@@ -1255,7 +1282,7 @@ def main [] {
       } else {
         ($e.src | path dirname) + "/" + ($e.src | path basename | str replace -r '\.so.*$' '') + "*"
       })
-      let matches = (glob $pattern)
+      let matches = (glob-native $pattern)
       if ($matches | is-empty) { error make {msg: $"rocm deploy: nothing matches ($pattern)"} }
       for f in $matches {
         let name = ($f | path basename)
@@ -1293,7 +1320,7 @@ def main [] {
     # discriminator that was missing when acpp-libclang-cpp21.1 carved one file
     # into a package with zero content (run 34116494098). A listing that cannot
     # tell those apart is a listing that cannot settle the next one either.
-    let paths = (glob ($root | path join "**" "*") --no-dir
+    let paths = (glob-native ($root | path join "**" "*") --no-dir
       | each {|p|
           let rel = ($p | path relative-to $root)
           let t = ($p | path type)

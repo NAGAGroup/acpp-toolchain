@@ -173,6 +173,7 @@ jobs:
         shell: bash
         run: |
           pixi run -e packaging nu tools/gen-platform-packages.nu --check
+          pixi run -e packaging nu tools/check-glob-normalisation.nu
           pixi run -e packaging nu tools/check-source-paths.nu
           pixi run -e packaging nu tools/tests/exercise-stage-fixups.nu
           pixi run -e packaging nu tools/check-sibling-mapping.nu --platform ${{ matrix.platform }}

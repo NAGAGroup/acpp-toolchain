@@ -39,6 +39,33 @@
 
 # Dependency order, not alphabetical. acpp-runtime leads because `acpp`
 # consumes it from the channel; anything downstream of `acpp` follows it.
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 const ORDER = [
   "acpp-runtime"
   "acpp-runtime-cuda"
@@ -156,7 +183,7 @@ def main [
   # from the built list, never by globbing the build directory.
   mut collected = 0
   for name in $built {
-    let found = (glob $"($build_dir)/($name)/*/output/*/*.conda")
+    let found = (glob-native $"($build_dir)/($name)/*/output/*/*.conda")
     if ($found | is-empty) {
       error make {msg: $"build-platform: ($name) published but no artifact found under ($build_dir)/($name)"}
     }

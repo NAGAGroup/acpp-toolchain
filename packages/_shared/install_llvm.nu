@@ -54,6 +54,33 @@
 # `llvm-config` is deliberately absent: it belongs to llvmdev, and upstream
 # spends an `rm` at the end of each arm to take it back out. A positive list
 # never adds it, so those two `rm` steps are gone rather than reproduced.
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 const LLVM_TOOLS = [
     "bugpoint" "dsymutil" "llc" "lli"
     "llvm-addr2line" "llvm-ar" "llvm-as" "llvm-bcanalyzer"
@@ -132,7 +159,7 @@ def place-tree [dir: string, layout_root: string, stage: string] {
     error make {msg: $"install_llvm: ($dir) is in this package's published file set but is not in the stage — the slice has rotted against the stage"}
   }
   mut n = 0
-  for f in (glob $"($dir)/**/*") {
+  for f in (glob-native $"($dir)/**/*") {
     if (($f | path type) == "dir") { continue }
     place $f $layout_root $stage
     $n = $n + 1
@@ -168,7 +195,7 @@ def main [] {
       place $"($stage)/lib/LLVM-C.lib" $layout_root $stage
       $placed = 2
     } else {
-      for f in (glob $"($stage)/lib/libLLVM-C($sover)($ext)") {
+      for f in (glob-native $"($stage)/lib/libLLVM-C($sover)($ext)") {
         place $f $layout_root $stage
         $placed = $placed + 1
       }
@@ -206,7 +233,7 @@ def main [] {
     let pats = ([$"($stage)/lib/libLLVM-($major)($ext)"]
       | append ($versioned | each {|n| $"($stage)/lib/($n)" }))
     for p in $pats {
-      for f in (glob $p) {
+      for f in (glob-native $p) {
         place $f $layout_root $stage
         $placed = $placed + 1
       }
@@ -291,7 +318,7 @@ def main [] {
     # 208 on linux-64 and osx-arm64, 208 of 208 on win-64. A bare lib/*.a would
     # also take clang's libclang*.a and lld's liblld*.a.
     let static_pat = (if (is-windows) { $"($lib)/LLVM*.lib" } else { $"($lib)/libLLVM*.a" })
-    let statics = (glob $static_pat | where {|f| ($f | path basename) not-in ["LLVM-C.lib"] })
+    let statics = (glob-native $static_pat | where {|f| ($f | path basename) not-in ["LLVM-C.lib"] })
     if ($statics | is-empty) {
       error make {msg: $"install_llvm: no static libraries matched ($static_pat) — the llvmdev slice has rotted against the stage"}
     }

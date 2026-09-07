@@ -21,6 +21,33 @@
 # against a local dist/ before they ever reach a runner, and each is guarded
 # for the empty case, which is the NORMAL case on a failed run.
 
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 def header [text: string] {
   print ""
   print $"=== ($text) ==="
@@ -36,7 +63,7 @@ def conda-index [artifact: string] {
 }
 
 def main [--dist: string = "dist", --stage-run-log: string = "", --publish-log: string = "publish.log"] {
-  let artifacts = (glob $"($dist)/**/*.conda")
+  let artifacts = (glob-native $"($dist)/**/*.conda")
   print $"observe: ($artifacts | length) artifact\(s\) under ($dist)"
 
   # 1. DID THE EXPENSIVE STAGE BUILD RUN EXACTLY ONCE? The whole cost model of
@@ -101,7 +128,7 @@ def main [--dist: string = "dist", --stage-run-log: string = "", --publish-log: 
   # is expected to work — and it is the kind of thing that only fails on a
   # user's machine.
   header "llvm-spirv: the RPATH baked into the shipped binary"
-  let spirv = (glob $"($dist)/**/acpp-llvm-spirv-*.conda")
+  let spirv = (glob-native $"($dist)/**/acpp-llvm-spirv-*.conda")
   if ($spirv | is-empty) {
     print "no acpp-llvm-spirv artifact — nothing built, or it is named differently"
   } else {
@@ -130,7 +157,7 @@ def main [--dist: string = "dist", --stage-run-log: string = "", --publish-log: 
   # a wrong rpath here is a runtime defect on a user's machine, so print what
   # actually got baked in.
   header "ROCm prebuilts: the RPATH patchelf left behind"
-  let rocm = (glob $"($dist)/**/acpp-runtime-rocm-*.conda")
+  let rocm = (glob-native $"($dist)/**/acpp-runtime-rocm-*.conda")
   if ($rocm | is-empty) {
     print "no acpp-runtime-rocm artifact in this run"
   } else {
@@ -151,7 +178,7 @@ def main [--dist: string = "dist", --stage-run-log: string = "", --publish-log: 
   # deployment-target package is at 26.0 and strong-exports __osx >= its own
   # version, so a wrong pin ships packages nobody can install.
   header "osx: the __osx floor actually recorded in the artifacts"
-  let osx = (glob $"($dist)/osx-arm64/*.conda")
+  let osx = (glob-native $"($dist)/osx-arm64/*.conda")
   if ($osx | is-empty) {
     print "no osx-arm64 artifacts in this run"
   } else {

@@ -22,6 +22,33 @@
 #
 #   pixi run -e packaging nu tools/tests/exercise-stage-fixups.nu
 
+# ⚠ EVERY GLOB GOES THROUGH THIS. On Windows `path join` emits BACKSLASHES,
+# and a backslash is an ESCAPE character in a nushell glob pattern — so a
+# pattern built from `path join` does not merely fail to match, it fails to
+# PARSE (`failed to parse glob expression`, win run 34129107780). Forward
+# slashes are valid separators on Windows, so normalising is safe everywhere
+# and is done on every platform rather than under an `if windows`, which would
+# leave the win path untested on linux.
+#
+# It also ASSERTS the result is clean: a backslash surviving normalisation
+# means the pattern carried an intentional escape, which nothing here wants,
+# and that assertion fires on ANY platform — including a linux laptop, where
+# `path join` would never have produced one.
+def glob-native [pattern: string, --no-dir] {
+  # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
+  # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
+  # glob parser handles those. nushell#15707 reports exactly this shape: a
+  # pattern built from `path expand`/`path join` fails to parse while the same
+  # path written as a literal works — which is why "backslash is an escape" is
+  # only half the story. Our own prefix and build dir go through `path expand`,
+  # so this is the form we would meet.
+  let p = ($pattern | str replace '\\?\' '' | str replace --all '\' '/')
+  if ($p | str contains '\') {
+    error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
+  }
+  if $no_dir { glob $p --no-dir } else { glob $p }
+}
+
 const STAGE = "packages/_acpp-stage/build-stage.nu"
 
 # A synthetic stage tree with the shapes the fixups act on: versioned and
@@ -94,7 +121,7 @@ def make-tree [root: string, os: string] {
 # The tree's full state: every path, plus what each symlink points at. Two
 # snapshots being equal is what "changed nothing" means.
 def snapshot [root: string] {
-  glob $"($root)/**/*" --no-dir
+  glob-native $"($root)/**/*" --no-dir
   | each {|p|
       let rel = ($p | path relative-to $root)
       let t = ($p | path type)
@@ -223,7 +250,7 @@ def main [--os: string = ""] {
     }
   }
 
-  let flang_cfg = (glob $"($root)/bin/*-flang.cfg")
+  let flang_cfg = (glob-native $"($root)/bin/*-flang.cfg")
   if not ($flang_cfg | is-empty) {
     let n = (open --raw ($flang_cfg | first) | lines | where {|l| $l != "" } | length)
     let uniq = (open --raw ($flang_cfg | first) | lines | where {|l| $l != "" } | uniq | length)

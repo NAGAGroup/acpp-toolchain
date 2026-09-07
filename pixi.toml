@@ -352,6 +352,13 @@ description = "Assert every stage fixup is idempotent"
 cmd = "nu tools/check-carves-against-stage.nu"
 description = "Resolve every carve against a real stage listing and name collisions"
 
+# Every glob goes through glob-native. The failure it prevents is invisible on
+# linux — `path join` only emits backslashes on Windows — so this lint is the
+# only thing that can catch a regression before a win runner does.
+[feature.packaging.tasks.check-glob-normalisation]
+cmd = "nu tools/check-glob-normalisation.nu"
+description = "Assert every glob is normalised for Windows"
+
 [feature.packaging.tasks.check-source-paths]
 cmd = "nu tools/check-source-paths.nu"
 description = "Assert every path: source resolves from its own recipe directory"

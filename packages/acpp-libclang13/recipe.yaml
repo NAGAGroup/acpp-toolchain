@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libclang13 — the VERSIONED libclang shared library. Lifted from the
+# reference monolith's `libclang${{ libclang_soversion }}` output
+# (clangdev-feedstock).
+#
+# THE 13 IS A SOVERSION, NOT OUR LLVM MAJOR. clangdev's own conda_build_config
+# says why: "Starting from LLVM 14, the ABI of libclang doesn't necessarily
+# match the major version anymore." It arrives from ../../variants.yaml as
+# `libclang_soversion`, and the stage's win fixup fails the build if the DLL it
+# finds is not named for that number — so the two cannot drift apart silently.
+#
+# SLICING FORM: GLOB LIST, upstream's own — one named file per platform.
+# Cross-checked against conda-forge's libclang13-21.1.8 artifact:
+# `lib/libclang.so.13`, `lib/libclang.13.dylib`, `Library/bin/libclang-13.dll`.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-libclang${{ libclang_soversion }}
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        ${{ "lib/libclang.so." ~ libclang_soversion if linux
+        else "lib/libclang." ~ libclang_soversion ~ ".dylib" if osx
+        else "Library/bin/libclang-" ~ libclang_soversion ~ ".dll" }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # "Use the same requirements as the top-level requirements, but only the
+    # ones required for run_exports"
+    - acpp-llvm ==${{ llvm_version }}
+    - if: win
+      then:
+        - zlib
+        - zstd
+  run:
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, exact=True)
+    - if: unix
+      then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ llvm_version }}
+  run_exports:
+    # "note that the name (e.g. libclang13) does not necessarily match the
+    # version lower bound (e.g. >=14.0.0)"
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+
+tests:
+  - package_contents:
+      files:
+        # presence of the versioned libraries
+        exists:
+          - if: linux
+            then: lib/libclang.so.${{ libclang_soversion }}
+          - if: osx
+            then: lib/libclang.${{ libclang_soversion }}.dylib
+          - if: win
+            then: ${{ library_prefix }}bin/libclang-${{ libclang_soversion }}.dll
+        # absence of unversioned or misversioned libraries
+        not_exists:
+          - if: linux
+            then:
+              - lib/libclang.so
+              - lib/libclang.so.${{ llvm_major }}
+              - lib/libclang.so.${{ llvm_version }}
+          - if: osx
+            then:
+              - lib/libclang.dylib
+              - lib/libclang.${{ llvm_major }}.dylib
+              - lib/libclang.${{ llvm_version }}.dylib
+          - if: win
+            then:
+              - ${{ library_prefix }}lib/libclang.lib
+              - ${{ library_prefix }}bin/libclang.dll
+              - ${{ library_prefix }}bin/libclang-${{ llvm_major }}.dll
+              - ${{ library_prefix }}bin/libclang-${{ llvm_version }}.dll
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Development headers and libraries for the clang C library, versioned

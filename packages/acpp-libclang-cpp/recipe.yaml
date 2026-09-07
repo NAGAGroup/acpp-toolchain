@@ -1,0 +1,81 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libclang-cpp — the UNVERSIONED libclang-cpp symlink. Lifted from the
+# reference monolith's `libclang-cpp` output (clangdev-feedstock).
+#
+# SLICING FORM: GLOB LIST, upstream's own — one named file per platform, so it
+# cannot reach another project's output in our union stage. Cross-checked
+# against conda-forge's libclang-cpp-21.1.8 artifact: `lib/libclang-cpp.so` on
+# linux-64, `lib/libclang-cpp.dylib` on osx-arm64, and ZERO paths on win-64.
+#
+# ON WINDOWS THIS SHIPS NOTHING, deliberately. Upstream expresses that with a
+# `files:` entry naming a path that does not exist (`lib/this_does_not_exist`),
+# a work-around for rattler-build treating an empty file list as "capture
+# everything" (rattler-build issue 2753). We cannot borrow that: our slice is
+# capture-everything-NEW driven by a copy script, and a glob matching nothing is
+# the one defect that script can detect, so a deliberately-dangling glob would
+# disarm the check for every other package too. ACPP_CARVE_NONE says the same
+# thing as a declaration instead, and demands a reason.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-libclang-cpp
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        ${{ "lib/libclang-cpp.so" if linux
+        else "lib/libclang-cpp.dylib" if osx
+        else "" }}
+      ACPP_CARVE_NONE: >-
+        ${{ "there is no unversioned libclang-cpp on win: the versioned output
+        acpp-libclang-cpp21.1 is itself skipped there, so this is a pure
+        wrapper, as upstream's own win-64 artifact also is (zero paths)"
+        if win else "" }}
+
+requirements:
+  build:
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+  run:
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, exact=True)
+    - if: unix
+      then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ llvm_version }}
+  run_exports:
+    # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
+    - if: unix
+      then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - if: linux
+          then: lib/libclang-cpp.so
+        - if: osx
+          then: lib/libclang-cpp.dylib
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: The clang C++ library

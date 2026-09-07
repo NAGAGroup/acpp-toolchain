@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libclang — the UNVERSIONED libclang, plus the import library on win.
+# Lifted from the reference monolith's `libclang` output (clangdev-feedstock).
+#
+# SLICING FORM: GLOB LIST, upstream's own — named files per platform.
+# Cross-checked against conda-forge's libclang-21.1.8 artifact:
+# `lib/libclang.so`, `lib/libclang.dylib`, and on win-64 the pair
+# `Library/bin/libclang.dll` + `Library/lib/libclang.lib`.
+#
+# The win DLL is not a symlink — the stage builds it with `create-forwarder-dll`
+# pointing at the versioned one, which is why win is the only platform where
+# this package carries real bytes rather than a link.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-libclang
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
+  variant:
+    down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        ${{ "lib/libclang.so" if linux
+        else "lib/libclang.dylib" if osx
+        else "Library/bin/libclang.dll;Library/lib/libclang.lib" }}
+
+requirements:
+  build:
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, exact=True)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-llvmdev ==${{ llvm_version }}
+    - acpp-llvm ==${{ llvm_version }}
+    # "Use the same requirements as the top-level requirements"
+    - libxml2-devel
+    - zlib
+    - zstd
+    - if: osx
+      then: libcxx-devel ==${{ cxx_compiler_version }}
+  run:
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, exact=True)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ llvm_version }}
+  run_exports:
+    # "note that the name (e.g. libclang13) does not necessarily match the
+    # version lower bound (e.g. >=14.0.0)"
+    # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, upper_bound=None)
+    - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: linux
+            then: lib/libclang.so
+          - if: osx
+            then: lib/libclang.dylib
+          - if: win
+            then:
+              - ${{ library_prefix }}bin/libclang.dll
+              - ${{ library_prefix }}lib/libclang.lib
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Development headers and libraries for the clang C library

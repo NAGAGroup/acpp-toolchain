@@ -72,7 +72,16 @@ def glob-native [pattern: string, --no-dir] {
   if ($p | str contains '\') {
     error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
   }
-  if $no_dir { glob $p --no-dir } else { glob $p }
+  # ⚠ AND THE RESULTS ARE NORMALISED TOO, which is the other half. On Windows
+  # glob RETURNS backslash paths (or verbatim ones), so a caller comparing a
+  # result against a forward-slash root — `path relative-to`, `str starts-with`,
+  # `=~` — fails with `prefix not found` even though the pattern was fine. Win
+  # run 34134434830 died in exactly that way, in the harness's own snapshot,
+  # AFTER the fixups themselves had passed. Both sides of every comparison must
+  # be forward-slash, and returning them normalised is the one place that makes
+  # every caller correct at once.
+  let hits = (if $no_dir { glob $p --no-dir } else { glob $p })
+  $hits | each {|h| $h | str replace '\\?\' '' | str replace --all '\' '/' }
 }
 
 def detected-os [] { $env.ACPP_FAKE_OS? | default $nu.os-info.name }
@@ -655,10 +664,23 @@ def darwin-args [src: string, prefix: string] {
     "-DLLDB_ENABLE_CURSES=ON"
     "-DLLDB_ENABLE_LZMA=ON"
     "-DLLDB_ENABLE_LIBXML2=ON"
-    # conda-forge's documented flags: "Prevent CMake from using system-wide
-    # macOS packages."
-    "-DCMAKE_FIND_FRAMEWORK=NEVER"
-    "-DCMAKE_FIND_APPBUNDLE=NEVER"
+    # ⚠ LAST, NOT NEVER — and LAST is conda-forge's own answer, read from its
+    # activation script rather than chosen: `activate-clang.sh` line 128 sets
+    # `-DCMAKE_FIND_FRAMEWORK=LAST -DCMAKE_FIND_APPBUNDLE=LAST` for every conda
+    # build on macOS, and the ctng activation says the same on linux.
+    #
+    # LAST keeps the intent ("prefer the prefix over system-wide macOS
+    # packages") while still ALLOWING frameworks as a fallback. NEVER removes
+    # them entirely, and lldb cannot be built that way: lldbUtility links
+    # CoreFoundation, CoreServices, Foundation and Security, which
+    # `find_library` resolves as SDK FRAMEWORKS. With NEVER they came back
+    # NOTFOUND and the generate step failed after configuring for 73 seconds
+    # (osx run 34134447649).
+    #
+    # This is our configure's defect, not lldb's: upstream builds lldb on macOS
+    # with the activation's LAST in effect.
+    "-DCMAKE_FIND_FRAMEWORK=LAST"
+    "-DCMAKE_FIND_APPBUNDLE=LAST"
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
@@ -1268,7 +1290,7 @@ def main [] {
     let libdir = ($prefix | path join "lib")
     for e in (open --raw $manifest | from json | transpose src dest) {
       if ($e.src | str contains "$ACPP_") { continue }
-      if ($e.src | str starts-with $prefix) { continue }
+      if ($e.src | str starts-with (fwd $prefix)) { continue }
       # optional components acpp probes without REQUIRED (hsakmt was folded
       # into hsa-runtime; rocprofiler-register is optional) render as
       # <VAR>-NOTFOUND when the tarball does not carry them
@@ -1313,7 +1335,10 @@ def main [] {
   # script knows where the stage root is on each platform.
   let listing = ($env | get -o ACPP_STAGE_PATHS | default "")
   if $listing != "" {
-    let root = (if (is-windows) { $layout_root } else { $prefix })
+    # Normalised, because the glob results below are: `path relative-to` needs
+    # BOTH sides in the same spelling or it fails with "prefix not found" on
+    # Windows (win run 34134434830).
+    let root = (fwd (if (is-windows) { $layout_root } else { $prefix }))
     # ⚠ TYPE AND TARGET, not just the path. A bare path list cannot answer the
     # question that actually matters about an install tree — whether an entry is
     # a real file, a symlink, or a DANGLING symlink — and that is precisely the

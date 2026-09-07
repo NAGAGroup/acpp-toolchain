@@ -39,7 +39,16 @@ def glob-native [pattern: string, --no-dir] {
   if ($p | str contains '\') {
     error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
   }
-  if $no_dir { glob $p --no-dir } else { glob $p }
+  # ⚠ AND THE RESULTS ARE NORMALISED TOO, which is the other half. On Windows
+  # glob RETURNS backslash paths (or verbatim ones), so a caller comparing a
+  # result against a forward-slash root — `path relative-to`, `str starts-with`,
+  # `=~` — fails with `prefix not found` even though the pattern was fine. Win
+  # run 34134434830 died in exactly that way, in the harness's own snapshot,
+  # AFTER the fixups themselves had passed. Both sides of every comparison must
+  # be forward-slash, and returning them normalised is the one place that makes
+  # every caller correct at once.
+  let hits = (if $no_dir { glob $p --no-dir } else { glob $p })
+  $hits | each {|h| $h | str replace '\\?\' '' | str replace --all '\' '/' }
 }
 
 def main [
@@ -61,7 +70,10 @@ def main [
   mkdir $into
   # One listing of the tree, reused for every lookup: the build directory holds
   # tens of thousands of files and a glob per package would walk it each time.
-  let candidates = (glob-native $"($search)/**/*.conda" | where {|f| not ($f | str contains $into) })
+  # Both sides forward-slash: glob-native returns normalised paths, so the
+  # directory being compared against must be normalised too.
+  let into_fwd = ($into | str replace --all ''\'' ''/'')
+  let candidates = (glob-native $"($search)/**/*.conda" | where {|f| not ($f | str contains $into_fwd) })
   print $"collect-artifacts: ($built | length) published package\(s\), ($candidates | length) .conda file\(s\) on disk"
 
   mut missing = []

@@ -46,7 +46,16 @@ def glob-native [pattern: string, --no-dir] {
   if ($p | str contains '\') {
     error make {msg: $"glob-native: pattern still contains a backslash after normalisation: ($p)"}
   }
-  if $no_dir { glob $p --no-dir } else { glob $p }
+  # ⚠ AND THE RESULTS ARE NORMALISED TOO, which is the other half. On Windows
+  # glob RETURNS backslash paths (or verbatim ones), so a caller comparing a
+  # result against a forward-slash root — `path relative-to`, `str starts-with`,
+  # `=~` — fails with `prefix not found` even though the pattern was fine. Win
+  # run 34134434830 died in exactly that way, in the harness's own snapshot,
+  # AFTER the fixups themselves had passed. Both sides of every comparison must
+  # be forward-slash, and returning them normalised is the one place that makes
+  # every caller correct at once.
+  let hits = (if $no_dir { glob $p --no-dir } else { glob $p })
+  $hits | each {|h| $h | str replace '\\?\' '' | str replace --all '\' '/' }
 }
 
 const STAGE = "packages/_acpp-stage/build-stage.nu"
@@ -120,7 +129,14 @@ def make-tree [root: string, os: string] {
 
 # The tree's full state: every path, plus what each symlink points at. Two
 # snapshots being equal is what "changed nothing" means.
-def snapshot [root: string] {
+def snapshot [root_in: string] {
+  # ⚠ BOTH SIDES FORWARD-SLASH. glob-native returns normalised results; the root
+  # they are made relative to must be normalised as well, or on Windows
+  # `path relative-to` fails with "prefix not found" against a mixed pair like
+  # `/tmp/stage-fixups-windows\bin` vs `/tmp/stage-fixups-windows`. That is how
+  # win run 34134434830 died — in this snapshot, AFTER the fixups themselves had
+  # passed on a real Windows runner for the first time.
+  let root = $root_in
   glob-native $"($root)/**/*" --no-dir
   | each {|p|
       let rel = ($p | path relative-to $root)
@@ -278,6 +294,20 @@ def main [--os: string = ""] {
       print $"FAIL: the flang config file has ($n) lines but only ($uniq) distinct — it accumulates per pass"
       $results = ($results | append false)
     }
+  }
+
+  # ⚠ EVERY SNAPSHOT PATH IS FORWARD-SLASH AND RELATIVE-TO SUCCEEDS. This is the
+  # assertion that fires on a LAPTOP if a helper ever returns a Windows-spelled
+  # path — the failure it guards is invisible on linux, where nothing produces a
+  # backslash, so without it the only detector is a metered win runner.
+  let mixed = ($after_two | where {|s| $s =~ '\\' })
+  if ($mixed | is-empty) {
+    print $"PASS: all ($after_two | length) snapshot paths are forward-slash and relative to the root"
+    $results = ($results | append true)
+  } else {
+    print $"FAIL: ($mixed | length) snapshot path\(s\) carry a backslash — glob-native or the root is not normalised"
+    for m in ($mixed | first 5) { print $"      ($m)" }
+    $results = ($results | append false)
   }
 
   # ⚠ THE SEAM MUST STAY A TESTING SEAM. `ACPP_FAKE_OS` overrides the stage's

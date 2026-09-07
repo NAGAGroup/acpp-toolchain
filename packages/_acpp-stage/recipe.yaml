@@ -133,7 +133,22 @@ source:
       - patches/upstream/compiler-rt/0002-Revert-Declare-_availability_version_check-as-weak_i.patch
 
       # --- lld-feedstock @ its v21.1.8 revision ---
-      - patches/upstream/lld/0001-point-header-inclusion-in-lld-MachO-CMakeLists.txt-t.patch
+      #
+      # ⚠ ONE PATCH DELIBERATELY NOT LIFTED, and this is the only place that
+      # says so: `0001-point-header-inclusion-in-lld-MachO-CMakeLists.txt-t`
+      # rewrites `include_directories(${LLVM_MAIN_SRC_DIR}/../libunwind/include)`
+      # to `$ENV{SRC_DIR}/libunwind/include`. Upstream's lld feedstock builds
+      # lld STANDALONE against an installed llvmdev, so LLVM_MAIN_SRC_DIR points
+      # into the install and `../libunwind` does not exist there — the patch
+      # redirects to that feedstock's own checkout, which extracts to $SRC_DIR
+      # directly. WE build in-tree from one tarball extracted to
+      # $SRC_DIR/llvm-project, so LLVM_MAIN_SRC_DIR is
+      # $SRC_DIR/llvm-project/llvm and the UNPATCHED line already resolves to
+      # $SRC_DIR/llvm-project/libunwind/include. Applying it pointed the
+      # compiler one directory too shallow and failed five lld/MachO sources
+      # with "mach-o/compact_unwind_encoding.h: No such file or directory"
+      # (run 34099640221, ninja 408/4512). Not pruning semantics: its
+      # PRECONDITION — standalone build, $SRC_DIR-rooted tarball — is false here.
 
       # --- lldb-feedstock @ its v21.1.8 revision ---
       - patches/upstream/lldb/0001-Remove-linking-liblldb-to-libpython.patch

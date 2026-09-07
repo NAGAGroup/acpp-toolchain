@@ -133,12 +133,13 @@ outputs:
         # The generation gate: build_scripts.sh fails the build on any
         # shellcheck finding in a script we are about to ship.
         - shellcheck
-      host:
-        # The compiler being activated. HOST, not run: acpp's weak run_export
-        # states its own exact build (version, LLVM tag, build number), so the
-        # run dependency on it is COMPUTED rather than transcribed, and acpp's
-        # strong export adds the matching acpp-runtime.
-        - acpp ==${{ acpp_version }}
+      # NO HOST DEPS — upstream's ctng clang_/clangxx_ outputs have no `host:`
+      # block at all, and the `acpp` dep here was a port-era addition to compute
+      # the run pin from acpp's run_export. See the osx port for the failure it
+      # caused there: acpp's run_constraints forbid conda-forge's `llvm-tools`
+      # at our major, and conda-forge's macOS linker toolchain requires that
+      # exact name. Linux never hit it only because its compiler is gcc — which
+      # is why the line survived this long, not a reason to keep it.
       run:
         # UPSTREAM: `clang_impl_${{ cross_target_platform }} ${{ clang_version }}.*`
         #
@@ -256,8 +257,7 @@ outputs:
       build:
         - sed
         - shellcheck
-      host:
-        - acpp ==${{ acpp_version }}
+      # No host deps — same reason as the C output above.
       run:
         # The C++ activation script sets only the CXX half; it relies on the C
         # script having run first for CPPFLAGS, CMAKE_ARGS and the sysroot.

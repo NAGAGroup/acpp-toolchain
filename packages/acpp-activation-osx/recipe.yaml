@@ -137,12 +137,21 @@ outputs:
     requirements:
       build:
         - sed
-      host:
-        # The compiler being activated. HOST, not run: acpp's weak run_export
-        # states its own exact build (version, LLVM tag, build number), so the
-        # run dependency on it is COMPUTED rather than transcribed, and acpp's
-        # strong export adds the matching acpp-runtime.
-        - acpp ==${{ acpp_version }}
+      # NO HOST DEPS, which is UPSTREAM'S SHAPE for this output: the osx
+      # activation's clang_/clangxx_ outputs, and ctng's, have no `host:` block
+      # at all — only the WINDOWS activation does, because its install script
+      # creates symlinks with clang and llvm-tools at build time. The `acpp`
+      # host dep here was a port-era addition, to COMPUTE the run pin from
+      # acpp's run_export: a convenience, not a requirement, since the driver
+      # this package activates is named explicitly in `run:` below.
+      #
+      # IT ALSO MADE THE PACKAGE UNBUILDABLE ON macOS. The host env then held
+      # `acpp`, whose run_constraints forbid conda-forge's `llvm-tools` at OUR
+      # major — and conda-forge's macOS linker toolchain requires exactly that
+      # name: `cctools_impl_osx-arm64` depends on `llvm-tools <major>.*`, pinned
+      # to whichever LLVM its build string names (measured on conda-forge's own
+      # metadata, not inferred). Run 34130069096 died on that conflict in its
+      # first host solve. Linux never hit it because its compiler is gcc.
       run:
         # UPSTREAM: `clang_impl_${{ cross_target_platform }} ${{ version }}.*`
         #
@@ -260,8 +269,7 @@ outputs:
     requirements:
       build:
         - sed
-      host:
-        - acpp ==${{ acpp_version }}
+      # No host deps — same reason as the C output above.
       run:
         # The C++ activation script sets only the CXX half; it relies on the C
         # script having run first for CPPFLAGS, CMAKE_ARGS and the sysroot.

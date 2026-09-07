@@ -148,20 +148,37 @@ def run-fixups [root: string, os: string] {
     $"clang-install-fixups-unix '($root)'"
   })
   let openmp_fixup = (if $os == "windows" { "" } else { $"; openmp-install-fixups '($root)'" })
-  # ⚠ ONE EXTERNAL IS STUBBED, AND ONLY WHEN FORCING AN OS WE ARE NOT ON. The
-  # windows clang fixup shells out to `create-forwarder-dll`, which exists only
-  # in the Windows toolchain — so without a stub the win branch could be
-  # exercised on a Windows runner alone, which is the machine this harness is
-  # meant to protect. The stub stands in for a DLL forwarder we do not own and
-  # are not testing; everything either side of it is our own logic and runs for
-  # real. On an actual Windows runner `$os` equals the host and the real tool
-  # is used.
+  # ⚠ ONE EXTERNAL IS STUBBED WHENEVER THIS HARNESS RUNS THE WINDOWS BRANCH —
+  # on a Windows runner too, and that correction matters. The condition used to
+  # be "we are faking an OS", which is the wrong axis: on a real win runner the
+  # branch calls the real `create-forwarder-dll`, and that tool lives in the
+  # STAGE's build environment while this gate runs in `packaging`. Win run
+  # 34130056510 failed with `Command 'create-forwarder-dll' not found` for
+  # exactly that reason — the harness must never need a build-env tool, on any
+  # platform.
+  #
+  # It is the ONLY one: audited, the four fixups this runs call `ln` (coreutils,
+  # present everywhere, and load-bearing for the symlink behaviour under test)
+  # and nothing else external. A DLL forwarder we neither own nor test is a
+  # legitimate stand-in; `ln` would not be.
+  # ⚠ AND THE STUB ITSELF IS WRITTEN FOR BOTH HOSTS. A `#!/bin/sh` file with
+  # `chmod +x` is not executable on Windows — where this branch now also runs —
+  # and `chmod` does not exist there either. So: a shell script for a unix host
+  # forcing the win branch, and a `.bat` for a real win runner, which is what
+  # PATHEXT will find. Writing only the first would have been the same
+  # platform-blindness one level down from the bug being fixed.
   let stub_dir = $"($root)-stubs"
-  if $os == "windows" and $nu.os-info.name != "windows" {
+  if $os == "windows" {
     rm -rf $stub_dir
     mkdir $stub_dir
-    "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for\ntouch \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
-    ^chmod +x $"($stub_dir)/create-forwarder-dll"
+    if $nu.os-info.name == "windows" {
+      # %2 is the forwarder path the fixup asks for; creating it empty is all
+      # the harness needs, since what is under test is our logic around it.
+      "@echo off\r\nrem fixture stub for create-forwarder-dll\r\ntype nul > %2\r\n" | save -f $"($stub_dir)/create-forwarder-dll.bat"
+    } else {
+      "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for\ntouch \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
+      ^chmod +x $"($stub_dir)/create-forwarder-dll"
+    }
   }
   let path_extra = (if ($stub_dir | path exists) { [$stub_dir] } else { [] })
   with-env {PATH: ($path_extra | append $env.PATH)} {

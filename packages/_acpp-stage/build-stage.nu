@@ -865,6 +865,57 @@ def compiler-rt-install-fixups [prefix: string, layout_root: string] {
   }
 }
 
+# WHERE THE OPENMP HEADERS LIVE, and this one is a BUILD-SHAPE difference
+# rather than a post-install copy — openmp-feedstock's build.sh has no copy at
+# all. It configures `../runtimes` with `-DLLVM_ENABLE_RUNTIMES=openmp` and
+# `CMAKE_INSTALL_PREFIX=$PREFIX`, and a runtimes build installs its headers to
+# `include/`. Our stage builds openmp as an `LLVM_ENABLE_PROJECTS` entry inside
+# the full tree, and an in-tree build installs them into the clang RESOURCE
+# directory instead. The artifact every slice was scoped from shows the first
+# layout; run 34112942609 produced the second, and install_openmp.nu's own
+# required-path guard caught it.
+#
+# MOVE, NOT COPY — the opposite of the compiler-rt case, and for a reason worth
+# stating. In conda-forge the resource directory holds a SYMLINK to
+# `$PREFIX/include/omp.h`, created by clangdev's own build (`ln -sf
+# $PREFIX/include/omp.h ${RESOURCE_DIR}/include/`), and the real file belongs to
+# llvm-openmp. Moving reproduces exactly that: the real headers land in
+# `include/`, and clang-install-fixups-* then recreates the symlink.
+#
+# ⚠ AND IT MUST RUN BEFORE THOSE FIXUPS, which is why it is called first. Both
+# of them already assumed `include/omp.h` existed: on linux `ln -sf` happily
+# replaced the real header in the resource directory with a link to a file that
+# was not there — a DANGLING symlink and no omp.h anywhere — and on Windows the
+# equivalent `cp` would simply have failed. That win failure was the next red
+# in the queue.
+#
+# By NAME, never by glob: the resource include directory is clang's own, full
+# of stddef.h and the intrinsics headers, and a wildcard here would move the
+# compiler's headers into the prefix.
+def openmp-header-fixups [prefix: string, layout_root: string] {
+  let root = (if (is-windows) { $layout_root } else { $prefix })
+  let res_inc = ($root | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "include")
+  let inc = ($root | path join "include")
+  mkdir $inc
+  let names = ["omp.h" "ompx.h" "omp-tools.h" "ompt.h" "ompt-multiplex.h"]
+  mut moved = []
+  for n in $names {
+    let src = ($res_inc | path join $n)
+    if ($src | path exists) {
+      mv -f $src ($inc | path join $n)
+      $moved = ($moved | append $n)
+    }
+  }
+  print $"openmp headers: moved ($moved | length) to ($inc) — ($moved | str join ', ')"
+  # omp.h and ompx.h are install_openmp.nu's REQUIRED paths, so their absence
+  # here is the same defect one step earlier, with a better error.
+  for n in ["omp.h" "ompx.h"] {
+    if not (($inc | path join $n) | path exists) {
+      error make {msg: $"openmp headers: ($n) is in neither ($res_inc) nor ($inc) — acpp-llvm-openmp requires include/($n) and would fail its own slice guard"}
+    }
+  }
+}
+
 def openmp-install-fixups [prefix: string] {
   let libdir = ($prefix | path join "lib")
   for f in (glob $"($libdir)/libgomp*") { rm -f $f }
@@ -1089,6 +1140,9 @@ def main [] {
   }
 
   compiler-rt-install-fixups $prefix $layout_root
+  # BEFORE the clang fixups: they create the resource-directory symlink that
+  # points AT include/omp.h, so the real header has to be there first.
+  openmp-header-fixups $prefix $layout_root
 
   if (is-windows) {
     clang-install-fixups-win $layout_root
@@ -1162,6 +1216,29 @@ def main [] {
       }
       print $"rocm deploy: ($pattern) -> ($destdir), (($matches | length)) files"
     }
+  }
+
+  # THE STAGE'S OWN PATH LISTING — the input a laptop needs to catch this
+  # class before a runner does.
+  #
+  # Runs 9, 13 and 14 were all one defect: the stage's install layout differs
+  # from the conda-forge artifact every carve list was scoped from, and nothing
+  # local can see it because nothing local has a built stage. The carves are
+  # checkable against upstream (tools/upstream-paths.nu) and the stage is
+  # checkable against nothing.
+  #
+  # This writes what the stage actually installed. With it published as a CI
+  # artifact, the whole class becomes a local diff — every carve glob resolved
+  # against this listing, every miss named — instead of one runner cycle per
+  # missing path. Emitted here rather than by the workflow because only this
+  # script knows where the stage root is on each platform.
+  let listing = ($env | get -o ACPP_STAGE_PATHS | default "")
+  if $listing != "" {
+    let root = (if (is-windows) { $layout_root } else { $prefix })
+    let paths = (glob ($root | path join "**" "*") --no-dir
+      | each {|p| $p | path relative-to $root })
+    $paths | sort | str join "\n" | save -f $listing
+    print $"stage path listing: ($paths | length) paths written to ($listing)"
   }
 
   ^ccache --show-stats

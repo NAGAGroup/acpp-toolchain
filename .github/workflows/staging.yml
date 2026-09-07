@@ -209,6 +209,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "ACPP_STAGE_RUN_LOG=${{ runner.temp }}/stage-runs.txt" >> "$GITHUB_ENV"
+          echo "ACPP_STAGE_PATHS=${{ runner.temp }}/stage-paths.txt" >> "$GITHUB_ENV"
           : > "${{ runner.temp }}/stage-runs.txt"
 
       # ── GATE 2 ────────────────────────────────────────────────────────────
@@ -304,6 +305,7 @@ jobs:
           path: |
             dist/
             publish.log
+            ${{ runner.temp }}/stage-paths.txt
           retention-days: 14
 
   # ---------------------------------------------------------------------------

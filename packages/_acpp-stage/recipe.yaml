@@ -272,6 +272,12 @@ build:
       # same way CCACHE_DIR is, and empty on a laptop, where the script does
       # nothing. It is an OBSERVATION: nothing gates on it yet.
       ACPP_STAGE_RUN_LOG: ${{ env.get("ACPP_STAGE_RUN_LOG", default="") }}
+      # Where the stage writes the listing of everything it installed. Empty
+      # off CI. Forwarded exactly like the run log — and like it, this is an
+      # OBSERVATION channel: it gates nothing, it makes a laptop able to diff
+      # the carve globs against the real install tree, which is the class
+      # behind runs 9, 13 and 14.
+      ACPP_STAGE_PATHS: ${{ env.get("ACPP_STAGE_PATHS", default="") }}
       # The LLVM version reaches the script from here rather than from
       # PKG_VERSION: PKG_VERSION is the STAGE's fixed 0.0.0, and every piece of
       # inherited upstream logic that parses a version number (resource-dir

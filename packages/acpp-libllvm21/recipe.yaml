@@ -53,8 +53,10 @@ requirements:
       then: libxml2-devel
     - zlib
     - zstd
+    # UPSTREAM (conda-build meta.yaml): `libcxx {{ cxx_compiler_version }}` — a
+    # BARE version, read as the range `21.*`. `==21` matches nothing.
     - if: osx
-      then: libcxx ==${{ cxx_compiler_version }}
+      then: libcxx >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
   run:
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx

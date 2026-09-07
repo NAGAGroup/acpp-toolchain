@@ -61,8 +61,10 @@ requirements:
     - acpp-llvm-tools[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - zlib
     - zstd
+    # UPSTREAM (conda-build meta.yaml): `libcxx {{ cxx_compiler_version }}` — a
+    # BARE version, read as the range `21.*`. `==21` matches nothing.
     - if: osx
-      then: libcxx ==${{ cxx_compiler_version }}
+      then: libcxx >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
   run:
     - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - if: win

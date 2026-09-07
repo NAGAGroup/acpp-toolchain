@@ -316,11 +316,15 @@ requirements:
     # "needs aarch/ppc/arm (re)build of conda-forge/backtrace-feedstock"
     - if: unix and x86_64
       then: backtrace
+    # UPSTREAM (llvmdev is still a conda-build meta.yaml): `libcxx
+    # {{ cxx_compiler_version }}` — a BARE version, which conda-build reads as
+    # the range `21.*`. `==21` would be a different spec and matches NOTHING:
+    # every libcxx build is versioned major.minor.patch.
     - if: osx
-      then: libcxx ==${{ cxx_compiler_version }}
-    # -- clangdev-stage --
+      then: libcxx >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
+    # -- clangdev-stage -- (upstream `libcxx-devel ${{ cxx_compiler_version }}.*`)
     - if: osx
-      then: libcxx-devel ==${{ cxx_compiler_version }}
+      then: libcxx-devel >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
     # -- lldb -- (its own host list, minus the llvm packages we build here)
     - python
     - swig

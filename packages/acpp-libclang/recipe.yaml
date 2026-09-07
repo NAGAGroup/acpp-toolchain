@@ -51,8 +51,12 @@ requirements:
     - libxml2-devel
     - zlib
     - zstd
+    # UPSTREAM: `libcxx-devel ${{ cxx_compiler_version }}.*` — the fleet
+    # no-wildcards rule turns the trailing `.*` into the range it means. `==21`
+    # would be a different spec and matches NOTHING: every libcxx-devel build is
+    # versioned major.minor.patch.
     - if: osx
-      then: libcxx-devel ==${{ cxx_compiler_version }}
+      then: libcxx-devel >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
   run:
     # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, exact=True)
     - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]

@@ -1,5 +1,5 @@
 # acpp-llvm-dev — the LLVM/clang development remainder, carved from
-# acpp-stage. PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
+# _acpp-stage. PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
 [package]
 name = "acpp-llvm-dev"
 version = "0.dev0"
@@ -10,7 +10,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 # The stage to carve from, and the runtime for its exact-build run_export.
 [package.build-dependencies]
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 acpp-runtime = { workspace = true }
 
 [package.build.config]

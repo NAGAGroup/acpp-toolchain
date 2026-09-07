@@ -1,13 +1,13 @@
 # build-platform.nu — build and publish every package of ONE platform into a
 # local channel, in dependency order, in ONE process.
 #
-# WHY ONE JOB PER PLATFORM. The expensive acpp-stage build is reused across
+# WHY ONE JOB PER PLATFORM. The expensive _acpp-stage build is reused across
 # every carving package through pixi's .pixi/bld cache, and that cache does
 # not cross runners. Parallelise by PLATFORM, never by package: a job per
 # package would rebuild LLVM per package.
 #
 # WHY `--path` PER PACKAGE. A whole-workspace `pixi publish` refuses the set,
-# because acpp-stage is publish = false and "every source dependency of a
+# because _acpp-stage is publish = false and "every source dependency of a
 # published package must itself be published in the same batch". A `--path`
 # publish is a batch of one, where only RUN dependencies may not be source
 # dependencies — build and host source deps are fine, and the stage is a host
@@ -58,7 +58,7 @@ def main [
     | get name
     | where {|p| ($p | path join "pixi.toml" | path exists) }
     | each {|p| $p | path basename }
-    | where {|n| $n != "acpp-stage" }   # built as a dependency, never published
+    | where {|n| $n != "_acpp-stage" }   # built as a dependency, never published
     | sort
   )
   let missing = ($on_disk | where {|n| $n not-in $ORDER })
@@ -134,7 +134,7 @@ def main [
 
   # Collect the artifacts the gates run against.
   #
-  # ONLY the packages we published. `acpp-stage` also leaves a .conda under
+  # ONLY the packages we published. `_acpp-stage` also leaves a .conda under
   # the build dir, and it contains EVERYTHING the carving packages ship — so
   # including it would make the disjointness gate report an overlap against
   # every single package, by design rather than by defect. Collect by name

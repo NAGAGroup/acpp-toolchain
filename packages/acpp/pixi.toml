@@ -1,4 +1,4 @@
-# acpp — the compiler, carved from acpp-stage. PACKAGE-ONLY manifest; the sole
+# acpp — the compiler, carved from _acpp-stage. PACKAGE-ONLY manifest; the sole
 # [workspace] is the repo root.
 [package]
 name = "acpp"
@@ -26,7 +26,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # other package in this family gets acpp-runtime through host + weak
 # run_export, which pixi does not see, so this applies to acpp alone.
 [package.build-dependencies]
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 
 [package.build.config]
 extra-input-globs = ["../_shared/carve.nu"]

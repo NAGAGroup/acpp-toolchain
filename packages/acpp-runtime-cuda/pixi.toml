@@ -1,5 +1,5 @@
 # acpp-runtime-cuda — backend METAPACKAGE. It ships no toolchain files, so it does not
-# depend on acpp-stage at all: nothing to carve, and no multi-GB stage
+# depend on _acpp-stage at all: nothing to carve, and no multi-GB stage
 # install in its build. PACKAGE-ONLY manifest; the sole [workspace] is the
 # repo root.
 #

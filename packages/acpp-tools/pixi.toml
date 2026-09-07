@@ -1,4 +1,4 @@
-# acpp-tools — clang-tools-extra and the analyzers, carved from acpp-stage.
+# acpp-tools — clang-tools-extra and the analyzers, carved from _acpp-stage.
 # PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
 [package]
 name = "acpp-tools"
@@ -10,7 +10,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 # The stage to carve from, and the runtime for its exact-build run_export.
 [package.build-dependencies]
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 acpp-runtime = { workspace = true }
 
 [package.build.config]

@@ -43,7 +43,7 @@ requirements:
   build:
     - nushell
   host:
-    - acpp-stage ==${{ version }}
+    - _acpp-stage ==0.0.0
     # Its weak run_export supplies the exact acpp-runtime spec for run.
     - acpp-runtime ==${{ version }}
   run:

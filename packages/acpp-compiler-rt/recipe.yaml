@@ -66,7 +66,7 @@ requirements:
   build:
     - nushell
   host:
-    - acpp-stage ==${{ version }}
+    - _acpp-stage ==0.0.0
     # HOST, not run: acpp carries a weak run_export naming its own version and
     # build string, so the run dependency below is COMPUTED from the compiler
     # these runtimes were carved beside rather than hand-written. Same

@@ -1,4 +1,4 @@
-# acpp-runtime — the SYCL runtime, carved out of acpp-stage.
+# acpp-runtime — the SYCL runtime, carved out of _acpp-stage.
 # PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
 #
 # Published with `pixi publish --path packages/acpp-runtime`. A whole-workspace
@@ -17,10 +17,10 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # THE PASSTHROUGH. The manifest tables do not ADD dependencies — the backend
 # regards only what the recipe declares. What this supplies is the workspace
 # PATH MAPPING the recipe cannot know, which lets the recipe name
-# `acpp-stage ==<version>` under requirements.host as if it came from a
+# `_acpp-stage ==<version>` under requirements.host as if it came from a
 # channel.
 [package.build-dependencies]
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 
 [package.build.config]
 # The carve script lives in ../_shared, outside this package directory, so it

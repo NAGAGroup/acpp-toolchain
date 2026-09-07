@@ -100,7 +100,7 @@ requirements:
   build:
     - nushell
   host:
-    - acpp-stage ==${{ version }}
+    - _acpp-stage ==0.0.0
     # Supplies the exact acpp-runtime spec to `run` via its weak run_export.
     - acpp-runtime ==${{ version }}
   run:

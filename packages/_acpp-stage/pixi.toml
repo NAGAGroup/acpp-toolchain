@@ -1,0 +1,48 @@
+# _acpp-stage — the ONE expensive LLVM+clang+AdaptiveCpp build, consumed as a
+# HOST dependency by every carving subpackage. PACKAGE-ONLY manifest; the sole
+# [workspace] is the repo root.
+#
+# THE LEADING UNDERSCORE IS A WARNING TO USERS, and the publish flag below is a
+# NAMED TEMPORARY COMPROMISE (Jack, 2026-09-06), not the design. The stage
+# installs into <prefix>/_stage and each subpackage copies its own portion to
+# the top level; nobody should ever install it directly.
+#
+# WHY IT IS PUBLISHED AT ALL. With `publish = false` a whole-workspace
+# `pixi publish` FAILS: "Every source dependency of a published package must
+# itself be published in the same batch." The narrower and CORRECT rule — only
+# a published package's RUN dependencies may not be source deps — is applied
+# only by `pixi publish --path`, a batch of one. Two code paths of one tool
+# giving opposite verdicts on identical input is the pixi defect; publishing
+# the stage is how we route around it without splitting the workspace.
+# The version is FIXED at 0.0.0 so the artifact uploads once and is SKIPPED by
+# every later publish. EXIT CONDITION: when pixi fixes the inconsistency, flip
+# this to `publish = false` and delete the artifact through the portal.
+#
+# The rejected alternative was publishing the stage separately and consuming it
+# as a BINARY host dep. Compare failure modes: publishing costs an ugly
+# listing, while a binary stage means nothing rebuilds it, so a stale artifact
+# makes every slicer carve from the WRONG toolchain and ship packages that look
+# fine.
+#
+# ⚠ ONE JOB PER PLATFORM. The expensive build runs exactly ONCE across all
+# subpackages of a platform — including across separate cold invocations —
+# because of pixi's .pixi/bld cache. Splitting a platform's subpackages across
+# CI jobs re-runs LLVM in each job. Parallelise the CI matrix by PLATFORM,
+# never by output.
+[package]
+name = "_acpp-stage"
+version = "0.0.0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+[package.build.config]
+# The licence texts live in ../_shared because the shipped packages point their
+# `license_file` at them and this build asserts them against the extracted
+# sources. pixi reads them straight from the source tree, but the default input
+# globs are derived from the recipe and THIS directory — a shared file living
+# outside it would not otherwise invalidate the build cache when edited.
+extra-input-globs = [
+  "../_shared/licenses/**",
+]

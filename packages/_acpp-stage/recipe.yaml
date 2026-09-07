@@ -1,0 +1,389 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# _acpp-stage — THE expensive build, and the only build in this workspace.
+# LLVM + clang + clang-tools-extra + lld + lldb + openmp + compiler-rt
+# (+ bolt on linux, + libcxx/libcxxabi on osx) + AdaptiveCpp, in ONE cmake
+# configure of the llvm tree, installed into <layout_root>/_stage. Every
+# shipped acpp-* package is a carve out of this.
+#
+# THE LEADING UNDERSCORE IS THE WARNING. This package is published only
+# because pixi's whole-workspace publish cannot express `publish = false` on a
+# host dependency; it is a build input, not a product, and must never be
+# installed by a user. Its version is FIXED (see `stage_version` below) so it
+# uploads once and is skipped by every later publish.
+#
+# THE BUILD IS LIFTED, NOT INVENTED. Everything below the acpp additions comes
+# from the reference monolith at
+# NAGAGroup/llvm-feedstocks-monolith@cb9f3be, which merges the twelve
+# conda-forge feedstocks verbatim. The seam this file cuts is
+# build-metadata vs package-metadata: the stage takes the BUILD (source,
+# patches, build/host requirements, configure flags, install-time fixups) and
+# strips every piece of package metadata — there is no `run:`, no
+# `run_exports:` and no `run_constraints:` anywhere in this file, deliberately,
+# and that is what keeps the stage out of every shipped package's metadata.
+# `host:` is KEPT INTACT: this build genuinely links libxml2, zlib, zstd and
+# python.
+#
+# SINGLE OUTPUT, NO `staging:`, NO `experimental`. Under pixi's rattler-build
+# backend a `staging:` output's dependency solve receives NO channels, so every
+# dep fails with "No candidates were found" (measured on pixi 0.78.0 and
+# 0.79.0). This design routes around that with ordinary packages: the stage
+# installs one level down and each subpackage's copy-to-top-level IS its file
+# diff.
+
+context:
+  # ---- the LLVM axis -------------------------------------------------------
+  # The reference monolith is at upstream's HEAD version (23.1.0). We lift the
+  # PATTERN and substitute ours: 21 is the top of AdaptiveCpp's supported range
+  # (its CMake guards LLVM_VERSION_MAJOR > 21) and conda-forge's default macOS
+  # compiler major.
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+
+  # ---- the AdaptiveCpp axis ------------------------------------------------
+  # Round 1 pins acpp to a CONSTANT develop commit. The reason is ccache, not
+  # feature freezing: resolving develop HEAD dynamically rotates the source rev
+  # on every upstream commit and invalidates the cache. Stated once, in
+  # ../../variants.yaml.
+  acpp_commit: ${{ acpp_rev }}
+
+  # ---- the stage's own identity -------------------------------------------
+  # A FIXED version that never moves. The stage is uploaded once and skipped by
+  # every later publish; the build string still carries the variant hash, so an
+  # LLVM bump mints one more dead artifact on the channel. Bounded and
+  # accepted (Jack, 2026-09-06). Subpackages take it as
+  # `_acpp-stage ==0.0.0` under requirements/host.
+  stage_version: "0.0.0"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+
+package:
+  name: _acpp-stage
+  version: ${{ stage_version }}
+
+source:
+  # ---------------------------------------------------------------------------
+  # llvm-project. The monolith lifts the GitHub auto-generated tag archive
+  # (archive/refs/tags/llvmorg-<v>.tar.gz); we take the RELEASE ASSET
+  # (llvm-project-<v>.src.tar.xz) at the same tag. Same tree, different
+  # container: a release asset is an immutable upload, while a tag archive is
+  # generated on demand and its checksum has changed under the ecosystem
+  # before. The sha256 below was verified by downloading the file
+  # (2026-09-06), not copied.
+  # ---------------------------------------------------------------------------
+  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+    sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+    target_directory: llvm-project
+    patches:
+      # =====================================================================
+      # THE UPSTREAM CONDA-INTEGRATION PATCHES.
+      #
+      # EVERY PATCH HERE COMES FROM ITS FEEDSTOCK'S OWN v21.1.8 REVISION, not
+      # from the feedstock HEAD the monolith vendored. That is a deliberate
+      # departure and it is forced: measured 2026-09-06 by `git apply --check`
+      # against the extracted 21.1.8 tree, NINE of the monolith's 24 patches do
+      # not apply to 21.1.8 (clangdev 0003, compiler-rt 0001, lldb 0001, openmp
+      # 0001 and five of the six libcxx patches). They are written against
+      # 23.1.0/22.1.8 sources. Every feedstock's own 21.1.8 revision applies
+      # cleanly, and the whole set below applies IN SEQUENCE with zero
+      # conflicts — verified, not assumed.
+      #
+      # So the rule "use the latest feedstock, point it at 21.1.8" holds for
+      # recipe METADATA and build scripts, where the latest codifies current
+      # best practice, but CANNOT hold for patches, which are bound to the
+      # source they were written against.
+      #
+      # Where the 21.1.8 patch SET differs from HEAD's, this takes 21.1.8's:
+      # clangdev at 21.1.8 carries ten patches including two HEAD has since
+      # dropped (Set-VERSION-in-osx, Fix-crosscompiling-LLVM-tools), and
+      # openmp's 21.1.8 patch is an entirely different one
+      # (link-libomp-to-compiler-rt-on-osx-arm) from HEAD's z_Linux_asm patch,
+      # which does not exist at 21.1.8.
+      # =====================================================================
+
+      # --- llvmdev-feedstock @ its v21.1.8 revision ---
+      # QEMU_LD_PREFIX/SDKROOT passthrough.
+      - patches/upstream/llvmdev/0001-pass-through-QEMU_LD_PREFIX-SDKROOT.patch
+
+      # --- clangdev-feedstock @ its v21.1.8 revision ---
+      # The conda-integration set. These are the single biggest correctness
+      # win of the whole rebuild: the pre-rebuild tree carried none of them.
+      - patches/upstream/clangdev/0001-Find-conda-gcc-installation.patch
+      - patches/upstream/clangdev/0002-Fix-sysroot-detection-for-linux.patch
+      - patches/upstream/clangdev/0003-clang-add-conda-specific-env-var-CONDA_BUILD_SYSROOT.patch
+      - patches/upstream/clangdev/0004-Fix-normalizeProgramName-s-handling-of-dots-outside-.patch
+      - patches/upstream/clangdev/0005-Set-VERSION-in-osx-as-well.patch
+      - patches/upstream/clangdev/0006-Fix-crosscompiling-LLVM-tools.patch
+      - patches/upstream/clangdev/0007-set-libclang-SOVERSION-unconditionally.patch
+      - patches/upstream/clangdev/0008-Make-PIE-default-on-macOS-too.patch
+      - patches/upstream/clangdev/0009-Find-ROCm-device-library-in-conda-layout.patch
+      - patches/upstream/clangdev/0010-Add-conda-mingw-paths.patch
+      # The one patch taken from clangdev HEAD rather than 21.1.8: it does not
+      # exist at 21.1.8, applies cleanly, and the HEAD build script this file
+      # lifts DEPENDS on it (it is what makes clang look for libLTO.dylib in
+      # the versioned resource dir that the install step links).
+      - patches/upstream/clangdev/0011-Look-for-libLTO.dylib-in-the-versioned-ResourceDir.patch
+
+      # --- compiler-rt-feedstock @ its v21.1.8 revision ---
+      - patches/upstream/compiler-rt/0001-no-code-sign.patch
+      - patches/upstream/compiler-rt/0002-Revert-Declare-_availability_version_check-as-weak_i.patch
+
+      # --- lld-feedstock @ its v21.1.8 revision ---
+      - patches/upstream/lld/0001-point-header-inclusion-in-lld-MachO-CMakeLists.txt-t.patch
+
+      # --- lldb-feedstock @ its v21.1.8 revision ---
+      - patches/upstream/lldb/0001-Remove-linking-liblldb-to-libpython.patch
+      - patches/upstream/lldb/0002-Define-CPU_SUBTYPE_ARM64E-if-not-available.patch
+      # Upstream guards this one `# [win and py>=311]`. rattler-build has no
+      # `py` selector, so the guard reduces to `win` — the same reduction the
+      # reference monolith made, and its note carries the lost half.
+      - if: win
+        then: patches/upstream/lldb/0003-Don-t-define-NO_PID_T-where-Python-is-patched.patch
+
+      # --- openmp-feedstock @ its v21.1.8 revision ---
+      - patches/upstream/openmp/0001-link-libomp-to-compiler-rt-on-osx-arm.patch
+
+      # --- libcxx-feedstock @ its v21.1.8 revision ---
+      # Applied on every platform even though libcxx is only BUILT on osx: the
+      # files they touch are compiled only in a libcxx build, so an
+      # unconditional apply keeps one source tree shape across platforms
+      # instead of three.
+      #
+      # 0001-Fix-ABI-compatibility-with-system is deliberately ABSENT: upstream
+      # applies it only at `sys_abi == "pre-12"`, a variant row that exists to
+      # ship a second libcxx for macOS older than 12. Our deployment target is
+      # 11.0 with a single build, so we are on upstream's post-12 row and that
+      # patch is not part of it.
+      - patches/upstream/libcxx/0002-custom-error-message-for-old-sdk.patch
+      - patches/upstream/libcxx/0003-disable-_LIBCPP_AVAILABILITY_HAS_INIT_PRIMARY_EXCEPT.patch
+      - patches/upstream/libcxx/0004-Work-around-stray-nostdlib-flags-causing-errors-with.patch
+      - patches/upstream/libcxx/0005-patch-__libcpp_tzdb_directory-to-allow-use-on-osx.patch
+      - patches/upstream/libcxx/0006-make-headers-platform-neutral-for-conda-forge.patch
+      - patches/upstream/libcxx/0007-Fix-compiling-with-gcc.patch
+
+      # --- ours, against llvm-project ---
+      # Xcode 26 toolchain: <sys/resource.h> is no longer a transitive include,
+      # so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1).
+      - patches/llvm/0009-crashrecovery-include-sys-resource-on-apple.patch
+
+  # ---------------------------------------------------------------------------
+  # AdaptiveCpp — THE ADDITION. It is injected into the LLVM configure as an
+  # external project (see build-stage.nu), which is why the compiler core is
+  # unavoidably ONE build and conda-forge's llvmdev -> clangdev split cannot
+  # carry it.
+  # ---------------------------------------------------------------------------
+  - git: https://github.com/AdaptiveCpp/AdaptiveCpp.git
+    rev: ${{ acpp_commit }}
+    target_directory: AdaptiveCpp
+    patches:
+      # The SPIRV-LLVM-Translator is its own package (acpp-llvm-spirv) and
+      # lands in the same prefix; this stops the sub-build and points the baked
+      # path at bin/.
+      - patches/acpp/0001-llvmspirv-provide-externally.patch
+      # Level Zero backend includes a glibc-internal header; breaks on win.
+      - patches/acpp/0002-ze-use-cstdint-not-glibc-internal-header.patch
+      # Level Zero backend links with GNU-style -lze_loader; lld-link drops it.
+      - patches/acpp/0003-ze-find-loader-library-portably.patch
+      # Host-JIT vector math: find libmvec through the dynamic loader at
+      # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot, which
+      # does not exist on user machines, and lld has no default search paths.
+      - patches/acpp/0008-host-jit-find-libmvec-via-loader.patch
+
+  # OpenCL headers, consumed through FETCHCONTENT_SOURCE_DIR_* so the build
+  # never reaches the network.
+  - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
+    sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
+    target_directory: OpenCL-Headers
+  - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
+    sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
+    target_directory: OpenCL-CLHPP
+
+  # ROCm, linux-64 only: TheRock's stable core tarball is the BUILD input —
+  # ROCM_PATH points here at configure time and the build deploys the runtime
+  # subset into the stage, to be carved by acpp-runtime-rocm. gfx1150 is the
+  # SMALLEST family tarball: the pieces acpp's hip manifest deploys (hiprtc,
+  # amdhip64, hsa-runtime64, amd_comgr, device-lib bitcode) are family-
+  # INDEPENDENT — the .kpack difference between families is ROCm's own math
+  # kernels, which are never deployed.
+  - if: target_platform == "linux-64"
+    then:
+      - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
+        sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
+        target_directory: rocm-dist
+
+  # The vendored licence texts the shipped packages carry as their
+  # license_file. They come in here so the build can assert, against the
+  # extracted sources, that each one is still byte-identical — this build is
+  # the only place that can see both sides.
+  - path: ../_shared/licenses
+    target_directory: vendored-licenses
+
+build:
+  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  dynamic_linking:
+    missing_dso_allowlist:
+      # CI machines have no GPU, so the CUDA toolkit install cannot provide
+      # nvcuda.dll and postprocessing fails on the missing DSO. conda-forge's
+      # own documented fix.
+      - if: win
+        then: "*/nvcuda.dll"
+  script:
+    interpreter: nu
+    file: build-stage.nu
+    env:
+      # rattler-build builds with a sanitized env, so anything ccache needs
+      # must be forwarded explicitly. Empty => ccache defaults.
+      CCACHE_DIR: ${{ env.get("CCACHE_DIR", default="") }}
+      CCACHE_MAXSIZE: ${{ env.get("CCACHE_MAXSIZE", default="") }}
+      CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
+      CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
+      ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
+      # The LLVM version reaches the script from here rather than from
+      # PKG_VERSION: PKG_VERSION is the STAGE's fixed 0.0.0, and every piece of
+      # inherited upstream logic that parses a version number (resource-dir
+      # paths, SOVERSION suffixes, versioned driver names) needs the LLVM one.
+      # Inherited version-parsing is the class of bug that put a YEAR into a
+      # clang resource-dir path on win; here the parse is removed entirely.
+      ACPP_LLVM_VERSION: ${{ llvm_version }}
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  # ---------------------------------------------------------------------------
+  # BUILD — the union of the build lists of every monolith staging output whose
+  # project this configure enables (llvmdev-stage, clangdev-stage,
+  # compiler-rt-stage, libcxx-stage) plus the lld, lldb and llvm-openmp
+  # outputs, plus ours. Upstream entries that name a package WE BUILD IN THIS
+  # CONFIGURE (llvmdev, clangdev, llvm-tools, clang) are the one class dropped,
+  # and only because a monolithic build cannot depend on its own outputs. Every
+  # `build_platform != target_platform` branch is dropped with them: round 1
+  # builds all three platforms NATIVELY and cross-compiles nothing.
+  # ---------------------------------------------------------------------------
+  build:
+    - ${{ compiler('c') }}          # lld-feedstock, libcxx-stage
+    - ${{ compiler('cxx') }}        # every upstream stage
+    - ${{ stdlib('c') }}            # every upstream stage
+    - cmake                         # every upstream stage (compiler-rt: >=3.4.3)
+    - ninja                         # llvmdev-stage, compiler-rt-stage, lld, lldb, openmp
+    # De-versioned so the single `python` variant key applies to build and host
+    # alike. Upstream spells it `python >=3` / `python >3` / `python *` across
+    # the four stages; one interpreter for the whole build is what keeps lldb's
+    # bindings compiled against the interpreter host resolved.
+    - python
+    # swig generates lldb's python bindings. lldb is built on all three
+    # platforms (conda-forge ships it on all three), so this is not linux-only.
+    - swig
+    - nushell                       # ours: the build script's interpreter
+    - ccache                        # ours: the whole reason acpp's rev is pinned
+    - if: win
+      then:
+        # llvmdev's win build uses create-forwarder-dll to publish an
+        # unversioned libclang.dll forwarding to the versioned one.
+        - create-forwarder-dll
+        # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
+        # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp itself
+        # must be compiled by a clang-family driver. The plain `clang` package
+        # (deps: vc only), NOT the clang_win-64 ACTIVATION package, which is
+        # built solely against vs2022/vs2019 and would drag the VS year
+        # backwards.
+        #
+        # MUST be a build dep, NOT host: a package is the file DIFF of its
+        # build, and conda-forge's clang ships the very files we install
+        # (clang.exe, clang-cl.exe, lib/clang/**). As a host dep it silently
+        # ejected them from every package (run 31241929077).
+        #
+        # PINNED to the exact LLVM version we build: on win compiler-rt is
+        # built by THIS clang-cl in projects mode, so the building compiler
+        # matches the clang_rt sources and the shipped clang exactly.
+        - clang ==${{ llvm_version }}
+
+  # ---------------------------------------------------------------------------
+  # HOST — KEPT INTACT, which is the named mistake to avoid. This is the union
+  # of llvmdev-stage's host list (nothing removed), clangdev-stage's,
+  # compiler-rt-stage's, lldb's and llvm-openmp's, plus acpp's backend inputs.
+  # Versions are DE-VERSIONED on purpose wherever ../../variants.yaml carries a
+  # pin: a variant key applies only to a BARE requirement, so a version written
+  # here would silently make the global pin inert.
+  # ---------------------------------------------------------------------------
+  host:
+    # -- llvmdev-stage --
+    # libxml2 is FORCE_ON in the configure, so this is load-bearing on EVERY
+    # platform; the pre-rebuild tree had it on linux only.
+    - libxml2-devel
+    - zlib
+    - zstd
+    # "needs aarch/ppc/arm (re)build of conda-forge/backtrace-feedstock"
+    - if: unix and x86_64
+      then: backtrace
+    - if: osx
+      then: libcxx ==${{ cxx_compiler_version }}
+    # -- clangdev-stage --
+    - if: osx
+      then: libcxx-devel ==${{ cxx_compiler_version }}
+    # -- lldb -- (its own host list, minus the llvm packages we build here)
+    - python
+    - swig
+    - six
+    - liblzma-devel
+    - if: not win
+      then:
+        - ncurses
+        - libedit
+    # -- ours: AdaptiveCpp backend build inputs --
+    # GPU backend build inputs are X86-PLATFORM inputs.
+    - if: target_platform == "linux-64" or target_platform == "win-64"
+      then:
+        # The single CUDA pin, hard against the variant key (conda-forge
+        # pinning-feedstock convention): cuda-version is what every other cuda-*
+        # package constrains itself against, so pinning it once aligns the whole
+        # set without a version literal on any of them.
+        - cuda-version ==${{ cuda_compiler_version }}
+        # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
+        - cuda-cudart-dev
+        # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home, and
+        # acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the cuda-nvvm
+        # metapackage — that drags in libnvvm.so, which nothing here loads.
+        - cuda-nvvm-tools
+        # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles the
+        # CUDA code. FindCUDAToolkit refuses to locate a toolkit without an nvcc
+        # binary (measured: FOUND=FALSE with cudart-dev + driver-dev +
+        # nvvm-tools + crt-dev alone).
+        - cuda-nvcc-tools
+        # level-zero{,-devel} and opencl-headers all ship for win-64, so the
+        # Intel backends are not linux-only. Upstream's Windows CI disables
+        # OpenCL, but the docs never say it cannot work — absence from someone
+        # else's CI is not evidence of impossibility.
+        - level-zero-devel
+        - opencl-headers
+    - if: target_platform == "linux-64"
+      then:
+        - ocl-icd
+        - cuda-driver-dev
+        - cuda-crt-dev_linux-64
+        - numactl
+    - if: win
+      then:
+        # nvcc.exe is what the legacy FindCUDA module anchors detection on.
+        # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
+        # hardcoded vs2019_win-64 dependency and would drag the 2019 toolset
+        # into the host env.
+        - cuda-nvcc-impl
+        - khronos-opencl-icd-loader
+        - libboost-devel
+
+  # NO `run:`, NO `run_exports:`, NO `run_constraints:` — DELIBERATELY, AND
+  # THIS IS THE WHOLE POINT OF THE STAGE.
+  #
+  # The stage is never installed by a user; it is a build input. Every run
+  # dependency is declared by the SUBPACKAGE that actually needs it, which is
+  # what makes the old run_exports leak structurally impossible to repeat:
+  # under the pre-rebuild design the metapackages inherited the staging host
+  # environment wholesale, which is how cuda-cudart, level-zero, ocl-icd and
+  # python_abi ended up as run deps of a ROCm metapackage. Here a package can
+  # only carry what it names.
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: BSD-2-Clause AND Apache-2.0 WITH LLVM-exception
+  summary: Internal build stage for the acpp toolchain — not for installation

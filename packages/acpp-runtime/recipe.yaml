@@ -6,7 +6,7 @@
 #
 # THIS IS THE PATTERN every carving subpackage follows:
 #   * single output, no `staging:`, no `experimental`
-#   * acpp-stage declared in pixi.toml [package.build-dependencies] and named
+#   * _acpp-stage declared in pixi.toml [package.build-dependencies] and named
 #     here under requirements.host by `name ==version` — the workspace
 #     passthrough, which is the sanctioned way a source sibling reaches a
 #     recipe (the manifest tables add no dependencies; they supply the path
@@ -96,7 +96,7 @@ requirements:
     # works — and note the stage is a HOST dep, which is precisely why
     # `pixi publish --path` can publish this package while the stage itself
     # stays unpublished.
-    - acpp-stage ==${{ version }}
+    - _acpp-stage ==0.0.0
   run:
     # Declared HERE, by the package that needs them. The stage exports
     # nothing, so nothing arrives by accident — the structural end of the

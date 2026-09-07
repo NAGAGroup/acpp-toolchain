@@ -1,6 +1,6 @@
 # carve.nu — the ONE copy step every acpp-* subpackage runs.
 #
-# The stage package (acpp-stage) installs the whole toolchain into
+# The stage package (_acpp-stage) installs the whole toolchain into
 # <layout_root>/_stage. It arrives here as a HOST dependency, so all of it is
 # already sitting in $PREFIX and none of it is NEW — a conda package is the
 # file DIFF of its build, so nothing would be captured. This script copies THIS
@@ -90,7 +90,7 @@ def main [] {
   let stage = ($layout_root | path join "_stage" | slashes)
 
   if not ($stage | path exists) {
-    error make {msg: $"carve: stage directory ($stage) does not exist — is acpp-stage a host dependency of this package?"}
+    error make {msg: $"carve: stage directory ($stage) does not exist — is _acpp-stage a host dependency of this package?"}
   }
 
   let lib_prefix = (if (is-windows) { "Library/" } else { "" })

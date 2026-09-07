@@ -105,7 +105,7 @@ requirements:
   build:
     - nushell
   host:
-    - acpp-stage ==${{ version }}
+    - _acpp-stage ==0.0.0
     # HOST, so acpp-runtime's weak run_export supplies the exact-build run
     # dependency: these tools link the libLLVM/libclang-cpp the runtime ships.
     - acpp-runtime ==${{ version }}

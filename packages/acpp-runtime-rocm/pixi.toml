@@ -15,7 +15,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # both are named in the recipe under requirements.host.
 [package.build-dependencies]
 acpp-runtime = { workspace = true }
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 
 [package.build.config]
 extra-input-globs = ["../_shared/carve.nu"]

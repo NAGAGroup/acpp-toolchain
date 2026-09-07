@@ -5,7 +5,7 @@
 # through dispatch inputs, not through separate workflows.
 #
 # JOB SHAPE IS LOAD-BEARING. Every package of a platform builds in ONE job,
-# because the expensive acpp-stage build is reused across all of them through
+# because the expensive _acpp-stage build is reused across all of them through
 # pixi's .pixi/bld cache, and that cache does not cross runners. Parallelise
 # by PLATFORM, never by package — a job per package would rebuild LLVM per
 # package.
@@ -131,8 +131,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .pixi/bld
-          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-${{ github.run_id }}
-          restore-keys: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-
+          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/_acpp-stage/**') }}-${{ github.run_id }}
+          restore-keys: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/_acpp-stage/**') }}-
 
       # Publishes in dependency order and collects the artifacts for gating.
       # Asserts that every package on disk is accounted for as built or
@@ -166,7 +166,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .pixi/bld
-          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/acpp-stage/**') }}-${{ github.run_id }}
+          key: bld-${{ matrix.platform }}-${{ hashFiles('variants.yaml', 'packages/_acpp-stage/**') }}-${{ github.run_id }}
 
       - uses: actions/upload-artifact@v4
         if: always()

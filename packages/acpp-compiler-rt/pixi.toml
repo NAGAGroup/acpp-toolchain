@@ -1,4 +1,4 @@
-# acpp-compiler-rt — the sanitizer/profile runtimes, carved from acpp-stage.
+# acpp-compiler-rt — the sanitizer/profile runtimes, carved from _acpp-stage.
 # PACKAGE-ONLY manifest; the sole [workspace] is the repo root.
 [package]
 name = "acpp-compiler-rt"
@@ -12,7 +12,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # HOST dependency in the recipe and appears in no `run:` or `run_exports:`
 # line, so pixi does not see a source run dependency and `--path` publishes.
 [package.build-dependencies]
-acpp-stage = { workspace = true }
+_acpp-stage = { workspace = true }
 acpp = { workspace = true }
 
 [package.build.config]

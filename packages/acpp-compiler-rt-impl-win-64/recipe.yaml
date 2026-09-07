@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# ⚠ GENERATED FILE — DO NOT EDIT. Written by tools/gen-platform-packages.nu
+# from ../<family>/recipe.yaml, which is the authored source of truth. CI runs
+# the generator with --check, so an edit here is a red build.
+#
+# WHY IT HAS TO EXIST: pixi matches a source package by its MANIFEST name, so a
+# templated recipe needs one manifest per platform — and several manifests
+# sharing one TEMPLATED recipe would all emit the same name on a given
+# platform, which pixi refuses. Hence a literal name and a platform skip.
+
+#
+# acpp-compiler-rt_<platform> — the unversioned per-platform selector. Lifted
+# from the reference monolith's `compiler-rt_${{ target_platform }}` output
+# (compiler-rt-feedstock).
+#
+# THE DIRECTORY AND MANIFEST ARE NAMED `acpp-compiler-rt-impl`, THE PACKAGE IS
+# NOT: the recipe emits a name templated on `target_platform` and a pixi package
+# manifest needs a fixed `[package] name`. Same shape as the acpp-activation-*
+# wrappers.
+#
+# SHIPS NOTHING, and says so with `files: []` exactly as upstream does. It runs
+# no slice script, so it does NOT take the stage as a host dependency — a
+# metapackage that installed a multi-gigabyte toolchain in order to copy nothing
+# out of it would be pure cost. This is one of the outputs where the "every
+# slicer takes the stage" law does not apply, because it is not a slicer.
+#
+# WHY IT EXISTS AT ALL: this is the name the clang activation packages depend
+# on, and it is what makes the arch-specific compiler-rt static libraries
+# reachable under a name that carries no LLVM major. Upstream's own comment on
+# the constraint below dates the split.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-compiler-rt_win-64
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  # GENERATED: this copy exists for win-64 alone.
+  skip: target_platform != "win-64"
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  noarch: generic
+  files: []
+
+requirements:
+  build: []
+  run:
+    # UPSTREAM: pin_subpackage("compiler-rt" ~ major_ver ~ "_" ~ target_platform, exact=True)
+    - acpp-compiler-rt${{ llvm_major }}_${{ target_platform }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  run_constraints:
+    # Upstream names `clang`; ours names ours, because nothing ships under a
+    # conda-forge name and a constraint on a name our channel provides would be
+    # a hard solve failure under strict channel priority rather than a
+    # fall-through.
+    - acpp-clang ==${{ llvm_version }}
+
+tests:
+  - package_contents:
+      strict: true
+      files: []
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: compiler-rt runtime libraries for one target platform (metapackage)

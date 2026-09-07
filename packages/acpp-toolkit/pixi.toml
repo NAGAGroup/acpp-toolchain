@@ -45,8 +45,10 @@ acpp-llvm-tools-21 = { workspace = true }
 acpp-clang = { workspace = true }
 acpp-clangxx = { workspace = true }
 acpp-clang-21 = { workspace = true }
-acpp-clang-impl = { workspace = true }
-acpp-clangxx-impl = { workspace = true }
+"acpp-clang_impl_linux-64" = { workspace = true }
+"acpp-clang_impl_osx-arm64" = { workspace = true }
+"acpp-clangxx_impl_linux-64" = { workspace = true }
+"acpp-clangxx_impl_osx-arm64" = { workspace = true }
 acpp-clangdev = { workspace = true }
 acpp-clang-format = { workspace = true }
 acpp-clang-format-21 = { workspace = true }
@@ -64,8 +66,12 @@ acpp-bolt = { workspace = true }
 acpp-compiler-rt = { workspace = true }
 acpp-compiler-rt21 = { workspace = true }
 acpp-libcompiler-rt = { workspace = true }
-acpp-compiler-rt-impl = { workspace = true }
-acpp-compiler-rt21-impl = { workspace = true }
+"acpp-compiler-rt_linux-64" = { workspace = true }
+"acpp-compiler-rt_win-64" = { workspace = true }
+"acpp-compiler-rt_osx-arm64" = { workspace = true }
+"acpp-compiler-rt21_linux-64" = { workspace = true }
+"acpp-compiler-rt21_win-64" = { workspace = true }
+"acpp-compiler-rt21_osx-arm64" = { workspace = true }
 # the SPIR-V translator
 acpp-llvm-spirv = { workspace = true }
 acpp-llvm-spirv-21 = { workspace = true }

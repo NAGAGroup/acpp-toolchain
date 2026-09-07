@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# ⚠ GENERATED FILE — DO NOT EDIT. Written by tools/gen-platform-packages.nu
+# from ../<family>/recipe.yaml, which is the authored source of truth. CI runs
+# the generator with --check, so an edit here is a red build.
+#
+# WHY IT HAS TO EXIST: pixi matches a source package by its MANIFEST name, so a
+# templated recipe needs one manifest per platform — and several manifests
+# sharing one TEMPLATED recipe would all emit the same name on a given
+# platform, which pixi refuses. Hence a literal name and a platform skip.
+
+#
+# acpp-compiler-rt21_<platform> — the arch-specific compiler-rt static
+# libraries and object files. Lifted from the reference monolith's
+# `compiler-rt${{ major_ver }}_${{ target_platform }}` output
+# (compiler-rt-feedstock).
+#
+# THE DIRECTORY AND MANIFEST ARE NAMED `acpp-compiler-rt21-impl`, THE PACKAGE IS
+# NOT. The recipe emits a name templated on `target_platform`, and a pixi
+# package manifest needs a fixed `[package] name`; the `acpp-activation-*`
+# wrappers already work that way. Whether pixi connects a manifest name to a
+# recipe dep that differs from it is UNPROVEN and waits on the first real build.
+#
+# SLICING FORM: GLOB LIST, upstream's own, and it needs no artifact derivation:
+# `lib/clang/21/lib` is compiler-rt's alone. Its two siblings under the same
+# resource directory take disjoint subtrees — `include/` and `share/` go to
+# acpp-compiler-rt21, the rest of `include/` to acpp-clang-21 — and that
+# partition WAS derived from the published artifacts, in those two recipes.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-compiler-rt${{ llvm_major }}_linux-64
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  # GENERATED: this copy exists for linux-64 alone.
+  skip: target_platform != "linux-64"
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  noarch: generic
+  # UPSTREAM: `detect_binary_files_with_prefix: false  # [win]`
+  prefix_detection:
+    ignore_binary_files: ${{ true if win else false }}
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      # NO `Library/` PREFIX, AND `prefix` AS THE DESTINATION. A noarch: generic
+      # package has no Windows layout — its paths are identical on every
+      # platform — so its content lands at %PREFIX% and not %PREFIX%\Library.
+      # Upstream states the same thing by writing this one win glob as
+      # `lib\clang\<major>\lib` while the arch-specific compiler-rt21 beside it
+      # writes `Library\lib\clang\<major>\lib`.
+      #
+      # THE PER-PLATFORM SUBTREE, NOT `lib/**`. Upstream's glob is the whole
+      # `lib/clang/<major>/lib` directory, which is correct in compiler-rt's own
+      # build prefix because nothing else installs there. In our union stage
+      # clangdev also puts a file in that directory on osx — the versioned
+      # libLTO.dylib symlink, which belongs to acpp-clang-21 — so the whole
+      # directory over-selects by exactly one path. The subtrees below are read
+      # off conda-forge's compiler-rt21_<platform>-21.1.8 artifacts: 73 paths
+      # under linux/, 14 under windows/, and on osx 23 under darwin/ plus ten
+      # `libclang_rt.*` archives sitting directly in lib/.
+      ACPP_CARVE: >-
+        ${{ "lib/clang/" ~ llvm_major ~ "/lib/linux/**" if linux
+        else "lib/clang/" ~ llvm_major ~ "/lib/libclang_rt.*;lib/clang/" ~ llvm_major ~ "/lib/darwin/**" if osx
+        else "lib/clang/" ~ llvm_major ~ "/lib/windows/**" }}
+      ACPP_CARVE_DEST: prefix
+
+requirements:
+  build:
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
+    - nushell
+  host:
+    # Upstream declares `host: []`; the stage is the one entry with no upstream
+    # counterpart, because our slice comes out of it rather than a build tree.
+    - _acpp-stage ==0.0.0
+  run: []
+  run_constraints:
+    # Upstream: "This is when compiler-rt and compiler-rt_<target_platform>
+    # split". Rewritten to our name.
+    - acpp-compiler-rt >=9.0.1
+  ignore_run_exports:
+    from_package:
+      # Upstream's, preserved. The compilers are in `build:` only so their
+      # STRONG run_exports do not follow a package that ships static archives
+      # nothing links at install time.
+      - ${{ compiler('cxx') }}
+      - ${{ stdlib('c') }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: osx
+            then: lib/clang/${{ llvm_major }}/lib/darwin/libclang_rt.osx.a
+          - if: win
+            then: lib/clang/${{ llvm_major }}/lib/windows/clang_rt.builtins-x86_64.lib
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: compiler-rt static runtime libraries for one target platform

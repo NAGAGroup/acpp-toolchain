@@ -45,5 +45,5 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 # back out of install-clang{,++}.sh.
 [package.build-dependencies]
 acpp = { workspace = true }
-acpp-clang-impl = { workspace = true }
-acpp-clangxx-impl = { workspace = true }
+"acpp-clang_impl_linux-64" = { workspace = true }
+"acpp-clangxx_impl_linux-64" = { workspace = true }

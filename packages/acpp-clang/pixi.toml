@@ -22,7 +22,8 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 [package.build-dependencies]
 _acpp-stage = { workspace = true }
 acpp-clang-21 = { workspace = true }
-acpp-clang-impl = { workspace = true }
+"acpp-clang_impl_linux-64" = { workspace = true }
+"acpp-clang_impl_osx-arm64" = { workspace = true }
 acpp-llvm-openmp = { workspace = true }
 acpp-llvm-tools = { workspace = true }
 

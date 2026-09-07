@@ -59,18 +59,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # `expect_dirs` is the number of PACKAGE DIRECTORIES in the workspace
-          # — what the publish accounting reconciles built + skipped against.
-          # `expect_artifacts` is the number of .conda files that platform
-          # produces, which is larger: acpp-clang and acpp-clangxx are each
-          # built twice, once per with_cfg row. Both numbers are MEASURED from
-          # `pixi publish --dry-run`, never inferred from the skip blocks.
+          # THREE numbers, all MEASURED from `pixi publish --dry-run` and never
+          # inferred from the skip blocks. `expect_names` is the distinct
+          # package names the platform builds and `expect_skips` the package
+          # directories it skips — asserted SEPARATELY, because a multi-output
+          # package is one directory producing several names, so the two do not
+          # sum to the 55 package directories. `expect_artifacts` is the .conda
+          # count, larger again: acpp-clang and acpp-clangxx are each built
+          # twice, once per with_cfg row.
           entries=()
           for p in ${{ inputs.platforms }}; do
             case "$p" in
-              linux-64)   entries+=('{"platform":"linux-64","runner":"Linux-x64-64","expect_dirs":49,"expect_artifacts":46}') ;;
-              win-64)     entries+=('{"platform":"win-64","runner":"Win-x64-64","expect_dirs":49,"expect_artifacts":39}') ;;
-              osx-arm64)  entries+=('{"platform":"osx-arm64","runner":"macOS-26-xlarge","expect_dirs":49,"expect_artifacts":44}') ;;
+              linux-64)   entries+=('{"platform":"linux-64","runner":"Linux-x64-64","expect_names":44,"expect_skips":12,"expect_artifacts":46}') ;;
+              win-64)     entries+=('{"platform":"win-64","runner":"Win-x64-64","expect_names":37,"expect_skips":20,"expect_artifacts":39}') ;;
+              osx-arm64)  entries+=('{"platform":"osx-arm64","runner":"macOS-26-xlarge","expect_names":42,"expect_skips":14,"expect_artifacts":44}') ;;
               *)
                 echo "Unknown platform '$p' — this workspace builds linux-64, win-64 and osx-arm64." >&2
                 exit 1
@@ -146,6 +148,22 @@ jobs:
           cache: true
           environments: packaging
 
+      # ── GATE 1b ───────────────────────────────────────────────────────────
+      # Cheap, and it runs before the expensive build for that reason. Both
+      # assert properties that no render can see and that a runner would
+      # otherwise discover an hour in:
+      #   * the generated per-platform recipes still match their authored
+      #     source (a hand edit to a generated file is a red build here);
+      #   * every workspace sibling a recipe names is mapped in its manifest
+      #     AND named the way pixi matches source packages — by MANIFEST name.
+      #     That is the defect that killed run 34097701602 three levels down a
+      #     host solve, after a green local dry run.
+      - name: "Gate 1b: the generated recipes and the sibling wiring"
+        shell: bash
+        run: |
+          pixi run -e packaging nu tools/gen-platform-packages.nu --check
+          pixi run -e packaging nu tools/check-sibling-mapping.nu --platform ${{ matrix.platform }}
+
       # Explicit restore/save on both caches: actions/cache's post-step only
       # saves on job SUCCESS, which starves iteration on exactly the runs that
       # need warmth.
@@ -204,7 +222,9 @@ jobs:
         shell: bash
         run: |
           pixi run -e packaging nu tools/publish-accounting.nu \
-            --log publish.log --expect ${{ matrix.expect_dirs }} \
+            --log publish.log \
+            --expect-names ${{ matrix.expect_names }} \
+            --expect-skips ${{ matrix.expect_skips }} \
             --date "$ACPP_NIGHTLY_DATE"
 
       # Collected BY PUBLISHED NAME out of the log, never by globbing the build

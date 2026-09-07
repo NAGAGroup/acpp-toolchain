@@ -99,13 +99,21 @@ acpp-activation-win = { path = "packages/acpp-activation-win" }
 acpp-activation-osx = { path = "packages/acpp-activation-osx" }
 
 # ---- lifted from the reference monolith (task 2) ----
-# compiler-rt family. The two `-impl` names are DIRECTORY names, not package
-# names: those recipes emit `acpp-compiler-rt{21,}_<target_platform>`, and a
-# pixi package manifest needs a fixed [package] name.
+# compiler-rt family. The `_<platform>` names below are the PACKAGE names, one
+# manifest each, all pointing at their family's single recipe — pixi matches a
+# source package by manifest name, so a templated recipe needs one manifest per
+# platform. The directory names keep the `-impl` stem.
 acpp-libcompiler-rt = { path = "packages/acpp-libcompiler-rt" }
-acpp-compiler-rt21-impl = { path = "packages/acpp-compiler-rt21-impl" }
+# The `_<platform>`-templated families: ONE manifest per platform, because pixi
+# matches a source package by its manifest name (see any of these manifests for
+# the measurement). They share one recipe per family.
+"acpp-compiler-rt21_linux-64" = { path = "packages/acpp-compiler-rt21-impl-linux-64" }
+"acpp-compiler-rt21_win-64" = { path = "packages/acpp-compiler-rt21-impl-win-64" }
+"acpp-compiler-rt21_osx-arm64" = { path = "packages/acpp-compiler-rt21-impl-osx-arm64" }
 acpp-compiler-rt21 = { path = "packages/acpp-compiler-rt21" }
-acpp-compiler-rt-impl = { path = "packages/acpp-compiler-rt-impl" }
+"acpp-compiler-rt_linux-64" = { path = "packages/acpp-compiler-rt-impl-linux-64" }
+"acpp-compiler-rt_win-64" = { path = "packages/acpp-compiler-rt-impl-win-64" }
+"acpp-compiler-rt_osx-arm64" = { path = "packages/acpp-compiler-rt-impl-osx-arm64" }
 
 # clangdev family.
 "acpp-libclang-cpp21.1" = { path = "packages/acpp-libclang-cpp21.1" }
@@ -114,13 +122,15 @@ acpp-libclang13 = { path = "packages/acpp-libclang13" }
 acpp-libclang = { path = "packages/acpp-libclang" }
 acpp-clang-format-21 = { path = "packages/acpp-clang-format-21" }
 acpp-clang-format = { path = "packages/acpp-clang-format" }
-# `acpp-clang-impl` and `acpp-clangxx-impl` are DIRECTORY names, like the two
-# compiler-rt ones above: those recipes emit `acpp-clang{,xx}_impl_<platform>`.
+# Same shape as the compiler-rt pair above: one manifest per platform, one
+# shared recipe per family, directories keeping the `-impl` stem.
 acpp-clang-21 = { path = "packages/acpp-clang-21" }
-acpp-clang-impl = { path = "packages/acpp-clang-impl" }
+"acpp-clang_impl_linux-64" = { path = "packages/acpp-clang-impl-linux-64" }
+"acpp-clang_impl_osx-arm64" = { path = "packages/acpp-clang-impl-osx-arm64" }
 acpp-clang = { path = "packages/acpp-clang" }
 acpp-clang-no-conda-cfg = { path = "packages/acpp-clang-no-conda-cfg" }
-acpp-clangxx-impl = { path = "packages/acpp-clangxx-impl" }
+"acpp-clangxx_impl_linux-64" = { path = "packages/acpp-clangxx-impl-linux-64" }
+"acpp-clangxx_impl_osx-arm64" = { path = "packages/acpp-clangxx-impl-osx-arm64" }
 acpp-clangxx = { path = "packages/acpp-clangxx" }
 acpp-clang-scan-deps = { path = "packages/acpp-clang-scan-deps" }
 acpp-clang-tools = { path = "packages/acpp-clang-tools" }
@@ -297,6 +307,17 @@ description = "Exercise staging.yml's bash guards (the version gate, the platfor
 [feature.packaging.tasks.check-sibling-mapping]
 cmd = "nu tools/check-sibling-mapping.nu"
 description = "Assert every workspace sibling a recipe names is mapped in its manifest"
+
+# The per-platform packages of every templated-name family are GENERATED from
+# one authored recipe each; --check makes a hand edit to a generated copy a red
+# build instead of a silent divergence.
+[feature.packaging.tasks.gen-platform-packages]
+cmd = "nu tools/gen-platform-packages.nu"
+description = "Regenerate the per-platform recipes of the templated-name families"
+
+[feature.packaging.tasks.check-platform-packages]
+cmd = "nu tools/gen-platform-packages.nu --check"
+description = "Assert every generated per-platform recipe matches its authored source"
 
 [feature.packaging.tasks.check-disjointness]
 cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"

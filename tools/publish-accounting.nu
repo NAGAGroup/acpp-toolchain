@@ -16,17 +16,22 @@
 # NON-VACUOUS BY CONSTRUCTION: a log it cannot parse produces zero of both, and
 # zero built fails before any comparison can be called a pass.
 #
-#   pixi run -e packaging nu tools/publish-accounting.nu --log publish.log --expect 49
+#   pixi run -e packaging nu tools/publish-accounting.nu --log publish.log \
+#     --expect-names 44 --expect-skips 12 --date 2026.09.07
 
 def main [
-  --log: string     # the captured publish output (stdout and stderr together)
-  --expect: int     # how many package directories the workspace holds
-  --date: string    # ACPP_NIGHTLY_DATE — every date-versioned package must carry exactly this
+  --log: string          # the captured publish output (stdout and stderr together)
+  --expect-names: int    # distinct package NAMES this platform must build
+  --expect-skips: int    # package DIRECTORIES this platform must skip
+  --date: string         # ACPP_NIGHTLY_DATE — every date-versioned package must carry exactly this
 ] {
   if ($log | is-empty) { error make {msg: "publish-accounting: --log <file> is required"} }
   if not ($log | path exists) { error make {msg: $"publish-accounting: ($log) does not exist"} }
-  if ($expect == null) or ($expect < 1) {
-    error make {msg: "publish-accounting: --expect <n> is required and must be at least 1"}
+  if ($expect_names == null) or ($expect_names < 1) {
+    error make {msg: "publish-accounting: --expect-names <n> is required and must be at least 1"}
+  }
+  if ($expect_skips == null) or ($expect_skips < 0) {
+    error make {msg: "publish-accounting: --expect-skips <n> is required (0 is a legitimate value; omitting it is not)"}
   }
 
   let lines = (open --raw $log | lines)
@@ -55,7 +60,7 @@ def main [
   let errors = ($lines | where {|l| $l =~ '(?i)not part of the publish set|cannot be published on its own|^error|failed to build' })
 
   let names = ($built | get name | uniq)
-  print $"publish-accounting: ($built | length) builds over ($names | length) names, ($skipped | length) skipped, expecting ($expect) package directories"
+  print $"publish-accounting: ($built | length) builds over ($names | length) names, ($skipped | length) skipped; expecting ($expect_names) names and ($expect_skips) skips"
   if not ($skipped | is-empty) {
     print $"publish-accounting: skipped — ($skipped | get dir | each {|d| $d | path basename } | str join ', ')"
   }
@@ -64,11 +69,18 @@ def main [
   if ($built | is-empty) {
     $failures = ($failures | append "zero packages were built — either the log is not a publish log or every output was skipped")
   }
-  # Two builds of one name (the with_cfg rows) count ONCE against the package
-  # directory total, because a directory is what pixi skips or builds.
-  let accounted = (($names | length) + ($skipped | length))
-  if $accounted != $expect {
-    $failures = ($failures | append $"($names | length) built + ($skipped | length) skipped = ($accounted), but the workspace holds ($expect) package directories — ($expect - $accounted) unaccounted for")
+  # ⚠ NAMES AND SKIPS ARE ASSERTED SEPARATELY, and NOT summed against the
+  # package-directory count. That identity looks right and is FALSE here: a
+  # multi-output package is ONE directory producing SEVERAL names — the three
+  # activation ports emit two or three each — so built + skipped exceeds the
+  # directory total by exactly the multi-output surplus, differently per
+  # platform. Two exact equalities are also a stricter gate than one sum, which
+  # a pair of compensating errors can satisfy.
+  if ($names | length) != $expect_names {
+    $failures = ($failures | append $"built ($names | length) distinct names, expected exactly ($expect_names)")
+  }
+  if ($skipped | length) != $expect_skips {
+    $failures = ($failures | append $"($skipped | length) package directories were skipped, expected exactly ($expect_skips) — a skip that appears or disappears is a `skip:` expression that changed meaning")
   }
   if not ($errors | is-empty) {
     for e in ($errors | first 10) { print $"  publish error line: ($e | str trim)" }
@@ -108,5 +120,5 @@ def main [
     for f in $failures { print $"FAIL ($f)" }
     error make {msg: $"publish-accounting: ($failures | length) failure\(s\) — see above"}
   }
-  print $"publish-accounting: OK — every one of ($expect) package directories is accounted for"
+  print $"publish-accounting: OK — ($expect_names) names built and ($expect_skips) directories skipped, exactly as expected"
 }

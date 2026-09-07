@@ -68,38 +68,41 @@ def main [] {
    + "  - acpp-clang v21.1.8 [llvm21_1_8_default_nocfg_hy_0] (linux-64)\n"
    + "ℹ️  skipping 'packages/acpp-libcxx': no outputs for platform linux-64\n") | save -f $good_log
   $results = ($results | append (check-behaviour "publish-accounting: a complete log" true {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $good_log --expect 4 }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $good_log --expect-names 3 --expect-skips 1 }))
   $results = ($results | append (check-behaviour "publish-accounting: SHORT count (a package silently absent)" false {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $good_log --expect 49 }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $good_log --expect-names 99 --expect-skips 1 }))
 
   let empty_log = ($WORK | path join "publish-empty.log")
   ("ℹ️  skipping 'packages/acpp-libcxx': no outputs for platform linux-64\n"
    + "ℹ️  skipping 'packages/acpp-bolt': no outputs for platform linux-64\n") | save -f $empty_log
   $results = ($results | append (check-behaviour "publish-accounting: ZERO built (every output skipped)" false {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $empty_log --expect 2 }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $empty_log --expect-names 1 --expect-skips 2 }))
 
   let err_log = ($WORK | path join "publish-err.log")
   ((open --raw $good_log) + "acpp-toolkit is not part of the publish set\n") | save -f $err_log
   $results = ($results | append (check-behaviour "publish-accounting: an ERROR line in an otherwise fine log" false {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $err_log --expect 5 }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $err_log --expect-names 3 --expect-skips 1 }))
 
   # THE VERSION ASSERTION — the stale-metadata class, measured 2026-09-07.
   let mixed_log = ($WORK | path join "publish-mixed.log")
   ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
    + "  - acpp-runtime v0.dev0 [llvm21_1_8_habc_0] (linux-64)\n") | save -f $mixed_log
   $results = ($results | append (check-behaviour "publish-accounting: a set where one package kept the 0.dev0 placeholder" false {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $mixed_log --expect 2 --date "2026.09.07" }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $mixed_log --expect-names 2 --expect-skips 0 --date "2026.09.07" }))
   let twodates = ($WORK | path join "publish-twodates.log")
   ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
    + "  - acpp-runtime v2026.09.06 [llvm21_1_8_habc_0] (linux-64)\n") | save -f $twodates
   $results = ($results | append (check-behaviour "publish-accounting: two DIFFERENT dates in one set (the midnight straddle)" false {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $twodates --expect 2 --date "2026.09.07" }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $twodates --expect-names 2 --expect-skips 0 --date "2026.09.07" }))
   let onedate = ($WORK | path join "publish-onedate.log")
   ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
    + "  - acpp-runtime v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
    + "  - acpp-lld v21.1.8 [llvm21_1_8_hq_0] (linux-64)\n") | save -f $onedate
   $results = ($results | append (check-behaviour "publish-accounting: one date across the set, plus the LLVM-versioned packages" true {
-    ^pixi run -e packaging nu tools/publish-accounting.nu --log $onedate --expect 3 --date "2026.09.07" }))
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $onedate --expect-names 3 --expect-skips 0 --date "2026.09.07" }))
+
+  $results = ($results | append (check-behaviour "publish-accounting: a package that skipped when it should have built" false {
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $good_log --expect-names 3 --expect-skips 0 }))
 
   # ── collect-artifacts ─────────────────────────────────────────────────────
   let src = ($WORK | path join "bld")
@@ -141,7 +144,7 @@ def main [] {
   make-conda $dj_bad "acpp" "2026.09.07" "llvm21_1_8_habc_0" "linux-64" ["bin/acpp" "lib/clang/21/include/omp.h"]
   make-conda $dj_bad "acpp-clang-21" "21.1.8" "llvm21_1_8_hz_0" "linux-64" ["lib/clang/21/include/omp.h"]
   $results = ($results | append (check-behaviour "disjointness: two DIFFERENT names shipping one path" false {
-    ^pixi run -e packaging nu tools/check-package-disjointness.nu --artifacts ($WORK | path join "dj-bad") --expect 2 }))
+    ^pixi run -e packaging nu tools/check-package-disjointness.nu --artifacts ($WORK | path join "dj-bad") --expect-names 0 --expect-skips 2 }))
 
   # ── check-name-collisions ─────────────────────────────────────────────────
   $results = ($results | append (check-behaviour "name-collisions: with_cfg twins at ONE version" true {

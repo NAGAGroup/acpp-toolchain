@@ -30,9 +30,9 @@ matrix() {          # $1 = the platforms input
     entries=()
     for p in $PLATFORMS; do
       case "$p" in
-        linux-64)   entries+=("{\"platform\":\"linux-64\",\"runner\":\"Linux-x64-64\",\"expect_dirs\":49,\"expect_artifacts\":46}") ;;
-        win-64)     entries+=("{\"platform\":\"win-64\",\"runner\":\"Win-x64-64\",\"expect_dirs\":49,\"expect_artifacts\":39}") ;;
-        osx-arm64)  entries+=("{\"platform\":\"osx-arm64\",\"runner\":\"macOS-26-xlarge\",\"expect_dirs\":49,\"expect_artifacts\":44}") ;;
+        linux-64)   entries+=("{\"platform\":\"linux-64\",\"runner\":\"Linux-x64-64\",\"expect_names\":44,\"expect_skips\":12,\"expect_artifacts\":46}") ;;
+        win-64)     entries+=("{\"platform\":\"win-64\",\"runner\":\"Win-x64-64\",\"expect_names\":37,\"expect_skips\":20,\"expect_artifacts\":39}") ;;
+        osx-arm64)  entries+=("{\"platform\":\"osx-arm64\",\"runner\":\"macOS-26-xlarge\",\"expect_names\":42,\"expect_skips\":14,\"expect_artifacts\":44}") ;;
         *) echo "Unknown platform '"'"'$p'"'"'" >&2; exit 1 ;;
       esac
     done

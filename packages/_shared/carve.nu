@@ -89,13 +89,54 @@ def main [] {
   })
   let stage = ($layout_root | path join "_stage" | slashes)
 
+  # ACPP_CARVE_DEST — where the copies LAND. Default "layout": the layout root,
+  # which is %PREFIX%\Library on win and $PREFIX everywhere else, and is what
+  # every ordinary package wants.
+  #
+  # "prefix" is for `noarch: generic` outputs and ONLY those. A noarch package
+  # has no Windows layout: its paths are the same on every platform, so its
+  # content must land at %PREFIX% directly. Upstream says the same thing in the
+  # form its globs take — compiler-rt21_<platform> writes its win slice as
+  # `lib\clang\<major>\lib` with no `Library\` prefix, under the comment "avoid
+  # Library\ for noarch output", while the arch-specific compiler-rt21 beside it
+  # writes `Library\lib\clang\<major>\lib`. Reading destination off the glob
+  # would make that distinction implicit and easy to lose; naming it here makes
+  # it a declaration.
+  #
+  # The SOURCE is unaffected: the stage always sits under the layout root,
+  # because the stage is what the platform-native build installed.
+  let dest_mode = ($env.ACPP_CARVE_DEST? | default "layout" | str trim)
+  if $dest_mode not-in ["layout" "prefix"] {
+    error make {msg: $"carve: ACPP_CARVE_DEST is '($dest_mode)' — it must be 'layout' or 'prefix'"}
+  }
+  let dest_root = (if $dest_mode == "prefix" { $env.PREFIX | slashes } else { $layout_root | slashes })
+
   if not ($stage | path exists) {
     error make {msg: $"carve: stage directory ($stage) does not exist — is _acpp-stage a host dependency of this package?"}
   }
 
   let lib_prefix = (if (is-windows) { "Library/" } else { "" })
 
+  # ACPP_CARVE_NONE — the DELIBERATELY EMPTY package, on this platform only.
+  # A few upstream outputs are pure wrappers on one platform and real on
+  # another (libclang-cpp ships the unversioned symlink on unix and nothing at
+  # all on win). Those cannot use the `build: files: []` form the always-empty
+  # metapackages use, because that is not platform-conditional.
+  #
+  # The value is a REASON, not a flag: an empty package is indistinguishable
+  # from a slice that silently rotted to nothing, which is the failure this
+  # script exists to catch, so the only way to get one is to say in the recipe
+  # why it is expected. Setting it together with a non-empty ACPP_CARVE is a
+  # contradiction and fails.
+  let none_reason = ($env.ACPP_CARVE_NONE? | default "" | str trim)
   let includes = ($env.ACPP_CARVE? | default "" | split row ";" | each {|g| $g | str trim } | where {|g| $g != "" })
+  if $none_reason != "" {
+    if not ($includes | is-empty) {
+      error make {msg: $"carve: ACPP_CARVE_NONE is set \(($none_reason)) but ACPP_CARVE names ($includes | length) globs — the recipe says both empty and not empty"}
+    }
+    print $"carve: ($env.PKG_NAME? | default "this package") ships nothing on this platform, deliberately: ($none_reason)"
+    return
+  }
   if ($includes | is-empty) {
     error make {msg: "carve: ACPP_CARVE is empty — the recipe must name the globs this package ships"}
   }
@@ -124,7 +165,7 @@ def main [] {
     # The path INSIDE the stage, replayed at the top of the layout root —
     # identical relative depth, which is what keeps $ORIGIN/../lib valid.
     let rel = ($m | path relative-to $stage)
-    let dst = ($layout_root | slashes | path join $rel)
+    let dst = ($dest_root | path join $rel)
     mkdir ($dst | path dirname)
     # -P, NOT -p. In nushell `-p` is `--progress` (a progress bar), and `cp`
     # DEREFERENCES symlinks unless told not to — measured: copying a 6-byte

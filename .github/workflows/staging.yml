@@ -149,19 +149,25 @@ jobs:
           environments: packaging
 
       # ── GATE 1b ───────────────────────────────────────────────────────────
-      # Cheap, and it runs before the expensive build for that reason. Both
-      # assert properties that no render can see and that a runner would
-      # otherwise discover an hour in:
+      # Cheap, and it runs before the expensive build for that reason. All
+      # three assert properties that no render can see and that a runner would
+      # otherwise discover an hour in — each one is here because it already
+      # cost a run:
       #   * the generated per-platform recipes still match their authored
       #     source (a hand edit to a generated file is a red build here);
+      #   * every `path:` source exists relative to the recipe that names it.
+      #     A path SOURCE resolves against the RECIPE dir and `license_file`
+      #     against the rendered SOURCE dir — two rules that look alike, and
+      #     applying one to the other failed run 34109157780 at FETCH time;
       #   * every workspace sibling a recipe names is mapped in its manifest
       #     AND named the way pixi matches source packages — by MANIFEST name.
       #     That is the defect that killed run 34097701602 three levels down a
       #     host solve, after a green local dry run.
-      - name: "Gate 1b: the generated recipes and the sibling wiring"
+      - name: "Gate 1b: the generated recipes, the sources, and the sibling wiring"
         shell: bash
         run: |
           pixi run -e packaging nu tools/gen-platform-packages.nu --check
+          pixi run -e packaging nu tools/check-source-paths.nu
           pixi run -e packaging nu tools/check-sibling-mapping.nu --platform ${{ matrix.platform }}
 
       # Explicit restore/save on both caches: actions/cache's post-step only

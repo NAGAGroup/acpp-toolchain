@@ -326,6 +326,14 @@ description = "Assert every generated per-platform recipe matches its authored s
 cmd = "nu tools/tests/exercise-clang-cfg-guard.nu"
 description = "Exercise the in-tree clang config-file guard, both branches"
 
+# Every `path:` source must exist relative to its own recipe. A `path:` source
+# and a `license_file` resolve by DIFFERENT rules — recipe dir vs rendered
+# source dir — and applying one rule to the other is what failed run
+# 34109157780 at fetch time.
+[feature.packaging.tasks.check-source-paths]
+cmd = "nu tools/check-source-paths.nu"
+description = "Assert every path: source resolves from its own recipe directory"
+
 [feature.packaging.tasks.check-disjointness]
 cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"
 args = [

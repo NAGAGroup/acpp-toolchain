@@ -64,7 +64,14 @@ source:
   # license_file. It comes in here so the build can assert, against the
   # extracted source, that it is still byte-identical — this build is the only
   # place that can see both sides. Same guard _acpp-stage runs.
-  - path: licenses/SPIRV-LLVM-Translator-LICENSE.TXT
+  #
+  # ⚠ THE `..` IS CORRECT HERE AND MUST STAY. A `path:` SOURCE resolves against
+  # the RECIPE directory, where `..` works; `license_file` resolves against the
+  # rendered SOURCE directory, where it never does. Two rules that look alike.
+  # The licence sweep applied the second to this line and run 34109157780 died
+  # at FETCH time with "failed to canonicalize path".
+  # tools/check-source-paths.nu now asserts every path source exists.
+  - path: ../_shared/licenses/SPIRV-LLVM-Translator-LICENSE.TXT
     target_directory: vendored-licenses
 
 build:

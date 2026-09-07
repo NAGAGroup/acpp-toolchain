@@ -34,8 +34,12 @@ on:
         description: "ACPP_BUILD_NUMBER — bump for a same-day rebuild, or the upload 409s"
         default: "0"
 
+# Keyed on the platform set, not the workflow: each platform is dispatched
+# on its own so a red one keeps rebuilding while a green one is left alone,
+# and two platforms in flight must not cancel each other. A re-dispatch of
+# the SAME platform set still cancels its predecessor.
 concurrency:
-  group: staging
+  group: staging-${{ inputs.platforms }}
   cancel-in-progress: true
 
 jobs:

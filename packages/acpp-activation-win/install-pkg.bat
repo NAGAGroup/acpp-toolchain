@@ -89,9 +89,24 @@ if [%PKG_NAME%] == [acpp-clang_%cross_target_platform%] (
 REM Nothing may survive unrendered: an unsubstituted token in a shipped script
 REM is a broken flag in a consumer's build, and it looks fine in the artifact.
 REM The pattern is @TOKEN@, not a bare @, so that `@echo on` does not match.
+REM
+REM ONE GUARD, TWO EXIT CODES, AND THE PASS PATH IS THE AWKWARD ONE.
+REM `findstr` returns 0 when it MATCHES and 1 when it does not — so the healthy
+REM outcome, no token surviving, leaves ERRORLEVEL 1 behind. Nothing reset it,
+REM and rattler-build's wrapper ends every script with an ERRORLEVEL check, so a
+REM PASSING guard failed the package: win run 34147813700, with both activation
+REM scripts installed correctly and every substitution done.
+REM
+REM `(call )` is the cmd idiom for "set ERRORLEVEL to 0" — a call to nothing,
+REM which succeeds. It runs only on the pass path, after the failure branch has
+REM already exited, so the two outcomes stay distinct:
+REM   * a token IS found  -> findstr 0 -> the block echoes and `exit 1`;
+REM   * no token is found -> findstr 1 -> the block is skipped, `(call )` resets
+REM     ERRORLEVEL to 0, and the script ends clean.
 findstr /R /C:"@[A-Z_][A-Z_]*@" vs%VSYEAR%_*-%PKG_NAME%.bat vs%VSYEAR%_*-%PKG_NAME%.ps1
 if %ERRORLEVEL% equ 0 (
     echo ERROR: unsubstituted @TOKEN@ left in an installed activation script
     exit 1
 )
+(call )
 popd

@@ -1174,9 +1174,27 @@ def main [] {
     # versioned sonames are what the runtime needs. The slicers decide which
     # package each lands in, so the unversioned links are recreated there, not
     # here.
+    # ⚠ ONLY IF IT IS A SYMLINK. The intent here is to drop the UNVERSIONED
+    # development link and keep the versioned soname the runtime needs — but
+    # `path exists` follows links, so this happily deleted whatever sat at that
+    # name. If any of these libraries has the reversed convention (the plain
+    # name real, the versioned name a link to it), this removed the REAL
+    # library and left a DANGLING versioned link behind — which is one of the
+    # two live hypotheses for acpp-libclang-cpp21.1 carving one file into a
+    # package with zero content (run 34116494098).
+    #
+    # Fail loudly on a real file rather than deleting it: if the convention is
+    # reversed for one of these, that is a fact about the LLVM build worth
+    # learning from an error message instead of from an empty package. Same
+    # class as the re-versioning loop that deleted binaries on a cached run.
     for f in [libLLVM.so libLTO.so libRemarks.so libclang.so libclang-cpp.so] {
       let p = ($prefix | path join "lib" $f)
-      if ($p | path exists) { rm $p }
+      let t = ($p | path type)
+      if $t == "symlink" {
+        rm $p
+      } else if $t == "file" {
+        error make {msg: $"stage: lib/($f) is a REAL FILE, not the unversioned symlink this step expects to drop. Deleting it would leave the versioned name dangling and its package would ship empty. The LLVM install convention for this library is reversed from the assumption here — package the plain name instead"}
+      }
     }
   }
 
@@ -1256,10 +1274,31 @@ def main [] {
   let listing = ($env | get -o ACPP_STAGE_PATHS | default "")
   if $listing != "" {
     let root = (if (is-windows) { $layout_root } else { $prefix })
+    # ⚠ TYPE AND TARGET, not just the path. A bare path list cannot answer the
+    # question that actually matters about an install tree — whether an entry is
+    # a real file, a symlink, or a DANGLING symlink — and that is precisely the
+    # discriminator that was missing when acpp-libclang-cpp21.1 carved one file
+    # into a package with zero content (run 34116494098). A listing that cannot
+    # tell those apart is a listing that cannot settle the next one either.
     let paths = (glob ($root | path join "**" "*") --no-dir
-      | each {|p| $p | path relative-to $root })
+      | each {|p|
+          let rel = ($p | path relative-to $root)
+          let t = ($p | path type)
+          if $t == "symlink" {
+            let target = (ls -l $p | get 0.target)
+            let resolves = ($p | path expand | path exists)
+            $"($rel)\tsymlink\t($target)\t(if $resolves { 'resolves' } else { 'DANGLING' })"
+          } else {
+            $"($rel)\t($t)\t\t"
+          }
+        })
     $paths | sort | str join "\n" | save -f $listing
+    let dangling = ($paths | where {|l| $l =~ 'DANGLING' })
     print $"stage path listing: ($paths | length) paths written to ($listing)"
+    if not ($dangling | is-empty) {
+      print $"stage path listing: ⚠ ($dangling | length) DANGLING symlink\(s\) in the stage:"
+      for d in ($dangling | first 20) { print $"    ($d)" }
+    }
   }
 
   ^ccache --show-stats

@@ -184,6 +184,33 @@ def main [] {
     # keeps the executable bit.
     cp -P $m $dst
     $total = $total + 1
+    # ⚠ EVERY COPY IS VERIFIED AT ITS DESTINATION, because "copied N" and "the
+    # package contains N" are different claims and they have already disagreed:
+    # acpp-libclang-cpp21.1 reported `copied 1 files` into a package rattler
+    # then described as `0 content` (run 34116494098), and the first sign of it
+    # was a package-content test three steps later.
+    #
+    # ⚠ THE ASSERTION IS LSTAT, NOT STAT, AND THE DIFFERENCE IS THE WHOLE
+    # DESIGN. `path type` reports `symlink` for a link whose target is missing,
+    # while `path exists` FOLLOWS it and says false. Only the first question —
+    # "is there an entry here at all" — is always-wrong when the answer is no.
+    #
+    # A link that does not resolve AT BUILD TIME is NORMAL here and must not
+    # fail: about ten packages ship an unversioned symlink whose target belongs
+    # to a sibling package by design (bin/clang++ -> clang-21, lib/libclang.so
+    # -> libclang.so.13), exactly as conda-forge splits them, and they resolve
+    # once both packages are installed. A guard that failed on those would kill
+    # ten correct builds to catch one suspect — worse than no guard.
+    #
+    # So the unresolved ones are REPORTED, because `copied 1` beside `0 content`
+    # is how acpp-libclang-cpp21.1 failed (run 34116494098) and the log said
+    # nothing about why.
+    if ($dst | path type) == null {
+      error make {msg: $"carve: reported copying ($rel) but nothing exists at ($dst) — the copy did not happen"}
+    }
+    if not ($dst | path exists) {
+      print $"carve: NOTE ($rel) is a symlink to '(ls -l $m | get 0.target)' that does not resolve inside this package — expected when the target ships in a sibling, suspicious when it does not"
+    }
   }
   let excl_note = (if ($excluded | is-empty) { "" } else { $", excluded ($excluded | length) paths" })
   print $"carve: copied ($total) files($excl_note) for ($env.PKG_NAME? | default 'this package')"

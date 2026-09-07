@@ -27,6 +27,17 @@ package:
   name: acpp-libcxx-devel
   version: ${{ llvm_version }}
 
+source:
+  # THE LICENCES MUST BE A SOURCE, NOT A `../` PATH. rattler-build resolves
+  # `license_file` against the rendered SOURCE directory, and a parent-relative
+  # path never resolves — measured both ways on a throwaway recipe: with no
+  # source and with one present, `../_shared/licenses/…` fails identically with
+  # "No license files were copied", which is what stopped every slicer in run
+  # 34107933036 AFTER its carve had succeeded. Bringing the directory in as a
+  # source is the shape `_acpp-stage` has always used.
+  - path: ../_shared/licenses
+    target_directory: licenses
+
 build:
   number: ${{ build_num }}
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
@@ -69,5 +80,5 @@ about:
   homepage: https://libcxx.llvm.org/
   repository: https://github.com/llvm/llvm-project
   license: Apache-2.0 WITH LLVM-exception
-  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  license_file: licenses/llvm-LICENSE.TXT
   summary: LLVM C++ standard library — development metapackage (library + headers)

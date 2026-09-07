@@ -32,6 +32,17 @@ package:
   name: acpp-libllvmspirv${{ llvm_major }}
   version: ${{ llvm_version }}
 
+source:
+  # THE LICENCES MUST BE A SOURCE, NOT A `../` PATH. rattler-build resolves
+  # `license_file` against the rendered SOURCE directory, and a parent-relative
+  # path never resolves — measured both ways on a throwaway recipe: with no
+  # source and with one present, `../_shared/licenses/…` fails identically with
+  # "No license files were copied", which is what stopped every slicer in run
+  # 34107933036 AFTER its carve had succeeded. Bringing the directory in as a
+  # source is the shape `_acpp-stage` has always used.
+  - path: ../_shared/licenses
+    target_directory: licenses
+
 build:
   number: ${{ build_num }}
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
@@ -83,7 +94,7 @@ about:
   license: NCSA
   # A slicer has no source tree, so the licence is the vendored copy
   # _acpp-llvm-spirv-stage asserts byte-for-byte against the extracted source.
-  license_file: ../_shared/licenses/SPIRV-LLVM-Translator-LICENSE.TXT
+  license_file: licenses/SPIRV-LLVM-Translator-LICENSE.TXT
   summary: |
     The SPIR-V translator library, versioned. Built from AdaptiveCpp's fork at
     the revision AdaptiveCpp's own build fetches for LLVM 21; the version is the

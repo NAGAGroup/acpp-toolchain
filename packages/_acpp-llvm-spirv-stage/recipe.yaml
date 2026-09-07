@@ -42,6 +42,15 @@ package:
   version: 0.0.0
 
 source:
+  # THE LICENCES MUST BE A SOURCE, NOT A `../` PATH. rattler-build resolves
+  # `license_file` against the rendered SOURCE directory, and a parent-relative
+  # path never resolves — measured both ways on a throwaway recipe: with no
+  # source and with one present, `../_shared/licenses/…` fails identically with
+  # "No license files were copied", which is what stopped every slicer in run
+  # 34107933036 AFTER its carve had succeeded. Bringing the directory in as a
+  # source is the shape `_acpp-stage` has always used.
+  - path: ../_shared/licenses
+    target_directory: licenses
   - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/${{ spirv_rev }}.tar.gz
     sha256: ${{ spirv_sha256 }}
     patches:
@@ -55,7 +64,7 @@ source:
   # license_file. It comes in here so the build can assert, against the
   # extracted source, that it is still byte-identical — this build is the only
   # place that can see both sides. Same guard _acpp-stage runs.
-  - path: ../_shared/licenses/SPIRV-LLVM-Translator-LICENSE.TXT
+  - path: licenses/SPIRV-LLVM-Translator-LICENSE.TXT
     target_directory: vendored-licenses
 
 build:

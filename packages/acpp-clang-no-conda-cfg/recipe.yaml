@@ -28,6 +28,17 @@ package:
   name: acpp-clang-no-conda-cfg
   version: ${{ llvm_version }}
 
+source:
+  # THE LICENCES MUST BE A SOURCE, NOT A `../` PATH. rattler-build resolves
+  # `license_file` against the rendered SOURCE directory, and a parent-relative
+  # path never resolves — measured both ways on a throwaway recipe: with no
+  # source and with one present, `../_shared/licenses/…` fails identically with
+  # "No license files were copied", which is what stopped every slicer in run
+  # 34107933036 AFTER its carve had succeeded. Bringing the directory in as a
+  # source is the shape `_acpp-stage` has always used.
+  - path: ../_shared/licenses
+    target_directory: licenses
+
 build:
   number: ${{ build_num }}
   string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
@@ -54,5 +65,5 @@ about:
   homepage: http://llvm.org/
   repository: https://github.com/llvm/llvm-project
   license: Apache-2.0 WITH LLVM-exception
-  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  license_file: licenses/llvm-LICENSE.TXT
   summary: Selects the clang build without conda configuration files

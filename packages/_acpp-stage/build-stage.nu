@@ -805,7 +805,9 @@ def darwin-link-diagnostics [] {
   # THE FAILING SHAPE, reproduced small. The flags are the ones that
   # distinguish compiler-rt's dynamic sanitizer links from the LLVM dylib links
   # that succeed in the same run.
-  let shape = (do { ^$cxx -v -dynamiclib -nodefaultlibs -nostdlib++ -fapplication-extension -o /tmp/acpp-probe2.dylib -x c /dev/null } | complete)
+  # `-v` dropped now that the mechanism is named: what these probes are for is
+  # WHICH LINKER the driver picks, and the `-###` line above already prints it.
+  let shape = (do { ^$cxx -dynamiclib -nodefaultlibs -nostdlib++ -fapplication-extension -o /tmp/acpp-probe2.dylib -x c /dev/null } | complete)
   print $"  reproduced shape: exit ($shape.exit_code)"
   for l in ([$shape.stdout $shape.stderr] | str join "" | lines | where {|l| $l =~ 'lto_library|ld:|@\(#\)|PROGRAM:ld|LTO' } | first 8) {
     print $"      ($l | str trim | str substring 0..200)"
@@ -824,7 +826,7 @@ def darwin-link-diagnostics [] {
   # A spread list, not a wrapped command line: nushell does not continue an
   # external invocation across lines, and the first version of this probe was a
   # parse error rather than a probe.
-  let zargs = ["-v" "-dynamiclib" "-nodefaultlibs" "-nostdlib++" "-fapplication-extension"
+  let zargs = ["-###" "-dynamiclib" "-nodefaultlibs" "-nostdlib++" "-fapplication-extension"
                "-target" "arm64-apple-macos11"
                "-darwin-target-variant" "arm64-apple-ios13.1-macabi"
                "-o" "/tmp/acpp-probe3.dylib" "-x" "c" "/dev/null"]
@@ -946,6 +948,48 @@ def darwin-args [src: string, prefix: string] {
 # (plain WIN32, NOT the compiler builtin _WIN32; the macro only exists because
 # CMake's default flags define it), so clobbering them broke omp_queue.cpp with
 # "'unistd.h' file not found" (run 31350122413).
+# ⚠ NAME THE LINKER EXPLICITLY ON macOS, because the driver's own lookup misses
+# it on the zippered path.
+#
+# MEASURED, by a probe that differs from a passing one by a single flag (osx run
+# 34145907345): the same driver, given the same `-lto_library` argument, invokes
+# `$BUILD_PREFIX/bin/arm64-apple-darwin20.0.0-ld` normally and `/usr/bin/ld`
+# when `-darwin-target-variant …-macabi` is present. conda-forge's ld64 956.6
+# accepts the versioned `libLTO.21.1.dylib` its own patched clang passes;
+# Xcode 26.6's ld enforces the `libLTO.dylib` basename and rejects it. That is
+# why the identical upstream recipe builds on conda-forge's runners and not on a
+# macOS-26 image: an Xcode version meeting a driver linker-selection gap, not a
+# defect in our recipe or in compiler-rt.
+#
+# READ AT SOURCE, so the comment carries mechanism rather than my inference:
+# clang resolves the linker in `ToolChain::GetLinkerPath`, where the default
+# path goes through `GetProgramPath(getDefaultLinker())` — a TOOLCHAIN-relative
+# lookup, which is why a toolchain whose triple is the Mac Catalyst variant does
+# not find conda's `arm64-apple-darwin20.0.0-`prefixed tools and falls through
+# to PATH. What the source states plainly is the fix: `--ld-path=` is checked
+# FIRST in that same function, ahead of `-fuse-ld=` and the default, and returns
+# the path directly when it is executable — so it is honoured on both the plain
+# and the zippered link paths.
+#
+# Chosen over `COMPILER_RT_ENABLE_MACCATALYST=OFF`: this is a build-environment
+# fix for a build-environment problem, and the shipped bits stay upstream-shaped
+# — turning the variant off would change what our sanitizer dylibs contain
+# relative to conda-forge's, which a path list cannot verify from here.
+def darwin-ld-path-flag [] {
+  let bp = ($env.BUILD_PREFIX? | default "")
+  if $bp == "" { return "" }
+  let ld = ($bp | path join "bin" $"(target-triple)-ld")
+  if not ($ld | path exists) {
+    # Not an error: on a machine without conda's ld64 the driver's own lookup is
+    # all there is, and forcing a path that does not exist would break every
+    # link rather than the zippered ones.
+    print $"darwin: ($ld) not present — leaving linker selection to the driver"
+    return ""
+  }
+  print $"darwin: forcing the linker to ($ld) — see the note in outer-flag-args"
+  $"--ld-path=($ld)"
+}
+
 def outer-flag-args [] {
   if (is-windows) { return [] }
   let cflags = ($env.CFLAGS? | default "")
@@ -959,7 +1003,11 @@ def outer-flag-args [] {
     ($env.CXXFLAGS? | default "")
   })
   let base_ld = ($env.LDFLAGS? | default "")
-  let ldflags = (if (is-darwin) { $base_ld } else { ([$base_ld "-pthread"] | str join " " | str trim) })
+  let ldflags = (if (is-darwin) {
+    ([$base_ld (darwin-ld-path-flag)] | str join " " | str trim)
+  } else {
+    ([$base_ld "-pthread"] | str join " " | str trim)
+  })
   [
     $"-DCMAKE_C_FLAGS=($cflags)"
     $"-DCMAKE_CXX_FLAGS=($cxxflags)"

@@ -1,0 +1,92 @@
+# recipe.yaml — the one monolithic LLVM + AdaptiveCpp build.
+#
+# Versions and choices live in variants.yaml; this file is the mechanism and
+# should not need editing to move a version.
+#
+# NOTHING INSTALLS THIS PACKAGE. It exists to produce a tree that gets
+# tarballed and sliced, so its version is fixed at 1.0 indefinitely — the
+# release tarball the workflow uploads is what carries an identity.
+
+context:
+  name: acpp-stage
+  version: "1.0"
+
+package:
+  name: ${{ name }}
+  version: ${{ version }}
+
+source:
+  - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
+    sha256: ${{ llvm_sha256 }}
+    target_directory: llvm-project
+
+  # Our fork. The rev is the integrity; a bump is one line in variants.yaml.
+  - git: https://github.com/NAGAGroup/AdaptiveCpp.git
+    rev: ${{ acpp_rev }}
+    target_directory: AdaptiveCpp
+
+  # ROCm from TheRock, a build input only: ROCM_PATH points here at configure
+  # time. conda-forge's ROCm trails the LLVM this toolchain needs, and the
+  # generic JIT requires acpp's LLVM <= ROCm's.
+  - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-${{ rocm_gfx }}-${{ rocm_version }}.tar.gz
+    sha256: ${{ rocm_sha256 }}
+    target_directory: rocm-dist
+
+build:
+  number: 0
+  script:
+    interpreter: nu
+    file: build.nu
+    env:
+      # rattler does not export variant values to the build script, so every
+      # choice build.nu needs is forwarded here explicitly. This is what makes
+      # variants.yaml the source of truth rather than the script.
+      LLVM_VERSION: ${{ llvm_version }}
+      LLVM_MAJOR: ${{ llvm_major }}
+      LLVM_PROJECTS: ${{ llvm_projects }}
+      LLVM_RUNTIMES: ${{ llvm_runtimes }}
+      LLVM_TARGETS: ${{ llvm_targets }}
+      # Passed to acpp's cmake so the SPIR-V translator is fetched at a commit
+      # instead of tracking a branch.
+      LLVMSPIRV_REV: ${{ llvmspirv_rev }}
+      # CCACHE_DIR and CCACHE_BASEDIR are set inside build.nu instead:
+      # RECIPE_DIR is a build-time environment variable, and BASEDIR is the
+      # work directory, which is named differently on every run.
+      CCACHE_MAXSIZE: ${{ ccache_maxsize }}
+      CCACHE_NOHASHDIR: ${{ ccache_nohashdir }}
+
+requirements:
+  build:
+    - ${{ compiler('c') }}
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
+    # The full CUDA toolkit through its activation: LLVM needs nvcc present to
+    # find the toolkit, and the activation isolates the build and puts the
+    # development packages in host.
+    - ${{ compiler('cuda') }}
+    - cmake
+    - ninja
+    - nushell
+    - python
+    - ccache
+    # lldb's python bindings are generated with swig
+    - swig
+    # acpp's cmake clones the SPIR-V translator and the Khronos headers
+    - git
+
+  host:
+    - python
+    - zlib
+    - zstd
+    - libxml2-devel
+    - ncurses
+    - libedit
+    - numactl
+    - level-zero-devel
+    # the OpenCL loader we link against; acpp fetches the headers itself
+    - ocl-icd
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: Apache-2.0 WITH LLVM-exception
+  summary: Monolithic LLVM and AdaptiveCpp build; the tree every published package slices from

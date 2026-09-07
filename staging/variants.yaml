@@ -102,6 +102,22 @@ libxml2-devel:
 numactl:
   - "2.0"
 
+# ---- ccache ----------------------------------------------------------------
+# CCACHE_DIR is not here: it derives from RECIPE_DIR in the recipe, so the
+# cache lives beside the recipe rather than in the ephemeral work directory
+# and the workflow can save and restore it around the build.
+#
+# 5G holds a full LLVM tree with room for a second configuration, and stays
+# well inside a GitHub Actions cache budget. The default 5G-in-name-only is
+# not the issue — the default is much smaller than one LLVM build.
+ccache_maxsize:
+  - "5G"
+# Absolute paths under CCACHE_BASEDIR are rewritten relative, and the current
+# directory is kept out of the hash. Together these are what make a cache from
+# one run hit on the next, whose work directory has a different name.
+ccache_nohashdir:
+  - "1"
+
 # ---- python ----------------------------------------------------------------
 # One interpreter for the whole build: lldb's bindings are compiled against
 # whichever interpreter host resolves, so build and host must not solve

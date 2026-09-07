@@ -121,9 +121,30 @@ jobs:
           fi
           echo "Building $ACPP_NIGHTLY_DATE build $ACPP_BUILD_NUMBER for ${{ matrix.platform }}"
 
+      # ⚠ `environments:` IS REQUIRED, and its absence is what killed run
+      # 34096393708 before a single one of our own steps ran. setup-pixi
+      # installs and then LISTS only the DEFAULT environment unless told
+      # otherwise (its action.yml at v0.10.0: "A space-separated list of
+      # environments to install. If not specified, only the default environment
+      # is installed"), and this workspace's default environment has ZERO
+      # dependencies BY DESIGN — every environment here is
+      # `no-default-feature`, because the default one would install the
+      # toolchain we are building. Its post-install `pixi list --locked` then
+      # exits 1 with "No packages found in 'default' environment".
+      #
+      # `packaging`, NOT `dev`: every step in this file goes through
+      # `pixi run -e packaging`, and the bare `pixi publish` is not
+      # environment-scoped at all. Verified by grepping this workflow rather
+      # than assumed — installing `dev` here would install rattler-build and
+      # git for nobody.
+      #
+      # NO `activate-environment`. Every step names its environment explicitly,
+      # and activation would put one environment's tools on PATH for steps that
+      # must not see them.
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: packaging
 
       # Explicit restore/save on both caches: actions/cache's post-step only
       # saves on job SUCCESS, which starves iteration on exactly the runs that
@@ -270,9 +291,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # ⚠ `environments:` IS REQUIRED, and its absence is what killed run
+      # 34096393708 before a single one of our own steps ran. setup-pixi
+      # installs and then LISTS only the DEFAULT environment unless told
+      # otherwise (its action.yml at v0.10.0: "A space-separated list of
+      # environments to install. If not specified, only the default environment
+      # is installed"), and this workspace's default environment has ZERO
+      # dependencies BY DESIGN — every environment here is
+      # `no-default-feature`, because the default one would install the
+      # toolchain we are building. Its post-install `pixi list --locked` then
+      # exits 1 with "No packages found in 'default' environment".
+      #
+      # `packaging`, NOT `dev`: every step in this file goes through
+      # `pixi run -e packaging`, and the bare `pixi publish` is not
+      # environment-scoped at all. Verified by grepping this workflow rather
+      # than assumed — installing `dev` here would install rattler-build and
+      # git for nobody.
+      #
+      # NO `activate-environment`. Every step names its environment explicitly,
+      # and activation would put one environment's tools on PATH for steps that
+      # must not see them.
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
+          environments: packaging
 
       - uses: actions/download-artifact@v4
         with:

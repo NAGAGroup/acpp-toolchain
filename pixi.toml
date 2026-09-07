@@ -223,6 +223,13 @@ description = "Print the publish set and its build order without building or upl
 nushell = ">=0.114,<0.115"
 libarchive = ">=3.8,<3.9"
 rattler-index = ">=0.31,<0.32"
+# ripgrep is the llvm-spirv RPATH observation's tool: it reads a BINARY and
+# extracts the $ORIGIN entries, which nushell's own text handling will not do.
+# Declared rather than inherited — it happens to be on this laptop's PATH and
+# on GitHub's hosted images, and neither says anything about the ORG runners
+# this workflow actually uses. That assumption is the same class as the one
+# that reddened run 34096393708.
+ripgrep = ">=14,<15"
 
 # bash and grep are ONLY for tools/tests/exercise-workflow-guards.sh, which
 # replays staging.yml''s own bash guards. Scoped to linux because that is where

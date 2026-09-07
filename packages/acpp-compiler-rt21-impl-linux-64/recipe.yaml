@@ -12,7 +12,7 @@
 #
 # acpp-compiler-rt21_<platform> — the arch-specific compiler-rt static
 # libraries and object files. Lifted from the reference monolith's
-# `compiler-rt${{ major_ver }}_${{ target_platform }}` output
+# `compiler-rt${{ major_ver }}_linux-64` output
 # (compiler-rt-feedstock).
 #
 # THE DIRECTORY AND MANIFEST ARE NAMED `acpp-compiler-rt21-impl`, THE PACKAGE IS
@@ -33,19 +33,37 @@ context:
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
   build_num: 0
 
+  # ⚠ THIS OUTPUT IS `noarch: generic`, SO `linux` / `osx` / `win` / `unix` ARE
+  # ALL FALSE IN IT. Every one of them is derived from `target_platform`, and
+  # for a noarch output that IS `noarch` — measured in the build's own variant
+  # record: `(noarch) (build_platform: linux-64, …, target_platform: noarch)`.
+  #
+  # An `if linux … else if osx … else <windows>` chain therefore falls through
+  # to its LAST branch on every platform. That is not hypothetical: it put the
+  # Windows carve glob into the LINUX package and failed run 34105145758 with
+  # "include glob 'lib/clang/21/lib/windows/**' matched nothing".
+  #
+  # `build_platform` is the axis that still means something here — the job that
+  # produced this package — so the whole recipe reads these three names and
+  # never a bare selector. Same reasoning as the `skip:` axis; this is the rest
+  # of that class.
+  is_linux: true  # GENERATED: constant for linux-64
+  is_osx: false  # GENERATED: constant for linux-64
+  is_win: false  # GENERATED: constant for linux-64
+
 package:
   name: acpp-compiler-rt${{ llvm_major }}_linux-64
   version: ${{ llvm_version }}
 
 build:
   number: ${{ build_num }}
-  # GENERATED: this copy exists for linux-64 alone, keyed on build_platform, NOT target_platform: this output is noarch, so target_platform is `noarch` and a target test would skip it everywhere.
-  skip: build_platform != "linux-64"
+  # GENERATED: this copy exists for linux-64 alone, keyed on BOTH axes: build_platform is what holds at build time (target_platform is `noarch` here), target_platform is what keeps this copy visible to a local cross-render.
+  skip: target_platform != "linux-64" and build_platform != "linux-64"
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   noarch: generic
   # UPSTREAM: `detect_binary_files_with_prefix: false  # [win]`
   prefix_detection:
-    ignore_binary_files: ${{ true if win else false }}
+    ignore_binary_files: ${{ true if is_win else false }}
   script:
     interpreter: nu
     file: ../_shared/carve.nu
@@ -67,8 +85,8 @@ build:
       # under linux/, 14 under windows/, and on osx 23 under darwin/ plus ten
       # `libclang_rt.*` archives sitting directly in lib/.
       ACPP_CARVE: >-
-        ${{ "lib/clang/" ~ llvm_major ~ "/lib/linux/**" if linux
-        else "lib/clang/" ~ llvm_major ~ "/lib/libclang_rt.*;lib/clang/" ~ llvm_major ~ "/lib/darwin/**" if osx
+        ${{ "lib/clang/" ~ llvm_major ~ "/lib/linux/**" if is_linux
+        else "lib/clang/" ~ llvm_major ~ "/lib/libclang_rt.*;lib/clang/" ~ llvm_major ~ "/lib/darwin/**" if is_osx
         else "lib/clang/" ~ llvm_major ~ "/lib/windows/**" }}
       ACPP_CARVE_DEST: prefix
 
@@ -98,9 +116,11 @@ tests:
   - package_contents:
       files:
         exists:
-          - if: osx
+          # Same noarch rule as above: these must key on build_platform, or the
+          # test asserts the wrong platform''s file — or none at all.
+          - if: is_osx
             then: lib/clang/${{ llvm_major }}/lib/darwin/libclang_rt.osx.a
-          - if: win
+          - if: is_win
             then: lib/clang/${{ llvm_major }}/lib/windows/clang_rt.builtins-x86_64.lib
 
 about:

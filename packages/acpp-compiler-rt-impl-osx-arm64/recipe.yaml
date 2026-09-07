@@ -11,7 +11,7 @@
 
 #
 # acpp-compiler-rt_<platform> — the unversioned per-platform selector. Lifted
-# from the reference monolith's `compiler-rt_${{ target_platform }}` output
+# from the reference monolith's `compiler-rt_osx-arm64` output
 # (compiler-rt-feedstock).
 #
 # THE DIRECTORY AND MANIFEST ARE NAMED `acpp-compiler-rt-impl`, THE PACKAGE IS
@@ -42,8 +42,8 @@ package:
 
 build:
   number: ${{ build_num }}
-  # GENERATED: this copy exists for osx-arm64 alone, keyed on build_platform, NOT target_platform: this output is noarch, so target_platform is `noarch` and a target test would skip it everywhere.
-  skip: build_platform != "osx-arm64"
+  # GENERATED: this copy exists for osx-arm64 alone, keyed on BOTH axes: build_platform is what holds at build time (target_platform is `noarch` here), target_platform is what keeps this copy visible to a local cross-render.
+  skip: target_platform != "osx-arm64" and build_platform != "osx-arm64"
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   noarch: generic
   files: []
@@ -52,7 +52,7 @@ requirements:
   build: []
   run:
     # UPSTREAM: pin_subpackage("compiler-rt" ~ major_ver ~ "_" ~ target_platform, exact=True)
-    - acpp-compiler-rt${{ llvm_major }}_${{ target_platform }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-compiler-rt${{ llvm_major }}_osx-arm64[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_constraints:
     # Upstream names `clang`; ours names ours, because nothing ships under a
     # conda-forge name and a constraint on a name our channel provides would be

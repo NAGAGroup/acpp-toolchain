@@ -126,7 +126,12 @@ def shipped_names [platform: string, log: string] {
   $names
 }
 
-def main [--platform: string, --regenerate, --log: string, --targets-file: string = $TARGET_FILE] {
+# NB `--log` defaults to "" rather than being left null: a null cannot be
+# passed to a `string`-typed parameter, so an omitted flag errored with
+# "can''t convert nothing to string" — which made the local invocation
+# (`--platform X` with no log) fail while CI, which always passes `--log`,
+# stayed green. A gate that only works one way is half a gate.
+def main [--platform: string, --regenerate, --log: string = "", --targets-file: string = $TARGET_FILE] {
   if $regenerate {
     let targets = (build_targets)
     let payload = {

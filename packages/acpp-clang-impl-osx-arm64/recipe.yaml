@@ -12,7 +12,7 @@
 #
 # acpp-clang_impl_<platform> — the TRIPLET-PREFIXED clang and clang-cpp
 # drivers. Lifted from the reference monolith's
-# `clang_impl_${{ target_platform }}` output (clangdev-feedstock).
+# `clang_impl_osx-arm64` output (clangdev-feedstock).
 #
 # THIS IS A CLANGDEV OUTPUT, NOT AN ACTIVATION ONE. Upstream declares the same
 # name in three feedstocks with disjoint skips: clangdev builds the NATIVE one,
@@ -79,22 +79,22 @@ requirements:
     - if: osx
       then: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_${{ variant }}_*"]
       else: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
-    - acpp-compiler-rt_${{ target_platform }} ==${{ llvm_version }}
+    - acpp-compiler-rt_osx-arm64 ==${{ llvm_version }}
     - acpp-compiler-rt ==${{ llvm_version }}
     - if: linux
       then:
         # conda-forge names, kept as upstream has them: these are the binutils
         # and sysroot our toolchain drives, not packages of ours.
-        - binutils_impl_${{ target_platform }}
-        - libgcc-devel_${{ target_platform }}
-        - sysroot_${{ target_platform }}
+        - binutils_impl_osx-arm64
+        - libgcc-devel_osx-arm64
+        - sysroot_osx-arm64
       else:
-        - cctools_impl_${{ target_platform }}
-        # UPSTREAM: `ld64_${{ target_platform }} * llvm21_1_*`. Rewritten to
+        - cctools_impl_osx-arm64
+        # UPSTREAM: `ld64_osx-arm64 * llvm21_1_*`. Rewritten to
         # bracket form so the version field is not a bare wildcard; the build
         # glob is unchanged and still selects conda-forge's ld64 built against
         # this LLVM series.
-        - ld64_${{ target_platform }}[build="llvm${{ llvm_maj_min | replace(".", "_") }}_*"]
+        - ld64_osx-arm64[build="llvm${{ llvm_maj_min | replace(".", "_") }}_*"]
 
 tests:
   - package_contents:

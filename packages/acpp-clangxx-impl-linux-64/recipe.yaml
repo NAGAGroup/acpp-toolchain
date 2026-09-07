@@ -11,7 +11,7 @@
 
 #
 # acpp-clangxx_impl_<platform> — the TRIPLET-PREFIXED clang++ driver. Lifted
-# from the reference monolith's `clangxx_impl_${{ target_platform }}` output
+# from the reference monolith's `clangxx_impl_linux-64` output
 # (clangdev-feedstock).
 #
 # THIS IS A CLANGDEV OUTPUT, NOT AN ACTIVATION ONE — see the note in
@@ -62,11 +62,11 @@ requirements:
       then: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_${{ variant }}_*"]
       else: acpp-clang-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # UPSTREAM: pin_subpackage("clang_impl_" ~ target_platform, exact=True)
-    - acpp-clang_impl_${{ target_platform }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-clang_impl_linux-64[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # UPSTREAM: pin_subpackage("clang-scan-deps", exact=True)
     - acpp-clang-scan-deps[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - if: linux
-      then: libstdcxx-devel_${{ target_platform }}
+      then: libstdcxx-devel_linux-64
       # UPSTREAM: `libcxx-devel ${{ maj_min }}.*`, a minor pin, "to avoid issues
       # when building new libcxx versions".
       #

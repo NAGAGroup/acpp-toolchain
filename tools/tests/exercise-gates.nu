@@ -83,6 +83,24 @@ def main [] {
   $results = ($results | append (check-behaviour "publish-accounting: an ERROR line in an otherwise fine log" false {
     ^pixi run -e packaging nu tools/publish-accounting.nu --log $err_log --expect 5 }))
 
+  # THE VERSION ASSERTION — the stale-metadata class, measured 2026-09-07.
+  let mixed_log = ($WORK | path join "publish-mixed.log")
+  ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
+   + "  - acpp-runtime v0.dev0 [llvm21_1_8_habc_0] (linux-64)\n") | save -f $mixed_log
+  $results = ($results | append (check-behaviour "publish-accounting: a set where one package kept the 0.dev0 placeholder" false {
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $mixed_log --expect 2 --date "2026.09.07" }))
+  let twodates = ($WORK | path join "publish-twodates.log")
+  ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
+   + "  - acpp-runtime v2026.09.06 [llvm21_1_8_habc_0] (linux-64)\n") | save -f $twodates
+  $results = ($results | append (check-behaviour "publish-accounting: two DIFFERENT dates in one set (the midnight straddle)" false {
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $twodates --expect 2 --date "2026.09.07" }))
+  let onedate = ($WORK | path join "publish-onedate.log")
+  ("  - acpp v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
+   + "  - acpp-runtime v2026.09.07 [llvm21_1_8_habc_2] (linux-64)\n"
+   + "  - acpp-lld v21.1.8 [llvm21_1_8_hq_0] (linux-64)\n") | save -f $onedate
+  $results = ($results | append (check-behaviour "publish-accounting: one date across the set, plus the LLVM-versioned packages" true {
+    ^pixi run -e packaging nu tools/publish-accounting.nu --log $onedate --expect 3 --date "2026.09.07" }))
+
   # ── collect-artifacts ─────────────────────────────────────────────────────
   let src = ($WORK | path join "bld")
   make-conda $src "acpp" "2026.09.07" "llvm21_1_8_habc_0" "linux-64" ["bin/acpp"]

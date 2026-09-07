@@ -291,6 +291,13 @@ description = "Exercise every packaging gate on good AND bad input"
 cmd = "bash tools/tests/exercise-workflow-guards.sh"
 description = "Exercise staging.yml's bash guards (the version gate, the platform matrix)"
 
+# THE CLASS CHECK THE DRY RUN CANNOT DO. `pixi publish --dry-run` renders and
+# enumerates but does NOT solve host environments, so a recipe naming a sibling
+# its manifest does not map renders green and dies on the first solve in CI.
+[feature.packaging.tasks.check-sibling-mapping]
+cmd = "nu tools/check-sibling-mapping.nu"
+description = "Assert every workspace sibling a recipe names is mapped in its manifest"
+
 [feature.packaging.tasks.check-disjointness]
 cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"
 args = [

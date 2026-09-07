@@ -21,6 +21,7 @@
 def main [
   --log: string     # the captured publish output (stdout and stderr together)
   --expect: int     # how many package directories the workspace holds
+  --date: string    # ACPP_NIGHTLY_DATE — every date-versioned package must carry exactly this
 ] {
   if ($log | is-empty) { error make {msg: "publish-accounting: --log <file> is required"} }
   if not ($log | path exists) { error make {msg: $"publish-accounting: ($log) does not exist"} }
@@ -72,6 +73,35 @@ def main [
   if not ($errors | is-empty) {
     for e in ($errors | first 10) { print $"  publish error line: ($e | str trim)" }
     $failures = ($failures | append $"($errors | length) error line\(s\) in the publish log")
+  }
+
+  # ── THE VERSION ASSERTION ────────────────────────────────────────────────
+  # ⚠ MEASURED, NOT HYPOTHETICAL: pixi's source-metadata cache (`.pixi/meta-v0`)
+  # is keyed on the manifest and recipe CONTENT, and a value a recipe reads
+  # through `env.get()` is invisible to that key. With a warm cache and an
+  # unchanged package directory, a recipe re-renders at its CACHED version —
+  # so setting ACPP_NIGHTLY_DATE and rebuilding produced a set where `acpp`
+  # carried 2026.09.07 while `acpp-runtime` carried 0.dev0 (reproduced
+  # 2026-09-07: four of the seven date-versioned packages were stale, and
+  # removing .pixi/meta-v0 fixed all seven).
+  #
+  # CI does not cache that directory today, so a runner starts cold — but "the
+  # cache path is currently narrow enough" is a fact about one file, not a
+  # property. This asserts the property: no package may ship the 0.dev0
+  # placeholder, and every DATE-SHAPED version in the set must be the ONE date
+  # this run was given. That also catches the midnight-straddle the setup job
+  # exists to prevent, from the other side.
+  if not ($date | is-empty) {
+    let placeholders = ($built | where {|b| $b.version == "0.dev0" })
+    if not ($placeholders | is-empty) {
+      $failures = ($failures | append $"($placeholders | length) package\(s\) published the 0.dev0 PLACEHOLDER: ($placeholders | get name | str join ', ')")
+    }
+    let dated = ($built | where {|b| ($b.version | parse -r '^\d{4}\.\d{2}\.\d{2}$' | is-not-empty) })
+    let wrong = ($dated | where {|b| $b.version != $date })
+    if not ($wrong | is-empty) {
+      $failures = ($failures | append $"($wrong | length) package\(s\) carry a date other than ($date): ($wrong | each {|w| $'($w.name) v($w.version)' } | str join ', ')")
+    }
+    print $"publish-accounting: ($dated | length) date-versioned package\(s\), all at ($date), and ($placeholders | length) at the 0.dev0 placeholder"
   }
 
   if not ($failures | is-empty) {

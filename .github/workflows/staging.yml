@@ -158,6 +158,16 @@ jobs:
 
       # THE stage cache. This is what makes the expensive build run once for
       # every package instead of once each.
+      #
+      # ⚠ `.pixi/bld` ONLY — NEVER `.pixi`, and never `.pixi/meta-v0`. That
+      # directory is pixi's source-METADATA cache, keyed on manifest and recipe
+      # CONTENT, and a value a recipe reads through `env.get()` is invisible to
+      # that key. Restoring it across runs makes an unchanged package re-render
+      # at its CACHED version: measured 2026-09-07 locally, where four of the
+      # seven date-versioned packages rendered at 0.dev0 while the three whose
+      # files had changed rendered at the real date. Gate 2's `--date`
+      # assertion catches the result, but this comment is what keeps the cause
+      # out of the tree.
       - name: Restore pixi build cache
         uses: actions/cache/restore@v4
         with:
@@ -194,7 +204,8 @@ jobs:
         shell: bash
         run: |
           pixi run -e packaging nu tools/publish-accounting.nu \
-            --log publish.log --expect ${{ matrix.expect_dirs }}
+            --log publish.log --expect ${{ matrix.expect_dirs }} \
+            --date "$ACPP_NIGHTLY_DATE"
 
       # Collected BY PUBLISHED NAME out of the log, never by globbing the build
       # directory: that directory also holds `_acpp-stage`, whose payload is the

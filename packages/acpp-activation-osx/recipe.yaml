@@ -90,6 +90,11 @@ context:
   # branch it takes, so the dummy keeps the render alive while the real value
   # is still required where it matters. Same idiom as the win recipe's
   # `${{ VCVER if win else "0.0" }}`.
+  # Same reason as the linux port: `c_stdlib` is a per-OUTPUT variant key and
+  # does not reach the clangxx output, where pixi re-renders after the build.
+  # See acpp-activation-linux for the measurement. osx-arm64 native only, so
+  # the provider is macosx_deployment_target by construction.
+  c_stdlib_name: ${{ c_stdlib | default("macosx_deployment_target") }}
   c_stdlib_version_here: ${{ c_stdlib_version if not win else "0.0" }}
   c_stdlib_version_next: ${{ (c_stdlib_version_here | split(".") | first) ~ "." ~ ((c_stdlib_version_here | split(".") | last | int) + 1) }}
 
@@ -159,7 +164,7 @@ outputs:
         # build exports __osx >=<its own version>, so a `>=` spec would resolve
         # to the newest and quietly raise the minimum macOS of everything built
         # with this toolchain.
-        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
+        - ${{ c_stdlib_name }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
         # The activation sets CMAKE_AR, CMAKE_RANLIB, CMAKE_LINKER,
         # CMAKE_STRIP, CMAKE_INSTALL_NAME_TOOL and CMAKE_LIBTOOL to
         # ${CHOST}-<tool>. Those are cctools programs, not clang ones.

@@ -69,6 +69,25 @@ context:
   # branch it takes, so the dummy keeps the render alive while the real value
   # is still required where it matters. Same idiom as the win recipe's
   # `${{ VCVER if win else "0.0" }}`.
+  # ⚠ THE STDLIB PACKAGE NAME, READ THROUGH A DEFAULT, AND THE DEFAULT IS LOAD-BEARING.
+  # `c_stdlib` is a VARIANT key, and pixi assigns it per OUTPUT: it reaches the
+  # output that calls `stdlib('c')` and no other. Measured on this very recipe —
+  # `acpp-clang_linux-64`'s variant is [c_stdlib, c_stdlib_version, llvm_version,
+  # target_platform] while `acpp-clangxx_linux-64`'s is [acpp_clang_linux_64,
+  # c_stdlib_version, llvm_version, target_platform]. `c_stdlib_version` reaches
+  # both; `c_stdlib` does not.
+  #
+  # rattler-build renders both outputs happily, so no local render sees it. pixi
+  # re-renders the recipe AFTER the build, outside rattler's box, and there the
+  # bare name is undefined — `Jinja template error: undefined value`, which is
+  # how run 34121010864 died with the package already built and its content test
+  # already passed.
+  #
+  # `| default(…)` is upstream's own idiom for exactly this (its ctng outputs
+  # write `clang_version | default("0")` for the same reason), and the value is
+  # not a second source of truth: this recipe is native-linux-only, where the C
+  # stdlib provider is sysroot by construction. Same fix applied to the osx port.
+  c_stdlib_name: ${{ c_stdlib | default("sysroot") }}
   c_stdlib_version_here: ${{ c_stdlib_version if not win else "0.0" }}
   c_stdlib_version_next: ${{ (c_stdlib_version_here | split(".") | first) ~ "." ~ ((c_stdlib_version_here | split(".") | last | int) + 1) }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
@@ -139,7 +158,7 @@ outputs:
         # __glibc >=<its own version>. A `>=` spec resolves to the newest, so
         # consumers would compile against 2.39 headers while the run_export
         # below still claimed 2.28 — the package would understate its own floor.
-        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
+        - ${{ c_stdlib_name }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
         # The activation sets AR, RANLIB, NM, STRIP and LD to ${CHOST}-<tool>,
         # which are binutils programs, not clang ones. Without this the
         # exported environment names tools that need not exist in the prefix,

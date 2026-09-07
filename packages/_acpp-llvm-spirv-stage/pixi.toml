@@ -1,0 +1,40 @@
+# _acpp-llvm-spirv-stage — the ONE SPIRV-LLVM-Translator build, consumed as a
+# HOST dependency by the four llvm-spirv slicers. PACKAGE-ONLY manifest; the
+# sole [workspace] is the repo root.
+#
+# THE SECOND STAGE IN THIS WORKSPACE, and it exists for the same reason as the
+# first: four packages have to come out of ONE build, and under this backend a
+# `staging:` output carrying build/host requirements solves against an empty
+# channel list, so "share one build" means stage + slicers.
+#
+# WHY THE FOUR MUST SHARE A BUILD, specifically. acpp-libllvmspirv ships the
+# UNVERSIONED symlink whose target acpp-libllvmspirv21 ships, and
+# acpp-llvm-spirv is a link to the binary acpp-llvm-spirv-21 ships. Split across
+# four independent builds those become artifacts of four different builds wired
+# together by a version pin — plus four compiles of the same source.
+#
+# ⚠ IT INSTALLS INTO <layout_root>/_spirv-stage, NOT _stage. A distinct
+# directory, deliberately: the two stages must never merge if they ever land in
+# one prefix, and a slicer that reads the wrong one would silently ship the
+# wrong project's files.
+#
+# THE LEADING UNDERSCORE IS A WARNING TO USERS, and the publish flag below is
+# the SAME named temporary compromise as _acpp-stage's — see that manifest for
+# the pixi defect it routes around, the fixed 0.0.0, and the exit condition.
+# Nobody should ever install this directly.
+[package]
+name = "_acpp-llvm-spirv-stage"
+version = "0.0.0"
+publish = true
+
+[package.build]
+backend = { name = "pixi-build-rattler-build", version = "*" }
+
+# THE PASSTHROUGH. The translator builds against OUR LLVM: LLVM_DIR points into
+# the main stage's cmake directory. _acpp-stage is a host dependency of THIS
+# BUILD only — it is not a dependency of any of the four shipped packages.
+[package.build-dependencies]
+_acpp-stage = { workspace = true }
+
+[package.build.config]
+extra-input-globs = ["../_shared/licenses/**"]

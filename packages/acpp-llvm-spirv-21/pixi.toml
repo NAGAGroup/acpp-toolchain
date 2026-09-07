@@ -1,16 +1,7 @@
-# acpp-llvm-spirv — the SPIR-V translator under its plain name. This is the one
-# AdaptiveCpp execs at runtime.
+# acpp-llvm-spirv-21 — the version-suffixed SPIR-V translator executable.
 #
 # A SLICER over _acpp-llvm-spirv-stage. PACKAGE-ONLY manifest; the sole
 # [workspace] is the repo root.
-#
-# THIS FILE REPLACES A PRE-METHODOLOGY acpp-llvm-spirv that was a whole SOURCE
-# BUILD of its own, over the vendor/llvm-spirv-feedstock SUBMODULE, shipping one
-# static-linked binary and no library. Three things changed: the methodology
-# has no submodules and lifts in-tree, the four upstream outputs are restored so
-# that a developer who cannot install conda-forge's llvm-spirv alongside our
-# toolchain still gets libLLVMSPIRVLib, and the build moved into
-# _acpp-llvm-spirv-stage because those four have to share it.
 #
 # Lifted from the reference monolith (llvm-feedstocks-monolith@cb9f3be): the
 # run / run_exports / run_constraints / ignore_run_exports in the recipe are
@@ -21,7 +12,7 @@
 # authority for what a dependency IS. [package.run-dependencies] is accepted by
 # this backend and SILENTLY IGNORED.
 [package]
-name = "acpp-llvm-spirv"
+name = "acpp-llvm-spirv-21"
 version = "21.1.8"
 publish = true
 
@@ -30,8 +21,8 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 [package.build-dependencies]
 _acpp-llvm-spirv-stage = { workspace = true }
-acpp-llvm-spirv-21 = { workspace = true }
 acpp-libllvm21 = { workspace = true }
+acpp-libllvmspirv21 = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

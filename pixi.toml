@@ -80,7 +80,6 @@ acpp-lldb = { path = "packages/acpp-lldb" }
 acpp-activation-linux = { path = "packages/acpp-activation-linux" }
 acpp-activation-win = { path = "packages/acpp-activation-win" }
 acpp-activation-osx = { path = "packages/acpp-activation-osx" }
-acpp-llvm-spirv = { path = "packages/acpp-llvm-spirv" }
 
 # ---- lifted from the reference monolith (task 2) ----
 # compiler-rt family. The two `-impl` names are DIRECTORY names, not package
@@ -124,6 +123,17 @@ acpp-llvm-openmp = { path = "packages/acpp-llvm-openmp" }
 # recipes — so both are SCRIPT-form slicers, like llvm-openmp above.
 # `acpp-lldb` reuses the pre-methodology directory, whose contents this replaces.
 acpp-lld = { path = "packages/acpp-lld" }
+
+# llvm-spirv family — the SECOND STAGE and its four slicers. The four outputs
+# must come out of ONE build (a symlink whose target another of them ships, and
+# a rename+link between the two binaries), and under this backend "share one
+# build" means stage + slicers. The stage installs into <layout_root>/_spirv-stage,
+# a DISTINCT directory from _stage; see its manifest.
+_acpp-llvm-spirv-stage = { path = "packages/_acpp-llvm-spirv-stage" }
+acpp-libllvmspirv21 = { path = "packages/acpp-libllvmspirv21" }
+acpp-libllvmspirv = { path = "packages/acpp-libllvmspirv" }
+acpp-llvm-spirv-21 = { path = "packages/acpp-llvm-spirv-21" }
+acpp-llvm-spirv = { path = "packages/acpp-llvm-spirv" }
 
 # ---- Build backends --------------------------------------------------------
 # Backends are specified as "*" in every member manifest, NOT pinned to a

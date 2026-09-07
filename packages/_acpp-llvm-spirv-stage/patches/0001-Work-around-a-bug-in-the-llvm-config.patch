@@ -1,0 +1,26 @@
+From 4e96cd52c7f5c695ecf3da195947874e202df870 Mon Sep 17 00:00:00 2001
+From: Yevhenii Havrylko <yevhenii.havrylko@intel.com>
+Date: Tue, 4 Jun 2024 23:58:29 -0400
+Subject: [PATCH] Work around a bug in the llvm config
+
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3cb4386..0c0c9ae 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -72,6 +72,9 @@ if(LLVM_SPIRV_BUILD_EXTERNAL)
+   set(CMAKE_CXX_STANDARD 17)
+   set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ 
++  # https://github.com/llvm/llvm-project/issues/83802
++  include(GNUInstallDirs)
++
+   if(LLVM_SPIRV_INCLUDE_TESTS)
+     set(LLVM_TEST_COMPONENTS
+       llvm-as
+-- 
+2.40.0.windows.1
+

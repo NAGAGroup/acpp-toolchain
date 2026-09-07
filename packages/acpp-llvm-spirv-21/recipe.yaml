@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvm-spirv-21 — the VERSION-SUFFIXED SPIR-V translator executable, and
+# the one that carries the real bytes. Lifted from the reference monolith's
+# `llvm-spirv-${{ spirv_major }}` output (llvm-spirv-feedstock).
+#
+# SLICING FORM: SCRIPT + one named path, upstream's own. See
+# ../_shared/install_llvm_spirv.nu.
+#
+# ⚠ SCOPE from conda-forge's llvm-spirv-21-21.1.4 artifacts: exactly
+# `bin/llvm-spirv-21` on unix and `Library/bin/llvm-spirv-21.exe` on win.
+#
+# THE SUFFIXED NAME IS THE REAL FILE. Upstream's install script renames the
+# installed `llvm-spirv` to `llvm-spirv-<major>` and puts the plain name back as
+# a link, so acpp-llvm-spirv is the link and this is its target — which is the
+# second reason the four packages must come out of one build.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-llvm-spirv-${{ llvm_major }}
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm_spirv.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-llvm-spirv-stage ==0.0.0
+    # THE EXECUTABLE LINKS libLLVM. Taken as a HOST dep so its weak run_export
+    # computes the exact-build run dependency rather than it being hand-written.
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # UPSTREAM: pin_subpackage("libllvmspirv" ~ spirv_major, exact=True)
+    - if: unix
+      then: acpp-libllvmspirv${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  run:
+    # UPSTREAM: pin_subpackage("libllvmspirv" ~ spirv_major, exact=True). Unix
+    # only, as upstream has it: on win the translator library is static and is
+    # already inside this executable.
+    - if: unix
+      then: acpp-libllvmspirv${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  ignore_run_exports:
+    from_package:
+      - zlib
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - ${{ library_prefix }}bin/llvm-spirv-${{ llvm_major }}${{ ".exe" if win else "" }}
+  - script:
+      # The binary runs, which means it resolved the libLLVM and (on unix) the
+      # translator library it links.
+      - llvm-spirv-${{ llvm_major }} -help
+
+about:
+  homepage: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator
+  license: NCSA
+  license_file: ../_shared/licenses/SPIRV-LLVM-Translator-LICENSE.TXT
+  summary: |
+    The SPIR-V translator executable, version-suffixed. Built from AdaptiveCpp's
+    fork at the revision AdaptiveCpp's own build fetches for LLVM 21; the version
+    is the LLVM this translator belongs to, not a translator release.

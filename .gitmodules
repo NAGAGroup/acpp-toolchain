@@ -7,6 +7,3 @@
 [submodule "vendor/clang-compiler-activation-feedstock"]
 	path = vendor/clang-compiler-activation-feedstock
 	url = https://github.com/NAGAGroup/clang-compiler-activation-feedstock.git
-[submodule "vendor/llvm-spirv-feedstock"]
-	path = vendor/llvm-spirv-feedstock
-	url = https://github.com/NAGAGroup/llvm-spirv-feedstock.git

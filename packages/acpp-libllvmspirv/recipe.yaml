@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libllvmspirv — the UNVERSIONED SPIRV-LLVM-Translator library, its three
+# public headers and its pkg-config file. Lifted from the reference monolith's
+# `libllvmspirv` output (llvm-spirv-feedstock).
+#
+# SLICING FORM: SCRIPT + named paths, upstream's own. See
+# ../_shared/install_llvm_spirv.nu.
+#
+# ⚠ SCOPE from conda-forge's libllvmspirv-21.1.4 artifacts: five paths on every
+# platform — `include/LLVMSPIRVLib/{LLVMSPIRVExtensions.inc,LLVMSPIRVLib.h,
+# LLVMSPIRVOpts.h}`, the unversioned library, and `lib/pkgconfig/LLVMSPIRVLib.pc`.
+#
+# THE UNVERSIONED LIBRARY IS A DIFFERENT THING PER PLATFORM, and that is the
+# whole reason this package and acpp-libllvmspirv21 must come out of ONE build.
+# On unix it is a SYMLINK onto the versioned library the sibling ships — so the
+# link and its target are two packages' halves of one build. On win there is no
+# versioned sibling at all and `LLVMSPIRVLib.lib` is the STATIC library itself,
+# which is why the run dependencies below are unix-only: a static archive
+# carries nothing at runtime.
+#
+# THIS PACKAGE EXISTS BECAUSE WE SHIP AN LLVM TOOLKIT A DEVELOPER CANNOT INSTALL
+# CONDA-FORGE'S ALONGSIDE (the lead's ruling, 2026-09-06). It reverses an
+# earlier collapse to a single tool-only output, which rested on acpp exec'ing
+# llvm-spirv and never linking it — true of acpp, but not of everyone else.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-libllvmspirv
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm_spirv.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-llvm-spirv-stage ==0.0.0
+    # UPSTREAM: pin_subpackage("libllvmspirv" ~ spirv_major, exact=True)
+    - if: unix
+      then: acpp-libllvmspirv${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # No acpp-libllvm21 here, deliberately, and unlike its siblings: on unix
+    # this package's only binary content is a symlink whose TARGET carries the
+    # libLLVM dependency, and on win it is a static archive, which carries none.
+  run:
+    # UPSTREAM: pin_subpackage("libllvmspirv" ~ spirv_major, exact=True)
+    - if: unix
+      then: acpp-libllvmspirv${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  run_constraints:
+    # UPSTREAM: `llvmdev ${{ spirv_llvm_version }}.*`, naming ours.
+    - acpp-llvmdev ==${{ llvm_version }}
+  run_exports:
+    # UPSTREAM: pin_subpackage("libllvmspirv" ~ spirv_major), win excluded.
+    - if: unix
+      then: acpp-libllvmspirv${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  ignore_run_exports:
+    from_package:
+      - zlib
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - ${{ library_prefix }}include/LLVMSPIRVLib/LLVMSPIRVLib.h
+        - ${{ library_prefix }}include/LLVMSPIRVLib/LLVMSPIRVOpts.h
+        - ${{ library_prefix }}include/LLVMSPIRVLib/LLVMSPIRVExtensions.inc
+        - ${{ library_prefix }}lib/pkgconfig/LLVMSPIRVLib.pc
+        - if: linux
+          then: lib/libLLVMSPIRVLib.so
+        - if: osx
+          then: lib/libLLVMSPIRVLib.dylib
+        - if: win
+          then: Library/lib/LLVMSPIRVLib.lib
+
+about:
+  homepage: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator
+  license: NCSA
+  license_file: ../_shared/licenses/SPIRV-LLVM-Translator-LICENSE.TXT
+  summary: |
+    The SPIR-V translator library and its headers. Built from AdaptiveCpp's fork
+    at the revision AdaptiveCpp's own build fetches for LLVM 21; the version is
+    the LLVM this translator belongs to, not a translator release.

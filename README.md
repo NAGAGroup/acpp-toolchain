@@ -33,6 +33,24 @@ The two suites ship the same file paths and are **mutually exclusive** in one en
 | `acpp-runtime-level-zero` | opt-in Level Zero loader (Intel GPUs) | consumer envs |
 | `acpp-runtime-ocl` | opt-in OpenCL ICD loader | consumer envs |
 
+### Not for installation
+
+Two names on the channel are build machinery and are **not** part of the
+interface. Both carry a leading underscore, both are pinned at version `0.0.0`,
+and neither should ever appear in a consumer environment: they install their
+contents under a `_stage` / `_spirv-stage` subdirectory of the prefix, which no
+shipped package reads at runtime.
+
+| Package | What |
+|---|---|
+| `_acpp-stage` | the one LLVM + clang + AdaptiveCpp build, from which every toolchain package copies its own portion |
+| `_acpp-llvm-spirv-stage` | the one SPIR-V translator build, from which the four `llvm-spirv` packages copy theirs |
+
+They are published only because a whole-workspace `pixi publish` refuses a
+source dependency that is not itself published in the same batch. That is a
+named temporary compromise, not the design; see each package's `pixi.toml` for
+the exit condition.
+
 ## Install
 
 ```toml

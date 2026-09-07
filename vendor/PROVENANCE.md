@@ -26,11 +26,17 @@ one-liner.
 | `ctng-compiler-activation-feedstock` | linux activation → `acpp-clang_linux-64`, `acpp-clangxx_linux-64` | `8595ae16ec1f9b72a945965102924c780cee717b` | rattler `recipe.yaml` |
 | `clang-win-activation-feedstock` | win activation incl. clang-cl → `acpp-clang_win-64`, `acpp-clangxx_win-64`, `acpp-clang-cl_win-64` | `19f75a409cb15ec850cd108b5aff4c0c2c260965` | rattler `recipe.yaml` |
 | `clang-compiler-activation-feedstock` | **osx** activation → `acpp-clang_osx-arm64`, `acpp-clangxx_osx-arm64` | `2659b5a3de067087a20234b109d60cb3c7c7b681` | **conda-build `meta.yaml`** |
-| `llvm-spirv-feedstock` | `acpp-llvm-spirv`, taken OUT of the monolith (kills a FetchContent-shaped dep) | `d62a8f68d3506468939b4e27c16357bcf6fa979c` | **conda-build `meta.yaml`** |
 
-Two of the four are still conda-build `meta.yaml`, not rattler `recipe.yaml`.
-`pixi-build-rattler-build` consumes a `recipe.yaml`, so the osx activation and
-llvm-spirv need a format conversion on top of the rename — more work than the
+**RETIRED: `llvm-spirv-feedstock`** (fork point
+`d62a8f68d3506468939b4e27c16357bcf6fa979c`, conda-build `meta.yaml`). It is no
+longer a submodule. The E2E methodology lifts in-tree, so the translator now
+lives at `packages/_acpp-llvm-spirv-stage` plus its four slicers, and the fork
+is reachable through this repository's history and through
+`NAGAGroup/llvm-spirv-feedstock` itself. Archiving, not deleting.
+
+One of the three remaining is still conda-build `meta.yaml`, not rattler
+`recipe.yaml`. `pixi-build-rattler-build` consumes a `recipe.yaml`, so the osx
+activation needs a format conversion on top of the rename — more work than the
 two that are already rattler-format.
 
 **Which feedstock owns which platform is not guessable**, and reading "the

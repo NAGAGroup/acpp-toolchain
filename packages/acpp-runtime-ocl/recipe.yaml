@@ -32,7 +32,10 @@ requirements:
     # subprocess. It rides the backend metapackages rather than acpp-runtime
     # because only the SPIR-V-consuming backends need it — a CUDA-only install
     # JITs to PTX and never execs it.
-    - acpp-llvm-spirv ==${{ version }}
+    # VERSIONED ON LLVM, NOT ON THE DATE. The translator is lifted content
+    # belonging to an LLVM release, not to AdaptiveCpp, so it carries
+    # llvm_version while this metapackage carries the nightly date.
+    - acpp-llvm-spirv ==${{ llvm_version }}
     # The ICD loader ships under a different name per platform: ocl-icd is
     # linux-only, Windows uses the Khronos loader (which reads the registry, so
     # no vendor-dir wiring is needed there). Each platform names itself — no

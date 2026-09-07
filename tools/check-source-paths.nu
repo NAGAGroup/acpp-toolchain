@@ -50,7 +50,41 @@ def main [] {
     }
   }
 
-  print $"check-source-paths: ($checked) path source\(s\) across ($recipes | length) recipes"
+  # ── NO TWO SOURCES MAY TARGET THE SAME DIRECTORY ─────────────────────────
+  # rattler copies each source into the work dir and REFUSES to overwrite what
+  # an earlier one placed: "File already exists". Two sources with the same
+  # target_directory is therefore always fatal, whatever they contain.
+  #
+  # This is the other half of the assertion that missed run 11's defect. The
+  # licence sweep's "append if a source block exists" branch appended the
+  # licence source to recipes that ALREADY had exactly it, and the check I
+  # wrote afterwards asked "does anything name licenses/ WITHOUT a source" —
+  # never "does anything have TWO". Same lesson one sweep later: assert the
+  # change you MADE, on the files you TOUCHED, not the rule you had in mind.
+  mut dupes = []
+  for r in $recipes {
+    # Pair each `- path:` with the `target_directory:` that follows it, which
+    # is how the YAML reads: a target belongs to the source above it.
+    mut pairs = []
+    mut current = ""
+    for l in (open --raw $r | lines) {
+      let p = ($l | parse -r '^\s*-\s*path:\s*(?P<v>\S+)\s*$' | get v.0?)
+      if $p != null { $current = $p; continue }
+      let t = ($l | parse -r '^\s*target_directory:\s*(?P<v>\S+)\s*$' | get v.0?)
+      if $t != null and $current != "" { $pairs = ($pairs | append {path: $current, target: $t}); $current = "" }
+    }
+    let collisions = ($pairs | group-by target | transpose target rows
+      | where {|g| ($g.rows | length) > 1 })
+    for c in $collisions {
+      $dupes = ($dupes | append $"($r | path relative-to (pwd)) has ($c.rows | length) sources targeting '($c.target)': ($c.rows | get path | str join ', ')")
+    }
+  }
+  if not ($dupes | is-empty) {
+    for d in $dupes { print $"DUPLICATE ($d)" }
+    error make {msg: $"check-source-paths: ($dupes | length) recipe\(s\) have two sources targeting one directory — rattler refuses the second with \"File already exists\""}
+  }
+
+  print $"check-source-paths: ($checked) path source\(s\) across ($recipes | length) recipes, no two targeting one directory"
   if $checked < 10 {
     error make {msg: $"check-source-paths: only ($checked) path sources found — this tree is built out of them, so that is a broken scan"}
   }

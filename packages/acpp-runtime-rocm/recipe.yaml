@@ -41,8 +41,6 @@ source:
   # source is the shape `_acpp-stage` has always used.
   - path: ../_shared/licenses
     target_directory: licenses
-  - path: ../_shared/licenses
-    target_directory: licenses
 
 build:
   number: ${{ build_num }}

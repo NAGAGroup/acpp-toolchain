@@ -4,10 +4,23 @@
 # monolith's `llvm-tools` output (llvmdev-feedstock).
 #
 # SLICING FORM: upstream's $PKG_NAME-branching install script, arm 4. On unix
-# this package is a SYMLINK FARM onto acpp-llvm-tools-21 plus `share/*`, minus
-# `llvm-config`; on win, where there are no symlinks, it carries the real
-# `bin/*.exe` and takes no dependency on the suffixed package (which does not
-# exist there).
+# this package is a SYMLINK FARM onto acpp-llvm-tools-21; on win, where there
+# are no symlinks, it carries the real `bin/*.exe` and takes no dependency on
+# the suffixed package (which does not exist there).
+#
+# SCOPE derived from conda-forge's PUBLISHED llvm-tools-21.1.8 artifact, not
+# from upstream's `bin/*` glob, because our union stage removes the per-project
+# scoping that glob relied on: against `_acpp-stage`, `bin/*` also selects
+# clang, clang++, clang-format, clangd, lld, lldb and acpp, every one of which
+# is a different package of ours. Re-read the contract with:
+#   pixi run -e dev nu tools/upstream-paths.nu llvm-tools 21.1.8 <platform>
+# 80 tools on linux-64 and win-64, 79 on osx-arm64. The list lives once in
+# ../_shared/install_llvm.nu and serves this arm and arm 3, which was measured
+# to ship the identical name set.
+#
+# `share/opt-viewer` is shipped HERE on linux-64 only; on osx-arm64 and win-64
+# upstream's llvmdev artifact carries it instead, and that split is followed
+# rather than normalised so each package ships what its twin does.
 
 context:
   llvm_version: "21.1.8"

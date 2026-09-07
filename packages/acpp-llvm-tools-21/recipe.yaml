@@ -3,9 +3,20 @@
 # acpp-llvm-tools-21 — the LLVM tools carrying a version suffix. Lifted from the
 # reference monolith's `llvm-tools-${{ major_ver }}` output (llvmdev-feedstock).
 #
-# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 3 — every
-# `bin/*` copied with a `-<major>` suffix, minus `llvm-config-<major>`, which
-# belongs to llvmdev.
+# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 3 — each
+# tool copied with a `-<major>` suffix.
+#
+# SCOPE derived from conda-forge's PUBLISHED llvm-tools-21-21.1.8 artifact, not
+# from upstream's `bin/*` glob, because our union stage removes the per-project
+# scoping that glob relied on. Against `_acpp-stage` the bare glob mints
+# `bin/clangd-21`, `bin/lld-21`, `bin/lldb-21` and `bin/acpp-21` — names LLVM
+# never had — and `bin/clang-format-21` and `bin/clang-scan-deps-21`, which are
+# acpp-clang-format-21 and acpp-clang-scan-deps. Re-read the contract with:
+#   pixi run -e dev nu tools/upstream-paths.nu llvm-tools-21 21.1.8 <platform>
+# 80 tools on linux-64, 79 on osx-arm64. There is NO win-64 artifact, which is
+# the same fact as this package's `skip: win`. `llvm-config` is not in the set
+# — it belongs to llvmdev — so a positive list never adds it and upstream's
+# compensating `rm` is gone rather than reproduced.
 
 context:
   llvm_version: "21.1.8"

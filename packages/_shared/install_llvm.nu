@@ -27,6 +27,64 @@
 # ACPP_LLVM_MAJOR / ACPP_LLVM_MAJ_MIN. The rc/dev suffix branches upstream
 # carries do not apply: we build tagged releases only.
 
+# THE UNION-STAGE SCOPING DEFECT, and how arms 3/4/5 answer it.
+#
+# Upstream's file slices are scoped by their feedstock's BUILD: llvmdev's
+# build.sh configures ../llvm with no LLVM_ENABLE_PROJECTS, so in ITS prefix
+# `bin/*` means "llvm's tools" and nothing else. `_acpp-stage` is ONE cmake
+# install of llvm + clang + clang-tools-extra + lld + lldb + openmp +
+# compiler-rt + AdaptiveCpp, which removes exactly that scoping: against our
+# stage `bin/*` also selects clang, clang-format, clangd, lld, lldb and acpp,
+# every one of which is a different package of ours.
+#
+# So for these three arms the glob was never the contract — the SHIPPED SET is,
+# and it is published. The lists below are derived from conda-forge's own
+# 21.1.8 artifacts, read with `tools/upstream-paths.nu`, not from upstream's
+# globs. Re-derive with:
+#
+#   pixi run -e dev nu tools/upstream-paths.nu llvm-tools-21 21.1.8 linux-64
+#   pixi run -e dev nu tools/upstream-paths.nu llvm-tools    21.1.8 <platform>
+#   pixi run -e dev nu tools/upstream-paths.nu llvmdev       21.1.8 <platform>
+
+# Arms 3 and 4 ship the SAME 80 tool names — measured: the `-21` artifact's
+# names with the suffix stripped are set-equal to the unsuffixed artifact's
+# names, on linux-64 and on osx-arm64 both, and win-64's llvm-tools set is
+# identical to linux-64's. So one list serves both arms and all platforms.
+#
+# `llvm-config` is deliberately absent: it belongs to llvmdev, and upstream
+# spends an `rm` at the end of each arm to take it back out. A positive list
+# never adds it, so those two `rm` steps are gone rather than reproduced.
+const LLVM_TOOLS = [
+    "bugpoint" "dsymutil" "llc" "lli"
+    "llvm-addr2line" "llvm-ar" "llvm-as" "llvm-bcanalyzer"
+    "llvm-bitcode-strip" "llvm-c-test" "llvm-cat" "llvm-cfi-verify"
+    "llvm-cgdata" "llvm-cov" "llvm-ctxprof-util" "llvm-cvtres"
+    "llvm-cxxdump" "llvm-cxxfilt" "llvm-cxxmap" "llvm-debuginfo-analyzer"
+    "llvm-debuginfod" "llvm-debuginfod-find" "llvm-diff" "llvm-dis"
+    "llvm-dlltool" "llvm-dwarfdump" "llvm-dwarfutil" "llvm-dwp"
+    "llvm-exegesis" "llvm-extract" "llvm-gsymutil" "llvm-ifs"
+    "llvm-install-name-tool" "llvm-jitlink" "llvm-jitlistener" "llvm-lib"
+    "llvm-libtool-darwin" "llvm-link" "llvm-lipo" "llvm-lto"
+    "llvm-lto2" "llvm-mc" "llvm-mca" "llvm-ml"
+    "llvm-ml64" "llvm-modextract" "llvm-mt" "llvm-nm"
+    "llvm-objcopy" "llvm-objdump" "llvm-opt-report" "llvm-otool"
+    "llvm-pdbutil" "llvm-profdata" "llvm-profgen" "llvm-ranlib"
+    "llvm-rc" "llvm-readelf" "llvm-readobj" "llvm-readtapi"
+    "llvm-reduce" "llvm-remarkutil" "llvm-rtdyld" "llvm-sim"
+    "llvm-size" "llvm-split" "llvm-stress" "llvm-strings"
+    "llvm-strip" "llvm-symbolizer" "llvm-tblgen" "llvm-tli-checker"
+    "llvm-undname" "llvm-windres" "llvm-xray" "opt"
+    "reduce-chunk-list" "sancov" "sanstats" "verify-uselistorder"
+]
+
+# osx-arm64 ships 79 of the 80. `llvm-jitlistener` is built only under
+# LLVM_USE_INTEL_JITEVENTS, which our own build-stage.nu sets on linux (line
+# 191) and win (line 353) and not on osx — the same split conda-forge makes,
+# confirmed in its artifacts: libLLVMIntelJITEvents is present in llvmdev on
+# linux-64 and win-64 and absent on osx-arm64. So this is a property of the
+# stage we actually build, not just of upstream's.
+const LLVM_TOOLS_NOT_ON_DARWIN = ["llvm-jitlistener"]
+
 def is-windows [] { $nu.os-info.name == "windows" }
 def is-darwin [] { $nu.os-info.name == "macos" }
 def slashes [] { str replace --all '\' '/' }
@@ -43,7 +101,50 @@ def place [src: string, layout_root: string, stage: string, dest_rel?: string] {
   cp -P $src $dst
 }
 
+# The tool set for THIS platform. A positive list is only a safety improvement
+# if a name it claims but cannot find is an error, so `require` below is what
+# makes it one: silently shipping 79 tools where 80 were promised is the same
+# class of quiet defect as over-selecting.
+def llvm-tools-here [] {
+  if (is-darwin) {
+    $LLVM_TOOLS | where {|t| $t not-in $LLVM_TOOLS_NOT_ON_DARWIN }
+  } else {
+    $LLVM_TOOLS
+  }
+}
+
+# Assert a stage path exists and return it. The message names the package's own
+# vocabulary ("the slice has rotted against the stage") because the cause is
+# always one of two things: the stage's cmake configuration changed, or upstream
+# changed what it ships and our derived list is stale.
+def require [p: string, what: string] {
+  if not ($p | path exists) {
+    error make {msg: $"install_llvm: ($what) is in this package's published file set but is not in the stage at ($p) — the slice has rotted against the stage"}
+  }
+  $p
+}
+
+# Copy a whole directory, file by file, preserving relative depth. Returns the
+# count placed and fails on an empty tree, so a directory that moved upstream is
+# loud rather than a silently thinner package.
+def place-tree [dir: string, layout_root: string, stage: string] {
+  if not ($dir | path exists) {
+    error make {msg: $"install_llvm: ($dir) is in this package's published file set but is not in the stage — the slice has rotted against the stage"}
+  }
+  mut n = 0
+  for f in (glob $"($dir)/**/*") {
+    if (($f | path type) == "dir") { continue }
+    place $f $layout_root $stage
+    $n = $n + 1
+  }
+  if $n == 0 {
+    error make {msg: $"install_llvm: ($dir) exists but is empty — the slice has rotted against the stage"}
+  }
+  $n
+}
+
 def main [] {
+  let exe = (if (is-windows) { ".exe" } else { "" })
   let layout_root = (if (is-windows) {
     $env.LIBRARY_PREFIX? | default ($env.PREFIX | path join "Library")
   } else {
@@ -88,66 +189,108 @@ def main [] {
       }
     }
   } else if $name == $"acpp-llvm-tools-($major)" {
-    # -- upstream arm 3: every bin/* copied WITH a -<major> suffix, except
-    #    llvm-config-<major>, which belongs to llvmdev --
-    for f in (glob $"($stage)/bin/*") {
-      if (($f | path type) == "dir") { continue }
-      let base = ($f | path basename)
-      if $base == $"llvm-config-($major)" { continue }
-      # The stage already carries the versioned clang drivers (the clangdev
-      # install fixups made them); re-suffixing those would produce the
-      # "doubly versioned" binaries upstream's own clang-tools test forbids.
-      if ($base | str ends-with $"-($major)") { continue }
-      place $f $layout_root $stage $"bin/($base)-($major)"
+    # -- upstream arm 3: each tool copied WITH a -<major> suffix.
+    #    Upstream globs `bin/*`; against our union stage that also mints
+    #    bin/clang-21, bin/clangd-21, bin/lld-21, bin/lldb-21, bin/acpp-21 —
+    #    names LLVM never had — and bin/clang-format-21, which IS
+    #    acpp-clang-format-21. Scoped to the published set instead. --
+    for tool in (llvm-tools-here) {
+      place (require $"($stage)/bin/($tool)($exe)" $tool) $layout_root $stage $"bin/($tool)-($major)($exe)"
       $placed = $placed + 1
     }
-    let cfg = ($layout_root | slashes | path join $"bin/llvm-config-($major)")
-    if ($cfg | path exists) { rm -f $cfg }
   } else if $name == "acpp-llvm-tools" {
-    if (is-windows) {
-      # -- upstream arm 4, win: the executables and share/, no symlinks --
-      for f in (glob $"($stage)/bin/*.exe") {
-        place $f $layout_root $stage
-        $placed = $placed + 1
-      }
-      for f in (glob $"($stage)/share/*") {
-        if (($f | path type) == "dir") { continue }
-        place $f $layout_root $stage
-        $placed = $placed + 1
-      }
-      let cfg = ($layout_root | slashes | path join "bin/llvm-config.exe")
-      if ($cfg | path exists) { rm -f $cfg }
-    } else {
-      # -- upstream arm 4, unix: a symlink farm onto llvm-tools-<major>, plus
-      #    share/*, minus llvm-config --
-      for f in (glob $"($stage)/bin/*") {
-        if (($f | path type) == "dir") { continue }
-        let base = ($f | path basename)
-        if ($base | str ends-with $"-($major)") { continue }
-        let dst = ($layout_root | slashes | path join $"bin/($base)")
+    # -- upstream arm 4: the unsuffixed names. On unix a symlink farm onto the
+    #    -<major> binaries; on win real copies, because Windows has no usable
+    #    symlink here. Same scoping fix as arm 3: the bare glob claimed
+    #    bin/clang, bin/clang++, bin/clang-format, bin/clangd, bin/lld and
+    #    bin/acpp, clobbering five of our packages and acpp itself. --
+    for tool in (llvm-tools-here) {
+      if (is-windows) {
+        place (require $"($stage)/bin/($tool)($exe)" $tool) $layout_root $stage
+      } else {
+        require $"($stage)/bin/($tool)" $tool
+        let dst = ($layout_root | slashes | path join $"bin/($tool)")
         mkdir ($dst | path dirname)
-        ^ln -sf ($layout_root | slashes | path join $"bin/($base)-($major)") $dst
-        $placed = $placed + 1
+        # RELATIVE target, where upstream writes ${PREFIX}/bin/... . Both names
+        # live in bin/, so a bare basename resolves, and it keeps working after
+        # the prefix is relocated — an absolute target baked at build time does
+        # not, and conda's prefix rewriting does not touch symlink targets.
+        ^ln -sf $"($tool)-($major)" $dst
       }
-      for f in (glob $"($stage)/share/*") {
-        if (($f | path type) == "dir") { continue }
-        place $f $layout_root $stage
-        $placed = $placed + 1
-      }
-      let cfg = ($layout_root | slashes | path join "bin/llvm-config")
-      if ($cfg | path exists) { rm -f $cfg }
+      $placed = $placed + 1
+    }
+    # share/opt-viewer belongs to llvm-tools on linux-64 and to llvmdev on
+    # osx-arm64 and win-64. That split is upstream's, verified in the 21.1.8
+    # artifacts of both packages on all three platforms, and it is followed
+    # rather than normalised so each of our packages ships what its twin does.
+    # (osx's llvm-tools additionally ships the same five scripts FLAT under
+    # share/; that is an artefact of conda-forge's osx build, not a path any
+    # LLVM install produces, so it is not reproduced.)
+    if (not (is-windows)) and (not (is-darwin)) {
+      $placed = $placed + (place-tree $"($stage)/share/opt-viewer" $layout_root $stage)
     }
   } else {
-    # -- upstream arm 5, llvmdev: install everything else. The host deps above
-    #    have already put their files in the prefix, so those are not new. --
-    for f in (glob $"($stage)/**/*") {
-      if (($f | path type) == "dir") { continue }
-      let rel = ($f | path relative-to $stage)
-      let dst = ($layout_root | slashes | path join $rel)
-      if ($dst | path exists) { continue }
-      mkdir ($dst | path dirname)
-      cp -P $f $dst
+    # -- upstream arm 5, llvmdev: upstream says "everything else" and relies on
+    #    its host deps having already filled the prefix. That subtraction is
+    #    only safe in a single-project prefix: against our union stage the
+    #    remainder also contains clangdev's headers and static libs, lld, lldb,
+    #    compiler-rt and acpp — none of which llvmdev's host deps cover. So the
+    #    slice is a POSITIVE list of what conda-forge's llvmdev artifact ships,
+    #    which is a small, regular set: llvm-config, the llvm/llvm-c headers,
+    #    llvm's cmake package, the LLVM* static libs, the unversioned developer
+    #    symlinks for the shared libs, and libexec/llvm. --
+    let lib = ($stage | path join "lib")
+
+    # bin: llvm-config everywhere; win additionally ships the two DLLs whose
+    # import libraries are below (on unix those are lib/*.so|dylib symlinks).
+    place (require $"($stage)/bin/llvm-config($exe)" "llvm-config") $layout_root $stage
+    $placed = $placed + 1
+    if (is-windows) {
+      for d in ["LTO.dll" "Remarks.dll"] {
+        place (require $"($stage)/bin/($d)" $d) $layout_root $stage
+        $placed = $placed + 1
+      }
+    }
+
+    # headers: exactly the two trees the artifact carries. `include/**` would
+    # additionally take clang/, clang-c/, lld/, lldb/ and openmp's omp.h.
+    for d in ["llvm" "llvm-c"] {
+      $placed = $placed + (place-tree $"($stage)/include/($d)" $layout_root $stage)
+    }
+
+    # cmake: llvm/ only — the stage also holds clang/, lld/ and lldb/.
+    $placed = $placed + (place-tree $"($lib)/cmake/llvm" $layout_root $stage)
+
+    # libexec: llvm/ only.
+    $placed = $placed + (place-tree $"($stage)/libexec/llvm" $layout_root $stage)
+
+    # static libs: every one llvmdev ships is LLVM-prefixed — measured, 208 of
+    # 208 on linux-64 and osx-arm64, 208 of 208 on win-64. A bare lib/*.a would
+    # also take clang's libclang*.a and lld's liblld*.a.
+    let static_pat = (if (is-windows) { $"($lib)/LLVM*.lib" } else { $"($lib)/libLLVM*.a" })
+    let statics = (glob $static_pat | where {|f| ($f | path basename) not-in ["LLVM-C.lib"] })
+    if ($statics | is-empty) {
+      error make {msg: $"install_llvm: no static libraries matched ($static_pat) — the llvmdev slice has rotted against the stage"}
+    }
+    for f in $statics { place $f $layout_root $stage; $placed = $placed + 1 }
+
+    # The unversioned developer aliases. The VERSIONED objects belong to
+    # libllvm<major>/libllvm-c<major> (arms 1 and 2); these are the -dev names a
+    # linker resolves through. LLVM-C is excluded above and here: it is
+    # acpp-libllvm-c21's whole content.
+    let aliases = (if (is-windows) {
+      ["LTO.lib" "Remarks.lib"]
+    } else {
+      [$"libLLVM($ext)" $"libLTO($ext)" $"libRemarks($ext)"]
+    })
+    for a in $aliases {
+      place (require $"($lib)/($a)" $a) $layout_root $stage
       $placed = $placed + 1
+    }
+
+    # share/opt-viewer on the two platforms whose llvmdev artifact carries it.
+    if (is-windows) or (is-darwin) {
+      $placed = $placed + (place-tree $"($stage)/share/opt-viewer" $layout_root $stage)
     }
   }
 

@@ -80,5 +80,8 @@ def main [name: string, version: string, platform: string] {
   print -e $"artifact: ($url)"
   let paths = (paths-of (fetch $url))
   print -e $"($paths | length) paths"
-  $paths | each {|p| print $p }
+  # `each` returns a list, which nushell then RENDERS as a table — appending
+  # three box-drawing lines to stdout that read as file paths to anything
+  # consuming this. `for` returns nothing, so stdout is exactly the path list.
+  for p in $paths { print $p }
 }

@@ -134,11 +134,13 @@ jobs:
       # toolchain we are building. Its post-install `pixi list --locked` then
       # exits 1 with "No packages found in 'default' environment".
       #
-      # `packaging`, NOT `dev`: every step in this file goes through
-      # `pixi run -e packaging`, and the bare `pixi publish` is not
-      # environment-scoped at all. Verified by grepping this workflow rather
-      # than assumed — installing `dev` here would install rattler-build and
-      # git for nobody.
+      # `packaging` AND `dev`, and the second one is new: every gate step runs
+      # through `pixi run -e packaging` and the bare `pixi publish` is not
+      # environment-scoped at all, so `packaging` alone was right until the
+      # upload moved to `rattler-build upload prefix` — which lives in `dev`.
+      # Installing an environment nothing uses is waste; running a step whose
+      # tool is not installed is a red run an hour in, and this file now has a
+      # step that needs it.
       #
       # NO `activate-environment`. Every step names its environment explicitly,
       # and activation would put one environment's tools on PATH for steps that
@@ -146,7 +148,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
-          environments: packaging
+          environments: packaging dev
 
       # ── GATE 1b ───────────────────────────────────────────────────────────
       # Cheap, and it runs before the expensive build for that reason. All
@@ -219,12 +221,58 @@ jobs:
       # "nothing errored", not "the expected packages were produced" — a recipe
       # whose skip expression broke would publish nothing and pass.
       #
-      # The two-segment channel URL is correct at pixi 0.78 (measured).
-      - name: Build and publish the whole workspace
+      # ⚠ BUILD AND UPLOAD ARE TWO STEPS, AND THE SPLIT IS ABOUT AUTH, NOT THE
+      # BUILD GRAPH. It is still ONE whole-workspace build in dependency order —
+      # `--target-dir` is the same publish set as `--to`, minus the upload — so
+      # the ruling that this repo builds as one graph is untouched.
+      #
+      # Run 34122419900 BUILT ALL 46 PACKAGES and then died on the first upload
+      # with `× the server rejected the upload (HTTP 403): Not authorized`.
+      # pixi's docs say `pixi publish --target-channel` does perform the OIDC
+      # trusted-publisher exchange, with exactly the workflow shape this file
+      # has (`id-token: write`, setup-pixi, no stored secrets) — so "pixi cannot
+      # do OIDC" is ruled out at the source, not guessed at.
+      #
+      # What is NOT established is whether pixi's exchange and rattler-build's
+      # present the same thing to prefix.dev. `rattler-build upload prefix` is
+      # the mechanism main uses and it has published this repo to a prefix.dev
+      # channel under OIDC — so using it here makes this run a DISCRIMINATOR
+      # rather than another attempt: if the upload succeeds, the registration is
+      # fine and the difference is in pixi's exchange; if it 403s identically,
+      # the trusted-publisher registration does not cover this workflow file and
+      # that is Jack's to change, with nothing further for us to try.
+      #
+      # No credential is created, rewritten or logged in either case.
+      - name: Build the whole workspace
         shell: bash
         run: |
           set -o pipefail
-          pixi publish --to https://prefix.dev/jackm97/naga-labs-staging 2>&1 | tee publish.log
+          pixi publish --target-dir dist-channel 2>&1 | tee publish.log
+
+      # The upload reads the built artifacts, so the accounting gate below still
+      # runs against the BUILD log — which is what it always parsed.
+      - name: Upload to the staging channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          # globstar AND nullglob: without globstar, bash's `**` is just `*` and
+          # would silently miss a per-platform subdirectory; without nullglob an
+          # unmatched pattern is passed through literally and rattler-build is
+          # handed a filename that does not exist. Both were measured traps in
+          # this workflow's earlier one-liners.
+          shopt -s globstar nullglob
+          pkgs=(dist-channel/**/*.conda)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "no .conda artifacts under dist-channel/ — the build produced nothing to upload"
+            exit 1
+          fi
+          echo "uploading ${#pkgs[@]} artifact(s) to jackm97/naga-labs-staging"
+          # --skip-existing: a re-dispatch at the same build number must not 409
+          # on a package an earlier attempt already uploaded. This is a STAGING
+          # channel; the loud-409 rule that main applies to lane packages is
+          # about published lanes, not about this one.
+          pixi run -e dev rattler-build upload prefix \
+            -c jackm97/naga-labs-staging --skip-existing "${pkgs[@]}" 2>&1 | tee upload.log
 
       - name: "Gate 2: every package directory is accounted for"
         shell: bash

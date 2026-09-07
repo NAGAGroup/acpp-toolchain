@@ -796,6 +796,32 @@ def darwin-link-diagnostics [] {
   for l in ([$shape.stdout $shape.stderr] | str join "" | lines | where {|l| $l =~ 'lto_library|ld:|@\(#\)|PROGRAM:ld|LTO' } | first 8) {
     print $"      ($l | str trim | str substring 0..200)"
   }
+
+  # ⚠ THE ZIPPERED VARIANT, WHICH IS THE ONE DIFFERENCE NOT YET TESTED. Run 30's
+  # probe reproduced every distinguishing flag EXCEPT `-darwin-target-variant`,
+  # and it got past `-lto_library` — conda's ld64 accepted the versioned name.
+  # The failing link has the variant. If the driver changes which linker it
+  # invokes, or how it spells -lto_library, when a Mac Catalyst variant is
+  # requested, this is where it shows: same driver, same flags, one addition.
+  #
+  # `-darwin-target-variant` is upstream's own doing — compiler-rt adds it under
+  # COMPILER_RT_ENABLE_MACCATALYST — so this probe asks whether that upstream
+  # choice is what selects the rejecting linker, WITHOUT changing it.
+  # A spread list, not a wrapped command line: nushell does not continue an
+  # external invocation across lines, and the first version of this probe was a
+  # parse error rather than a probe.
+  let zargs = ["-v" "-dynamiclib" "-nodefaultlibs" "-nostdlib++" "-fapplication-extension"
+               "-target" "arm64-apple-macos11"
+               "-darwin-target-variant" "arm64-apple-ios13.1-macabi"
+               "-o" "/tmp/acpp-probe3.dylib" "-x" "c" "/dev/null"]
+  let zippered = (do { ^$cxx ...$zargs } | complete)
+  print $"  reproduced shape WITH the zippered variant: exit ($zippered.exit_code)"
+  for l in ([$zippered.stdout $zippered.stderr] | str join "" | lines | where {|l| $l =~ 'lto_library|ld:|@\(#\)|PROGRAM:ld|"[^"]*/ld"|LTO' } | first 10) {
+    print $"      ($l | str trim | str substring 0..200)"
+  }
+  print "  (if THIS one fails on -lto_library and the one above does not, the"
+  print "   zippered variant is the trigger and COMPILER_RT_ENABLE_MACCATALYST"
+  print "   is the knob; if both pass, the difference is elsewhere in the link.)"
   print "────────────────────────────────────────────────────────────────────"
 }
 

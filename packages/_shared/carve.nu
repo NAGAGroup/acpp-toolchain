@@ -134,7 +134,7 @@ def main [] {
     if not ($includes | is-empty) {
       error make {msg: $"carve: ACPP_CARVE_NONE is set \(($none_reason)) but ACPP_CARVE names ($includes | length) globs — the recipe says both empty and not empty"}
     }
-    print $"carve: ($env.PKG_NAME? | default "this package") ships nothing on this platform, deliberately: ($none_reason)"
+    print $"carve: ($env.PKG_NAME? | default 'this package') ships nothing on this platform, deliberately: ($none_reason)"
     return
   }
   if ($includes | is-empty) {
@@ -181,5 +181,5 @@ def main [] {
     $total = $total + 1
   }
   let excl_note = (if ($excluded | is-empty) { "" } else { $", excluded ($excluded | length) paths" })
-  print $"carve: copied ($total) files($excl_note) for ($env.PKG_NAME? | default "this package")"
+  print $"carve: copied ($total) files($excl_note) for ($env.PKG_NAME? | default 'this package')"
 }

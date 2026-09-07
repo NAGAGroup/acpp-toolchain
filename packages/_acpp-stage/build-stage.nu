@@ -35,6 +35,11 @@
 
 def is-windows [] { $nu.os-info.name == "windows" }
 def is-darwin [] { $nu.os-info.name == "macos" }
+# NB `is-linux` is defined because `not (is-windows) and not (is-darwin)` is
+# read twice and got it wrong once: a call to an UNDEFINED command parses
+# cleanly in nushell (it becomes an external lookup) and fails only at RUN
+# time — here, an hour into a build.
+def is-linux [] { $nu.os-info.name == "linux" }
 
 def cpu-count [] { $env.CPU_COUNT? | default (sys cpu | length | into string) | into int }
 
@@ -261,9 +266,100 @@ def linux-arm-backend-args [] {
   ]
 }
 
-# Where the conda toolchain lives, for the compiler-rt runtimes sub-build.
-# Returns [] when neither can be located, so the build fails with the real
-# compiler error rather than a confusing empty --sysroot=.
+# Where the conda toolchain lives: the sysroot to compile against and the
+# prefix holding the C++ stdlib headers. Returns "" for either when it cannot
+# be located, so callers fail with the real compiler error rather than a
+# confusing empty --sysroot=.
+#
+# Shared by the compiler-rt runtimes child build and the in-tree clang config
+# file, which is the point — the SSCP bitcode compile broke precisely because
+# those two resolved the stdlib differently.
+def conda-toolchain-paths [] {
+  let sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
+  let bp = ($env.BUILD_PREFIX? | default "")
+  let derived = (if $bp != "" { [$bp (conda-host-triple) "sysroot"] | path join } else { "" })
+  let chosen = (if ($sysroot != "" and ($sysroot | path exists)) {
+    $sysroot
+  } else if ($derived != "" and ($derived | path exists)) {
+    $derived
+  } else {
+    ""
+  })
+  {sysroot: $chosen, gcc_toolchain: $bp}
+}
+
+# THE IN-TREE CLANG'S CONFIG FILE — what makes the compiler that is about to
+# build AdaptiveCpp's SSCP bitcode resolve the C++ stdlib the same way every
+# other compile in this build does.
+#
+# WHY IT IS NEEDED. AdaptiveCpp generates its SSCP libkernel bitcode by
+# invoking the JUST-BUILT clang directly (src/libkernel/sscp/CMakeLists.txt,
+# libkernel_generate_bitcode_library): `${CLANG_EXECUTABLE_PATH} <fixed flags>`,
+# where the platform-specific part handles WIN32 and APPLE and is EMPTY on
+# Linux. It reads no CMAKE_CXX_FLAGS and no CMAKE_SYSROOT, so the compiler runs
+# BARE and cannot find <cstdlib> — run 34101077994, ninja 4151/4512. On `main`
+# this never appeared because acpp was built against an INSTALLED clangdev
+# whose conda config file supplied those flags implicitly. This restores that
+# property at the packaging layer, which is where a packaging defect belongs.
+#
+# THE NAME IS MEASURED, NOT GUESSED. clang searches its OWN directory for
+# `<default-target-triple>-<driver-mode>.cfg`; the driver mode is `clang` even
+# when the binary is invoked as `clang-21`, and argv0 does not enter the name.
+# Verified against a real clang 21.1.8: `Configuration file:
+# .../bin/x86_64-conda-linux-gnu-clang.cfg`. So the triple comes from the built
+# compiler itself via -dumpmachine, and the result is ASSERTED below rather
+# than assumed — a config file clang never reads is exactly the kind of silent
+# no-op this build has been bitten by.
+#
+# LINUX ONLY. The fork's own platform_specific branch already passes
+# `-isysroot` on APPLE, and Windows resolves MSVC through the environment.
+def write-inbuild-clang-cfg [build: string] {
+  let major = $env.ACPP_LLVM_MAJOR
+  let bin = ($build | path join "bin")
+  let clang = ($bin | path join $"clang-($major)")
+  if not ($clang | path exists) {
+    error make {msg: $"in-tree clang not found at ($clang) — the cfg must be written after the clang target is built"}
+  }
+
+  let tc = (conda-toolchain-paths)
+  if $tc.sysroot == "" or $tc.gcc_toolchain == "" {
+    print "WARNING: no conda sysroot/toolchain found; the in-tree clang gets no config file and SSCP bitcode will compile against system headers"
+    return
+  }
+
+  let triple = (^$clang -dumpmachine | str trim)
+  if $triple == "" {
+    error make {msg: "in-tree clang -dumpmachine returned nothing — cannot name its config file"}
+  }
+  let cfg = ($bin | path join $"($triple)-clang.cfg")
+  $"--sysroot=($tc.sysroot)\n--gcc-toolchain=($tc.gcc_toolchain)\n" | save -f $cfg
+  print $"in-tree clang config: wrote ($cfg) for triple ($triple)"
+
+  # ASSERTION 1: clang actually READS it. The whole failure mode here is a file
+  # nobody reads, so this is the guard that must fire if the naming rule ever
+  # changes.
+  let v = (^$clang -v -x c++ -E /dev/null | complete)
+  let read_line = ($v.stderr | lines | where {|l| $l =~ '^Configuration file:' } | first | default "")
+  if not ($read_line | str contains $cfg) {
+    print $v.stderr
+    error make {msg: $"the in-tree clang did not read ($cfg) — it reported '($read_line)'. The config-file naming rule has changed; the SSCP bitcode compile would fail with a missing <cstdlib>"}
+  }
+  print $"in-tree clang config: ($read_line | str trim)"
+
+  # ASSERTION 2: the PROPERTY, not the mechanism — the compiler can now find
+  # the C++ standard library, which is the thing the SSCP compile needs.
+  let probe = (mktemp -t --suffix .cpp)
+  "#include <cstdlib>\nint main() { return 0; }\n" | save -f $probe
+  let c = (^$clang -fsyntax-only -std=c++17 -x c++ $probe | complete)
+  rm -f $probe
+  if $c.exit_code != 0 {
+    print $c.stderr
+    error make {msg: "the in-tree clang still cannot find <cstdlib> with its config file in place — SSCP bitcode generation would fail exactly as in run 34101077994"}
+  }
+  print "in-tree clang config: <cstdlib> resolves"
+}
+
+# The runtimes child build's toolchain arguments.
 def conda-toolchain-args [] {
   let sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
   let bp = ($env.BUILD_PREFIX? | default "")
@@ -827,6 +923,16 @@ def main [] {
     # fatal at -j64). Windows builds the dylib too now, but its inner projects
     # do not link it, so the ordered target stays unix-only.
     ^cmake --build $build --target LLVM --parallel (cpu-count)
+    # THEN clang, and only then the rest — because AdaptiveCpp's SSCP bitcode
+    # steps invoke the just-built clang directly and BARE, so its config file
+    # has to be in place before ninja reaches them. Building the target
+    # explicitly costs nothing (it is work the full build does anyway) and
+    # makes the ordering a stated dependency rather than a race against the
+    # scheduler, which is the same reasoning as the LLVM target above.
+    if (is-linux) {
+      ^cmake --build $build --target clang --parallel (cpu-count)
+      write-inbuild-clang-cfg $build
+    }
     ^cmake --build $build --parallel (cpu-count)
   }
 

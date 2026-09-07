@@ -273,21 +273,10 @@ jobs:
         if: always()
         shell: bash
         run: |
-          echo "=== how many times did the stage build run? (design says once) ==="
-          sort -u "${ACPP_STAGE_RUN_LOG:-/dev/null}" 2>/dev/null | wc -l || true
-          echo "=== openmp + BOLT optional paths that were ABSENT (tighten the lists against these) ==="
-          grep -E "optional paths ABSENT" publish.log || echo "(no optional-path lines in the log)"
-          echo "=== share/gdb: does the stage produce it, and does anyone ship it? ==="
-          find .pixi/bld -type d -name gdb -path '*_stage*' 2>/dev/null | head -5 || true
-          pixi run -e packaging nu -c 'let hits = (glob "dist/**/*.conda" | where {|f| (^bsdtar -xOf $f "info-*.tar.zst" | ^bsdtar -xOf - "info/paths.json" | from json | get paths._path | any {|p| $p =~ "share/gdb"})}); print $"share/gdb is shipped by: ($hits | length) package(s)"' || true
-          echo "=== win: where does AdaptiveCpp put its runtime JSON? ==="
-          find .pixi/bld -type d -name AdaptiveCpp -path '*_stage*' 2>/dev/null | head -10 || true
-          echo "=== llvm-spirv rpath after rattler-build post-processing ==="
-          pixi run -e packaging nu -c 'let f = (glob "dist/**/acpp-llvm-spirv-*.conda" | first); print $f; ^bsdtar -xOf $f "pkg-*.tar.zst" | ^bsdtar -xOf - --include "*/llvm-spirv" | rg -a -o "\$ORIGIN[^\u{0}]*" | print' || true
-          echo "=== the osx deployment floor, from a built artifact ==="
-          pixi run -e packaging nu -c 'for f in (glob "dist/osx-arm64/acpp-runtime-*.conda") { print ($f | path basename); ^bsdtar -xOf $f "info-*.tar.zst" | ^bsdtar -xOf - "info/index.json" | from json | get depends | where {|d| $d =~ "__osx"} | print }' || true
-          echo "=== templated names: did acpp-compiler-rt_<plat> build from the sibling or resolve from a channel? ==="
-          grep -E "acpp-(compiler-rt|clang(xx)?)_(linux-64|win-64|osx-arm64)" publish.log | head -20 || true
+          pixi run -e packaging nu tools/observe-first-build.nu \
+            --dist dist \
+            --publish-log publish.log \
+            --stage-run-log "${ACPP_STAGE_RUN_LOG:-}" || true
 
       - name: Save ccache
         if: always()

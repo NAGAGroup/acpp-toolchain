@@ -313,6 +313,24 @@ def conda-toolchain-paths [] {
 #
 # LINUX ONLY. The fork's own platform_specific branch already passes
 # `-isysroot` on APPLE, and Windows resolves MSVC through the environment.
+# ASSERTION 1, in its own function so it can be EXERCISED — both branches —
+# against a real clang without running a build. It has now fired once on a
+# false positive, and a guard whose true branch has never been shown to fire is
+# untested code.
+#
+# Both sides are canonical: the caller expands the path it wrote, and clang
+# reports a resolved path of its own.
+def assert-clang-reads-cfg [clang: string, cfg: string] {
+  let v = (^$clang -v -x c++ -E /dev/null | complete)
+  let read_line = ($v.stderr | lines | where {|l| $l =~ '^Configuration file:' } | first | default "")
+  let reported = ($read_line | str replace "Configuration file:" "" | str trim)
+  if $reported != $cfg {
+    print $v.stderr
+    error make {msg: $"the in-tree clang did not read ($cfg) — it reported '($reported)'. The config-file naming rule has changed; the SSCP bitcode compile would fail with a missing <cstdlib>"}
+  }
+  print $"in-tree clang config: clang reads ($reported)"
+}
+
 def write-inbuild-clang-cfg [build: string] {
   let major = $env.ACPP_LLVM_MAJOR
   let bin = ($build | path join "bin")
@@ -331,20 +349,18 @@ def write-inbuild-clang-cfg [build: string] {
   if $triple == "" {
     error make {msg: "in-tree clang -dumpmachine returned nothing — cannot name its config file"}
   }
-  let cfg = ($bin | path join $"($triple)-clang.cfg")
+  # ⚠ CANONICALISE AT CONSTRUCTION, NEVER AT COMPARISON. `$build` is
+  # `$SRC_DIR/../build_dir`, so this path carries an unresolved `..` — and
+  # clang, like cmake and ninja, reports the RESOLVED path. Comparing the two
+  # literal strings made this guard fire on a correct build, differing by
+  # exactly `work/../` (run 34103103220). A guard that cannot tell its own
+  # subject apart is worse than no guard: it cost a full runner cycle five
+  # seconds before the step it was protecting.
+  let cfg = ($bin | path join $"($triple)-clang.cfg" | path expand)
   $"--sysroot=($tc.sysroot)\n--gcc-toolchain=($tc.gcc_toolchain)\n" | save -f $cfg
   print $"in-tree clang config: wrote ($cfg) for triple ($triple)"
 
-  # ASSERTION 1: clang actually READS it. The whole failure mode here is a file
-  # nobody reads, so this is the guard that must fire if the naming rule ever
-  # changes.
-  let v = (^$clang -v -x c++ -E /dev/null | complete)
-  let read_line = ($v.stderr | lines | where {|l| $l =~ '^Configuration file:' } | first | default "")
-  if not ($read_line | str contains $cfg) {
-    print $v.stderr
-    error make {msg: $"the in-tree clang did not read ($cfg) — it reported '($read_line)'. The config-file naming rule has changed; the SSCP bitcode compile would fail with a missing <cstdlib>"}
-  }
-  print $"in-tree clang config: ($read_line | str trim)"
+  assert-clang-reads-cfg $clang $cfg
 
   # ASSERTION 2: the PROPERTY, not the mechanism — the compiler can now find
   # the C++ standard library, which is the thing the SSCP compile needs.
@@ -854,9 +870,18 @@ def main [] {
   # bin -> lib. Copying to a different relative depth would break every binary.
   # The same invariance is what lets the clang driver find its resource
   # directory relative to its own executable. Measured, not theory.
-  let prefix = ($layout_root | path join "_stage")
+  # ⚠ BOTH ARE CANONICALISED HERE, AT CONSTRUCTION, AND THAT IS THE CLASS FIX.
+  # `$build` defaults to `$SRC_DIR/../build_dir`, so it carries an unresolved
+  # `..` for the rest of the script — while every TOOL we compare against
+  # (clang's "Configuration file:", cmake, ninja, and the deployment manifest
+  # CMake writes) reports RESOLVED paths. Comparing a constructed path to a
+  # reported one then differs by exactly `work/../` and a correct build fails:
+  # that is what killed run 34103103220, five seconds from the step the guard
+  # was protecting. Expanding at the source fixes every comparison downstream
+  # instead of each one being remembered separately.
+  let prefix = ($layout_root | path join "_stage" | path expand)
   mkdir $prefix
-  let build = ($env.ACPP_BUILD_DIR? | default ($src | path join ".." "build_dir"))
+  let build = ($env.ACPP_BUILD_DIR? | default ($src | path join ".." "build_dir") | path expand)
   mkdir $build
 
   let sep = (if (is-windows) { ";" } else { ":" })

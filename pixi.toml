@@ -319,6 +319,13 @@ description = "Regenerate the per-platform recipes of the templated-name familie
 cmd = "nu tools/gen-platform-packages.nu --check"
 description = "Assert every generated per-platform recipe matches its authored source"
 
+# The in-tree clang config guard, exercised against a REAL clang: the `..`
+# build-path shape that produced a false positive must pass, a config file
+# clang does not read must fire, and the flags must reach cc1.
+[feature.packaging.tasks.test-clang-cfg-guard]
+cmd = "nu tools/tests/exercise-clang-cfg-guard.nu"
+description = "Exercise the in-tree clang config-file guard, both branches"
+
 [feature.packaging.tasks.check-disjointness]
 cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"
 args = [

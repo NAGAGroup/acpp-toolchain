@@ -692,6 +692,29 @@ def windows-args [src: string, libprefix: string, build: string] {
 # and no sysroot machinery: the activation's CMAKE_ARGS carries
 # CMAKE_OSX_SYSROOT and the deployment target.
 # ---------------------------------------------------------------------------
+# The conda sysroot compiler-rt must be pinned to, and the SDK version it must
+# believe it has. Both are printed by the caller, so a run's log says what was
+# chosen rather than leaving it to be inferred from a failure.
+def darwin-sysroot [] {
+  let s = ($env.CONDA_BUILD_SYSROOT? | default "")
+  if $s == "" {
+    error make {msg: "darwin: CONDA_BUILD_SYSROOT is not set — the osx compiler activation should export it, and compiler-rt must be pinned to it rather than probing the SDK with xcrun"}
+  }
+  $s
+}
+
+# MACOSX_SDK_VERSION if anything ever exports it, else the deployment target,
+# which is the value upstream's own variant carries for it. Never a literal:
+# a number written here would silently disagree with the toolchain the moment
+# the deployment target moved.
+def darwin-sdk-version [] {
+  let v = ($env.MACOSX_SDK_VERSION? | default ($env.MACOSX_DEPLOYMENT_TARGET? | default ""))
+  if $v == "" {
+    error make {msg: "darwin: neither MACOSX_SDK_VERSION nor MACOSX_DEPLOYMENT_TARGET is set — compiler-rt's DARWIN_macosx_OVERRIDE_SDK_VERSION cannot be derived, and guessing it would re-enable the zippered SDK path that fails the sanitizer links"}
+  }
+  $v
+}
+
 def darwin-args [src: string, prefix: string] {
   [
     "-DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra;lld;lldb;openmp;compiler-rt"
@@ -722,6 +745,35 @@ def darwin-args [src: string, prefix: string] {
     # compiler-rt/build.sh, osx branch. Single-arch: we ship osx-arm64 only.
     "-DDARWIN_osx_ARCHS=arm64"
     "-DCOMPILER_RT_ENABLE_IOS=Off"
+    # ⚠ PIN COMPILER-RT TO THE CONDA SYSROOT AND THE DEPLOYMENT SDK, which is
+    # the half of upstream's osx branch we had not lifted. Without these,
+    # compiler-rt's darwin cmake PROBES the SDK itself with xcrun — visible in
+    # the failing link as a SECOND `-isysroot`, pointing at Xcode 26's
+    # MacOSX26.5.sdk next to the conda one — and at that SDK version its
+    # zippered / Mac Catalyst variant logic switches on for every dynamic
+    # sanitizer library. That path builds an `-lto_library` argument from the
+    # probed SDK, and ld64 rejects any LTO plugin not literally named
+    # libLTO.dylib. Osx runs 34139827478 and 34141293372 both died there, at
+    # 6,700 of 6,903 steps.
+    #
+    # Upstream never meets it because these two lines stop the probing:
+    # compiler-rt is told the sysroot and the SDK version rather than asked to
+    # discover them.
+    #
+    # THE SDK VERSION IS DERIVED, NEVER HARDCODED. Upstream sets its
+    # MACOSX_SDK_VERSION variant to the SAME value as its deployment target
+    # (11.0 in its variants.yaml, and 11.0 in ours) — the point of the override
+    # is to name a version BELOW the zippered threshold, not to describe the
+    # SDK on disk. So it comes from the environment the activation sets, with
+    # MACOSX_SDK_VERSION preferred if anything ever exports it, and it is an
+    # ERROR rather than a guess when neither is present.
+    $"-DDARWIN_macosx_CACHED_SYSROOT=(darwin-sysroot)"
+    $"-DDARWIN_macosx_OVERRIDE_SDK_VERSION=(darwin-sdk-version)"
+    # "the following option is confusingly named; it means not rebuild libcxx"
+    # — upstream's own comment. The pair is how compiler-rt is pointed at the
+    # right C++ stdlib on darwin; the linux branch sets HAS_LIBSTDCXX instead.
+    "-DCOMPILER_RT_USE_LIBCXX=OFF"
+    "-DCOMPILER_RT_HAS_LIBCXX=1"
     # lldb/build.sh, osx branch
     "-DLLDB_USE_SYSTEM_DEBUGSERVER=ON"
     "-DLLDB_ENABLE_LIBEDIT=ON"
@@ -1240,6 +1292,11 @@ def main [] {
     | append (if (is-windows) {
         (windows-args $src $layout_root $build)
       } else if (is-darwin) {
+        # Say what compiler-rt was pinned to, so the run's own log answers it.
+        # These two decide whether compiler-rt probes the SDK with xcrun and
+        # takes the zippered path that fails the sanitizer links; a run that
+        # fails there should not need a second run to find out what they were.
+        print $"darwin: compiler-rt pinned to sysroot (darwin-sysroot), SDK version (darwin-sdk-version)"
         (darwin-args $src $prefix)
       } else {
         (linux-args $src $prefix $layout_root)

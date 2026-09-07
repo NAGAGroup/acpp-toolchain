@@ -50,6 +50,7 @@ build:
   number: ${{ build_num }}
   string: ${{ llvm_build_tag }}_${{ variant }}_h${{ hash }}_${{ build_num }}
   # GENERATED: the authored skip (win), AND this copy's platform.
+  # Keyed on target_platform: this output is architecture-specific.
   skip: target_platform != "osx-arm64" or (win)
   variant:
     down_prioritize_variant: ${{ 0 if variant == "default" else 1 }}

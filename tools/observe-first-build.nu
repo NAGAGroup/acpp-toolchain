@@ -115,6 +115,37 @@ def main [--dist: string = "dist", --stage-run-log: string = "", --publish-log: 
     }
   }
 
+  # 5b. THE ROCm PREBUILTS AND rattler's PATCHELF FALLBACK. Six libraries from
+  # the TheRock tarball — libamd_comgr, libhiprtc, libhiprtc-builtins,
+  # libhsa-runtime64, librocprofiler-register, libamdhip64 — are third-party
+  # ELF files we do not build, and rattler's in-place rpath rewrite cannot
+  # patch them ("error new value is longer than old value"): its own edit can
+  # only shrink a string in place, and our runtime prefix is longer than the
+  # build placeholder. It then relinks each one with patchelf, which CAN grow
+  # the section, and the archive writes normally (run 34103908648: six errors,
+  # six patchelf relinks, same six names).
+  #
+  # So the error is rattler's FIRST ATTEMPT, not a failure — but the fallback's
+  # RESULT has never been read. These libraries ship in acpp-runtime-rocm, and
+  # a wrong rpath here is a runtime defect on a user's machine, so print what
+  # actually got baked in.
+  header "ROCm prebuilts: the RPATH patchelf left behind"
+  let rocm = (glob $"($dist)/**/acpp-runtime-rocm-*.conda")
+  if ($rocm | is-empty) {
+    print "no acpp-runtime-rocm artifact in this run"
+  } else {
+    let f = ($rocm | first)
+    print $"  from ($f | path basename)"
+    let libs = ((conda-paths $f) | where {|p| $p =~ 'lib/lib(amdhip64|hiprtc|hsa-runtime64|amd_comgr|rocprofiler-register)' })
+    print $"  ($libs | length) ROCm libraries shipped"
+    let out = (do { ^bsdtar -xOf $f "pkg-*.tar.zst" | ^bsdtar -xOf - --include "*/libamdhip64*" | ^rg -a -o '\$ORIGIN[^\u{0}]*' } | complete)
+    if $out.exit_code != 0 or ($out.stdout | str trim) == "" {
+      print "  no $ORIGIN entry read back from libamdhip64 (it may carry an absolute RPATH, or none)"
+    } else {
+      for l in ($out.stdout | lines | uniq) { print $"  libamdhip64 RPATH: ($l)" }
+    }
+  }
+
   # 6. THE osx DEPLOYMENT FLOOR, read from a BUILT artifact rather than from
   # variants.yaml. c_stdlib_version 11.0 is load-bearing: the channel's
   # deployment-target package is at 26.0 and strong-exports __osx >= its own

@@ -66,17 +66,34 @@ def generate [dir: string, plat: string] {
   # 2. THE SKIP. The authored recipe may or may not have one; either way the
   # generated copy must build on ITS platform only, or the N copies collide
   # exactly as N manifests over one recipe did.
+  #
+  # ⚠ THE AXIS DEPENDS ON `noarch:`, AND GETTING IT WRONG DELETES THE PACKAGE.
+  # For a `noarch: generic` output, `target_platform` IS `noarch` — so
+  # `target_platform != "linux-64"` is true on every platform, the only output
+  # is skipped, and pixi fails with "there is no output defined for the package
+  # <name>". That killed run 34103908648 after both stages had built, and it is
+  # reproducible in three lines (measured on a throwaway package, 2026-09-07).
+  # `build_platform` is the right axis there and says the true thing anyway:
+  # these are noarch SELECTOR metapackages named for a platform, produced by
+  # that platform's job.
+  let is_noarch = ($src | lines | any {|l| $l =~ '^\s*noarch:' })
+  let axis = (if $is_noarch { "build_platform" } else { "target_platform" })
+  let why = (if $is_noarch {
+    "build_platform, NOT target_platform: this output is noarch, so target_platform is `noarch` and a target test would skip it everywhere"
+  } else {
+    "target_platform: this output is architecture-specific"
+  })
   let skip_lines = ($src | lines | where {|l| $l =~ '^  skip: ' })
   let with_name = ($src | str replace $name_line $literal)
   let out = (if ($skip_lines | is-empty) {
     # No authored skip: insert one directly after the literal name's build
     # `number:` line, where a skip conventionally sits.
     let anchor = ($with_name | lines | where {|l| $l =~ '^  number: ' } | first)
-    $with_name | str replace $anchor $"($anchor)\n  # GENERATED: this copy exists for ($plat) alone.\n  skip: target_platform != \"($plat)\""
+    $with_name | str replace $anchor $"($anchor)\n  # GENERATED: this copy exists for ($plat) alone, keyed on ($why).\n  skip: ($axis) != \"($plat)\""
   } else {
     let authored = ($skip_lines | first)
     let expr = ($authored | str replace "  skip: " "" | str trim)
-    $with_name | str replace $authored $"  # GENERATED: the authored skip \(($expr)), AND this copy's platform.\n  skip: target_platform != \"($plat)\" or \(($expr))"
+    $with_name | str replace $authored $"  # GENERATED: the authored skip \(($expr)), AND this copy's platform.\n  # Keyed on ($why).\n  skip: ($axis) != \"($plat)\" or \(($expr))"
   })
 
   # 3. The banner goes after the schema line, which every recipe here carries.
@@ -110,8 +127,33 @@ def main [--check] {
   if $n < 4 {
     error make {msg: "gen-platform-packages: fewer than four generated recipes — the family list is broken, and a check over nothing is not a check"}
   }
+  # THE PROPERTY, asserted on what is on disk rather than on what the generator
+  # believes it wrote: a noarch output must never be skipped on target_platform.
+  # That is the defect that cost run 34103908648, and the assertion is what
+  # stops it coming back through a hand edit or a future generator change.
+  mut axis_bad = []
+  for fam in $FAMILIES {
+    for plat in $fam.plats {
+      let out = $"packages/($fam.dir)-($plat)/recipe.yaml"
+      if not ($out | path exists) { continue }
+      let t = (open --raw $out)
+      let noarch = ($t | lines | any {|l| $l =~ '^\s*noarch:' })
+      let skips = ($t | lines | where {|l| $l =~ '^\s*skip:' })
+      if $noarch and ($skips | any {|s| $s =~ 'target_platform' }) {
+        $axis_bad = ($axis_bad | append $"($out) is noarch and skips on target_platform — that skips it EVERYWHERE, and pixi then reports 'there is no output defined for the package'")
+      }
+      if (not $noarch) and ($skips | any {|s| $s =~ 'build_platform' }) {
+        $axis_bad = ($axis_bad | append $"($out) is architecture-specific but skips on build_platform — wrong axis for a cross-capable output")
+      }
+    }
+  }
+  if not ($axis_bad | is-empty) {
+    for b in $axis_bad { print $"FAIL ($b)" }
+    error make {msg: $"gen-platform-packages: ($axis_bad | length) generated recipe\(s\) skip on the wrong platform axis"}
+  }
+
   if $check {
-    print $"gen-platform-packages: checked ($n) generated recipe\(s\)"
+    print $"gen-platform-packages: checked ($n) generated recipe\(s\) — every skip axis matches its noarch-ness"
     if not ($drifted | is-empty) {
       for d in $drifted { print $"DRIFT ($d)" }
       error make {msg: $"gen-platform-packages: ($drifted | length) generated recipe\(s\) do not match their authored source — run the generator"}

@@ -42,8 +42,8 @@ package:
 
 build:
   number: ${{ build_num }}
-  # GENERATED: this copy exists for linux-64 alone.
-  skip: target_platform != "linux-64"
+  # GENERATED: this copy exists for linux-64 alone, keyed on build_platform, NOT target_platform: this output is noarch, so target_platform is `noarch` and a target test would skip it everywhere.
+  skip: build_platform != "linux-64"
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   noarch: generic
   files: []

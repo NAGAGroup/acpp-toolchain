@@ -82,10 +82,10 @@ requirements:
     - if: linux
       then: libstdcxx-devel_${{ target_platform }}
     - if: osx
-      # "only minor-pin to avoid issues when building new libcxx versions"
-      # UPSTREAM: `libcxx-devel ${{ maj_min }}.*`; see the note in
-      # ../acpp-clangxx-impl/recipe.yaml on the range form and on the name.
-      then: libcxx-devel >=${{ llvm_maj_min }},<21.2.0a0
+      # UPSTREAM: `libcxx-devel ${{ maj_min }}.*`, a minor pin, "to avoid issues
+      # when building new libcxx versions". Ours, in the exact same-build form —
+      # see the note in ../acpp-clangxx-impl/recipe.yaml.
+      then: acpp-libcxx-devel[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
 
 tests:
   - package_contents:

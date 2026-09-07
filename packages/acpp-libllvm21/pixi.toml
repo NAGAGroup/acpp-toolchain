@@ -19,6 +19,7 @@ backend = { name = "pixi-build-rattler-build", version = "*" }
 
 [package.build-dependencies]
 _acpp-stage = { workspace = true }
+acpp-libcxx = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

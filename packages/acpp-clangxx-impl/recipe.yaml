@@ -55,18 +55,17 @@ requirements:
     - acpp-clang-scan-deps[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - if: linux
       then: libstdcxx-devel_${{ target_platform }}
-      # "only minor-pin to avoid issues when building new libcxx versions"
-      # UPSTREAM: `libcxx-devel ${{ maj_min }}.*` — the fleet no-wildcards rule
-      # turns the trailing `.*` into the range it means. `==21.1` would be a
-      # DIFFERENT spec and would match only libcxx-devel 21.1.0.
+      # UPSTREAM: `libcxx-devel ${{ maj_min }}.*`, a minor pin, "to avoid issues
+      # when building new libcxx versions".
       #
-      # ⚠ NAMED `libcxx-devel`, conda-forge's package, not `acpp-libcxx-devel`.
-      # That follows the six clangdev packages already committed, which all name
-      # conda-forge's `libcxx`. The libcxx family is in our own build (group 5,
-      # osx-only), so this whole workspace has one open question — whether the
-      # osx C++ runtime is ours or conda-forge's — and it must be settled in one
-      # place rather than diverged here.
-      else: libcxx-devel >=${{ llvm_maj_min }},<21.2.0a0
+      # OURS, NOT CONDA-FORGE'S: we build libc++ on osx, so naming the
+      # conda-forge package would put a SECOND C++ runtime in the prefix beside
+      # the one this toolchain links. Upstream's minor pin becomes the exact
+      # same-build form because our libc++ and this package come out of ONE
+      # stage build. `_acpp-stage` is the sole exemption workspace-wide — it is
+      # BUILT BY conda-forge's clang and is what produces ours, so it cannot
+      # depend on its own output.
+      else: acpp-libcxx-devel[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
 
 tests:
   - package_contents:

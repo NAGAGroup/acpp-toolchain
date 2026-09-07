@@ -26,6 +26,7 @@ acpp-libclang13 = { workspace = true }
 acpp-llvm = { workspace = true }
 acpp-clang-format = { workspace = true }
 acpp-clang-scan-deps = { workspace = true }
+acpp-libcxx = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

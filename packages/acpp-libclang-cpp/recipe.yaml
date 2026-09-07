@@ -58,7 +58,7 @@ requirements:
       then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ llvm_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_exports:
     # UPSTREAM: pin_subpackage("libclang-cpp" ~ maj_min, upper_bound="x.x")
     - if: unix

@@ -50,7 +50,7 @@ requirements:
     # UPSTREAM: `libcxx ==${{ cxx_compiler_version }}`, which is the conda-build
     # BARE form meaning the range 21.*; see the note in ../acpp-libclang.
     - if: osx
-      then: libcxx >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - acpp-llvmdev ==${{ llvm_version }}
     - acpp-llvm ==${{ llvm_version }}
     # "these they are present in the host env anyway as run-deps of llvm
@@ -63,7 +63,7 @@ requirements:
     # libcxx the host resolved, which for us is the same number the host spec
     # above floors at.
     - if: osx
-      then: libcxx >=${{ cxx_compiler_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_constraints:
     # Upstream names `llvm`; ours names ours, because nothing ships under a
     # conda-forge name and a constraint on a name our channel provides would be

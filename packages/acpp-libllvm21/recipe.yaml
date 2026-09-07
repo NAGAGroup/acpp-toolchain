@@ -56,11 +56,11 @@ requirements:
     # UPSTREAM (conda-build meta.yaml): `libcxx {{ cxx_compiler_version }}` — a
     # BARE version, read as the range `21.*`. `==21` matches nothing.
     - if: osx
-      then: libcxx >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run:
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ cxx_compiler_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_exports:
     # UPSTREAM: `pin_subpackage("libllvm" ~ major_ver, upper_bound="x.x")`,
     # absent on win. TIGHTENED to the exact same-build form: there is no

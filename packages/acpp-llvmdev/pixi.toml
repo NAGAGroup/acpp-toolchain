@@ -22,6 +22,7 @@ _acpp-stage = { workspace = true }
 acpp-libllvm21 = { workspace = true }
 acpp-libllvm-c21 = { workspace = true }
 acpp-llvm-tools = { workspace = true }
+acpp-libcxx = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

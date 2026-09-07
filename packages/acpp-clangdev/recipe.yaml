@@ -85,7 +85,7 @@ requirements:
     - acpp-llvmdev ==${{ llvm_version }}
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ llvm_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
 
 tests:
   - package_contents:

@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libcxx — the LLVM C++ standard library. Lifted from the reference
+# monolith's `libcxx` output (libcxx-feedstock).
+#
+# OSX ONLY, and that is Jack's ruling rather than an omission: on macOS libc++
+# IS the native platform C++ library, and we build it. linux uses libstdcxx and
+# win uses the MSVC runtime, so on those platforms this family does not exist.
+# Upstream's own skip is `win or ppc64le or aarch64`; ours is the complement of
+# the one platform we ship it on.
+#
+# SLICING FORM: GLOB LIST, upstream's own. Every glob is scoped by the
+# `libc++` NAME rather than by a shared directory, so none of them can reach
+# another project's output in our union stage — the same property that let
+# acpp-clangdev keep upstream's globs unchanged.
+#
+# Cross-checked against conda-forge's libcxx-21.1.8 osx-arm64 artifact, which
+# ships exactly five paths: lib/libc++.dylib, lib/libc++.1.dylib,
+# lib/libc++.1.0.dylib, lib/libc++.a and lib/libc++experimental.a. NOTE THE
+# SOVERSION IS libc++'s OWN, `1`, and has nothing to do with the LLVM version —
+# which is why nothing below derives a library name from llvm_major.
+#
+# THE STATIC ARCHIVES ARE DELIBERATE, upstream's comment: "static libs for
+# cross-compilation, due to lack of host-exports".
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-libcxx
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  # Upstream's build string carries a `debug_` prefix off its `hardening`
+  # variant, and its run_exports carry `libcxx * debug*` so a hardened build
+  # cannot be installed without an extra label. We build one row, release, so
+  # the axis and both of the things that hang off it are gone rather than
+  # collapsed to an always-empty string.
+  skip: not osx
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        lib/libc++.dylib;
+        lib/libc++.*.dylib;
+        lib/libc++.a;
+        lib/libc++experimental.*
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # Upstream takes libcxxabi in host and run on LINUX. WE SHIP NO libcxxabi
+    # AT ALL: upstream skips that output on everything but linux, and its own
+    # test asserts that lib/libc++abi.dylib is ABSENT on osx — shipping it
+    # "breaks exception passing", in upstream's words. Our stage builds
+    # libcxxabi as an LLVM runtime because libc++ needs it at build time; it is
+    # not packaged.
+  ignore_run_exports:
+    from_package:
+      # "we want to ignore libstdcxx, but not libgcc; the latter also comes in
+      # through compiler('c'), and conda keeps that despite ignoring the cxx
+      # run-exports"
+      - ${{ compiler('cxx') }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          # presence of shared & static libraries
+          - lib/libc++.dylib
+          - lib/libc++.a
+          - lib/libc++experimental.a
+        not_exists:
+          # the headers are acpp-libcxx-headers'
+          - include/c++/v1/iterator
+          # libcxxabi is not shipped on osx, deliberately — see above
+          - lib/libc++abi.dylib
+
+about:
+  homepage: https://libcxx.llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: LLVM C++ standard library

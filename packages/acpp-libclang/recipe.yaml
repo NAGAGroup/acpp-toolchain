@@ -56,13 +56,13 @@ requirements:
     # would be a different spec and matches NOTHING: every libcxx-devel build is
     # versioned major.minor.patch.
     - if: osx
-      then: libcxx-devel >=${{ cxx_compiler_version }},<${{ (cxx_compiler_version | int) + 1 }}.0a0
+      then: acpp-libcxx-devel[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run:
     # UPSTREAM: pin_subpackage("libclang" ~ libclang_soversion, exact=True)
     - acpp-libclang${{ libclang_soversion }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ llvm_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_exports:
     # "note that the name (e.g. libclang13) does not necessarily match the
     # version lower bound (e.g. >=14.0.0)"

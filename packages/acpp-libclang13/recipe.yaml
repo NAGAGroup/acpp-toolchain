@@ -60,7 +60,7 @@ requirements:
       then: acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ llvm_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
   run_exports:
     # "note that the name (e.g. libclang13) does not necessarily match the
     # version lower bound (e.g. >=14.0.0)"

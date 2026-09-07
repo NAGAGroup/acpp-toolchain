@@ -316,6 +316,15 @@ requirements:
     # "needs aarch/ppc/arm (re)build of conda-forge/backtrace-feedstock"
     - if: unix and x86_64
       then: backtrace
+    # ⚠ THE TWO ENTRIES BELOW ARE CONDA-FORGE'S libcxx, DELIBERATELY, AND THIS
+    # IS THE ONLY PLACE IN THE WORKSPACE THAT IS TRUE. Every other package names
+    # `acpp-libcxx` / `acpp-libcxx-devel`, because we build libc++ on osx and a
+    # dep on the conda-forge name would put a second C++ runtime in the prefix.
+    # THIS build is the exception: it is compiled BY conda-forge's clang and it
+    # is what PRODUCES our libc++, so it cannot depend on its own output. Do not
+    # "fix" these to acpp-* — that is a circular dependency, not a consistency
+    # improvement.
+    #
     # UPSTREAM (llvmdev is still a conda-build meta.yaml): `libcxx
     # {{ cxx_compiler_version }}` — a BARE version, which conda-build reads as
     # the range `21.*`. `==21` would be a different spec and matches NOTHING:

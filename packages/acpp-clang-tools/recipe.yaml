@@ -218,7 +218,7 @@ requirements:
         - acpp-libclang-cpp${{ llvm_maj_min }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     # "we need to do this manually because clang_bootstrap has no run-export"
     - if: osx
-      then: libcxx >=${{ llvm_version }}
+      then: acpp-libcxx[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
     - if: win
       then: ucrt
   run_constraints:

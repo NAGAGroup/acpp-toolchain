@@ -28,6 +28,7 @@ _acpp-stage = { workspace = true }
 acpp-clang-21 = { workspace = true }
 acpp-clang-impl = { workspace = true }
 acpp-clang-scan-deps = { workspace = true }
+acpp-libcxx-devel = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

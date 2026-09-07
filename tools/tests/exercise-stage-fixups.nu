@@ -224,7 +224,14 @@ def run-fixups [root: string, layout_root: string, os: string] {
       # the harness needs, since what is under test is our logic around it.
       "@echo off\r\nrem fixture stub for create-forwarder-dll\r\necho %1 %2 | findstr /C:\"/\" >nul && (echo STUB: forward slash in a path handed to create-forwarder-dll: %1 %2 & exit /b 3)\r\ntype nul > %2\r\n" | save -f $"($stub_dir)/create-forwarder-dll.bat"
     } else {
-      "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for,\n# and REFUSES a forward-slash path the way cmd.exe's `copy` effectively does.\ncase \"$1$2\" in\n  */*) echo \"STUB: forward slash in a path handed to create-forwarder-dll: $1 $2\" >&2; exit 3 ;;\nesac\n: > \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
+      # ⚠ IT DOES NOT CREATE THE FILE ON A NON-WINDOWS HOST. When this harness
+      # forces the win branch on linux, `native-path` correctly produces a
+      # BACKSLASH path — which linux treats as a literal FILENAME, so a stub
+      # that created it dropped `\tmp\stage-fixups-windows\...\libclang.dll`
+      # into the repository root. (It reached a commit once; that is how this
+      # comment came to exist.) The assertion is the point of the stub; the file
+      # is not, and nothing downstream checks for it.
+      "#!/bin/sh\n# fixture stub for create-forwarder-dll: REFUSES a forward-slash path the way\n# cmd.exe's `copy` effectively does, and creates nothing — the destination is a\n# Windows-shaped path that means nothing on this filesystem.\ncase \"$1$2\" in\n  */*) echo \"STUB: forward slash in a path handed to create-forwarder-dll: $1 $2\" >&2; exit 3 ;;\nesac\nexit 0\n" | save -f $"($stub_dir)/create-forwarder-dll"
       ^chmod +x $"($stub_dir)/create-forwarder-dll"
     }
   }

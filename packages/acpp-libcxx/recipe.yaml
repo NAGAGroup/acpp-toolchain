@@ -65,9 +65,30 @@ build:
 
 requirements:
   build:
+    # ⚠ NO `compiler('cxx')` HERE, AND THIS PACKAGE IS THE REASON THE RULE
+    # DIFFERS FROM UPSTREAM'S. Upstream COMPILES libc++ and therefore needs the
+    # C++ compiler; it then declares `ignore_run_exports: [compiler('cxx')]`
+    # because that compiler's strong export is the very library this package
+    # IS. We carve libc++ out of a stage that was built elsewhere, so the
+    # compiler is a lift with nothing to compile.
+    #
+    # AND ignore_run_exports IS NOT ENOUGH ON ITS OWN: it filters RUN
+    # dependencies, while a build dep's STRONG run_export also enters the HOST
+    # environment. On osx that put conda-forge's libcxx 23.1.0 into this
+    # package's host prefix, where its files ALREADY OCCUPY the five paths the
+    # carve writes — so the carve copied 5 files over pre-existing ones and
+    # rattler, which packages only what is NEW relative to the host snapshot,
+    # produced an EMPTY package whose own content test then failed (osx run
+    # 34148191467). The second consequence was worse and would have shipped: our
+    # libc++ would have carried a run dep on conda-forge's, two libc++ in one
+    # prefix.
+    #
+    # `stdlib('c')` and `compiler('c')` STAY — upstream keeps the C compiler's
+    # exports deliberately ("we want to ignore libstdcxx, but not libgcc; the
+    # latter also comes in through compiler('c')"), and those are the linux
+    # runtime floors this package's shipped binaries genuinely need.
     - ${{ stdlib('c') }}
     - ${{ compiler('c') }}
-    - ${{ compiler('cxx') }}
     - nushell
   host:
     - _acpp-stage ==0.0.0
@@ -77,12 +98,11 @@ requirements:
     # "breaks exception passing", in upstream's words. Our stage builds
     # libcxxabi as an LLVM runtime because libc++ needs it at build time; it is
     # not packaged.
-  ignore_run_exports:
-    from_package:
-      # "we want to ignore libstdcxx, but not libgcc; the latter also comes in
-      # through compiler('c'), and conda keeps that despite ignoring the cxx
-      # run-exports"
-      - ${{ compiler('cxx') }}
+  # NO ignore_run_exports BLOCK. Upstream's exists to suppress
+  # `compiler('cxx')`'s exports — and we do not have that compiler in `build:`
+  # at all (see the note there), so there is nothing left to ignore. Keeping the
+  # block would name a package this recipe does not use, which reads as
+  # protection while providing none.
 
 tests:
   - package_contents:

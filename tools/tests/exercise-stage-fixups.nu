@@ -349,6 +349,44 @@ def main [--os: string = ""] {
     $results = ($results | append false)
   }
 
+  # ⚠ THE DARWIN BUILD-TREE libLTO ALIAS, which is a BUILD-phase step rather
+  # than a post-install fixup and so is not in the sequence above — but it has
+  # the same idempotence requirement (a cached run re-runs it) and the same
+  # cost of being wrong (compiler-rt's darwin dynamic libraries fail to link
+  # with "-lto_library library filename must be 'libLTO.dylib'", 6,706 steps
+  # into osx run 34139827478).
+  if $os == "macos" {
+    let bt = $"($root)-buildtree"
+    rm -rf $bt
+    mkdir $"($bt)/lib"
+    "fake lto\n" | save -f $"($bt)/lib/libLTO.21.1.dylib"
+    let one = (^nu -c $"$env.ACPP_LLVM_MAJOR = '21'; $env.ACPP_LLVM_MAJ_MIN = '21.1'; source ($STAGE); link-build-tree-lto '($bt)'" | complete)
+    let two = (^nu -c $"$env.ACPP_LLVM_MAJOR = '21'; $env.ACPP_LLVM_MAJ_MIN = '21.1'; source ($STAGE); link-build-tree-lto '($bt)'" | complete)
+    let link = $"($bt)/lib/clang/21/lib/libLTO.dylib"
+    let target = (if (($link | path type) == "symlink") { (ls -l $link | get 0.target) } else { "" })
+    if $one.exit_code == 0 and $two.exit_code == 0 and $target == "../../../libLTO.21.1.dylib" and ($link | path exists) {
+      print "PASS: the darwin build-tree libLTO alias is relative, resolves, and is idempotent"
+      $results = ($results | append true)
+    } else {
+      print $"FAIL: build-tree libLTO — passes ($one.exit_code)/($two.exit_code), target '($target)', resolves ($link | path exists)"
+      $results = ($results | append false)
+    }
+    # And it must REFUSE to leave a dangling link when the LTO target produced
+    # nothing, which is the failure mode it exists to make legible.
+    let empty = $"($root)-buildtree-empty"
+    rm -rf $empty
+    mkdir $"($empty)/lib"
+    let bad = (^nu -c $"$env.ACPP_LLVM_MAJOR = '21'; $env.ACPP_LLVM_MAJ_MIN = '21.1'; source ($STAGE); link-build-tree-lto '($empty)'" | complete)
+    if $bad.exit_code != 0 {
+      print "PASS: a missing versioned libLTO is an error, not a dangling link"
+      $results = ($results | append true)
+    } else {
+      print "FAIL: build-tree libLTO accepted a missing versioned library"
+      $results = ($results | append false)
+    }
+    rm -rf $bt $empty
+  }
+
   # ⚠ THE HELPER'S CONTRACT, TESTED WITHOUT A WINDOWS FILESYSTEM. The assertion
   # above cannot fire on linux — a linux root is already canonical, so a raw one
   # passes — which would leave the drive-letter half detectable only on a

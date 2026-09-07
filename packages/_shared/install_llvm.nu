@@ -226,6 +226,23 @@ def main [] {
       }
     }
   } else if ($name | str starts-with "acpp-libllvm") {
+    # ⚠ DELIBERATELY EMPTY ON WINDOWS, matching upstream exactly. There is no
+    # C++ LLVM DLL on Windows — every LLVM tool links statically there, so
+    # llvmdev's bld.bat builds no dylib and conda-forge's own
+    # `libllvm21` for win-64 EXISTS AND SHIPS ZERO PATHS (measured:
+    # `nu tools/upstream-paths.nu libllvm21 21.1.8 win-64`). The C API DLL is a
+    # separate package, acpp-libllvm-c21, and it is not empty.
+    #
+    # The name is still built so that a consumer writing it gets the same
+    # answer on every platform, which is upstream's shape. Without this branch
+    # the arm places nothing and the rot guard below fires — correctly, by its
+    # own rule, on the one package for which empty is the right answer. Stated
+    # as a REASON rather than a silent skip, the way carve.nu's
+    # ACPP_CARVE_NONE is.
+    if (is-windows) {
+      print $"install_llvm: ($name) ships nothing on win — upstream's libllvm<major> for win-64 has zero paths; the C API DLL is acpp-libllvm-c<major>"
+      return
+    }
     # -- upstream arm 2: LLVM's own shared libraries --
     #
     # ⚠ NAMED, NOT WILDCARDED, AND THAT IS THE WHOLE POINT. Upstream writes

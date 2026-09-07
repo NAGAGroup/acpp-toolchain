@@ -299,7 +299,13 @@ def linux-args [src: string, prefix: string, deps: string] {
     # llvmdev/build.sh: linux-64 only.
     "-DLLVM_USE_INTEL_JITEVENTS=ON"
     # One dylib every tool links against — the seam the whole package
-    # partition rests on. llvmdev/build.sh sets both.
+    # partition rests on. llvmdev/build.sh sets both, and the artifact agrees:
+    # conda-forge's libllvm21 ships libLLVM.so.21.1 on linux and
+    # libLLVM.21.1.dylib on osx.
+    #
+    # WINDOWS DOES NOT GET THIS, and the asymmetry is upstream's: bld.bat sets
+    # neither, the win libllvm21 artifact ships ZERO paths, and every LLVM tool
+    # there links statically. See the win block for what enforcing it cost.
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_DYLIB_SYMBOL_VERSIONING=ON"
@@ -562,11 +568,33 @@ def windows-args [src: string, libprefix: string, build: string] {
     # 31351719706), and upstream AdaptiveCpp's own windows-acppllvm.yml uses
     # the projects path too.
     "-DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra;lld;lldb;openmp;compiler-rt"
-    # FLIPPED ON for this rebuild (it was OFF): shared libLLVM means far
-    # fewer and faster links on the slowest leg. This is a BUILD SPEED
-    # decision, not a plugin-support one.
-    "-DLLVM_BUILD_LLVM_DYLIB=ON"
-    "-DLLVM_LINK_LLVM_DYLIB=ON"
+    # ⚠ NO C++ LLVM DYLIB ON WINDOWS, and the asymmetry with unix is UPSTREAM'S,
+    # not ours. llvmdev's build.sh sets `LLVM_BUILD_LLVM_DYLIB=yes` and
+    # `LLVM_LINK_LLVM_DYLIB=yes` — so linux and osx keep them — while its
+    # bld.bat sets neither and passes only the C dylib below. On Windows every
+    # LLVM tool links statically.
+    #
+    # THE ARTIFACT SIDE AGREES, checked before changing anything:
+    # conda-forge's `libllvm21` for win-64 EXISTS AND SHIPS ZERO PATHS, while
+    # `libllvm-c21` ships exactly `Library/bin/LLVM-C.dll` and its import
+    # library. There is no C++ LLVM DLL on Windows for anyone to carve, so
+    # DYLIB=ON was building something nothing ships.
+    #
+    # It was also breaking the build. This rebuild had flipped both ON for
+    # build speed on the slowest leg; with tests included, `bugpoint` links
+    # against the DLL and every LLVMPasses symbol it needs — PassBuilder,
+    # PipelineTuningOptions, the register*Analyses family — is absent from the
+    # C++ DLL's export set. Win run 34138615965 compiled 7,200 of 7,201 steps
+    # and failed on that one link. `main`'s `LLVM_TOOL_BUGPOINT_BUILD=OFF` sat
+    # beside these two lines with no comment: it was the workaround for exactly
+    # this, and turning tests ON made it impossible to keep. Two of our own
+    # choices interacting, both now resolved by matching upstream.
+    #
+    # Static tool links cost build time on win. Accepted.
+    #
+    # AdaptiveCpp is unaffected: its CMake has no LLVM dylib requirement at all
+    # (its only link-mode reference is a conditional on CLANG_LINK_CLANG_DYLIB),
+    # so its in-tree targets follow whatever the tree is configured for.
     # llvmdev/bld.bat: the C dylib is a win-only upstream output
     # (libllvm-c<major>), which the ratified subset ships on win-64.
     "-DLLVM_BUILD_LLVM_C_DYLIB=ON"
@@ -1039,6 +1067,28 @@ def openmp-header-fixups [prefix: string, layout_root: string] {
   }
 }
 
+# The darwin build tree's `libLTO.dylib` alias — see the call site for why it
+# must exist before compiler-rt links.
+#
+# RELATIVE TARGET, and idempotent: `ln -sf` replaces an existing link, and the
+# relative form is what survives being moved (rattler normalises absolute
+# in-prefix links to relative anyway, measured). The versioned file is required
+# rather than assumed, because if the LTO target did not produce it the symlink
+# would be dangling and clang would fail later with a worse message.
+def link-build-tree-lto [build: string] {
+  let major = $env.ACPP_LLVM_MAJOR
+  let maj_min = $env.ACPP_LLVM_MAJ_MIN
+  let libdir = ($build | path join "lib")
+  let versioned = ($libdir | path join $"libLTO.($maj_min).dylib")
+  if not ($versioned | path exists) {
+    error make {msg: $"build-tree libLTO: ($versioned) does not exist after building the LTO target — compiler-rt's darwin dynamic libraries will fail to link with \"-lto_library library filename must be 'libLTO.dylib'\""}
+  }
+  let res_lib = ($libdir | path join "clang" $major "lib")
+  mkdir $res_lib
+  ^ln -sf $"../../../libLTO.($maj_min).dylib" ($res_lib | path join "libLTO.dylib")
+  print $"build-tree libLTO: ($res_lib)/libLTO.dylib -> ../../../libLTO.($maj_min).dylib"
+}
+
 def openmp-install-fixups [prefix: string] {
   let libdir = ($prefix | path join "lib")
   for f in (glob-native $"($libdir)/libgomp*") { rm -f $f }
@@ -1203,9 +1253,26 @@ def main [] {
     # libLLVM must exist BEFORE the inner ExternalProjects link against it:
     # their inner cmake links the file directly, so the outer ninja has no rule
     # for it and high job counts race ahead of the link (invisible at -j16,
-    # fatal at -j64). Windows builds the dylib too now, but its inner projects
-    # do not link it, so the ordered target stays unix-only.
+    # fatal at -j64). Windows does not build a C++ LLVM dylib at all (see the
+    # win block), so the ordered target is unix-only for that reason too.
     ^cmake --build $build --target LLVM --parallel (cpu-count)
+    if (is-darwin) {
+      # THE BUILD TREE NEEDS THE SAME libLTO NAME THE INSTALLED TREE WILL HAVE.
+      # We apply conda-forge's clangdev patch 0011, which makes clang look for
+      # `<ResourceDir>/lib/libLTO.dylib`. The post-install fixup creates exactly
+      # that — but compiler-rt's darwin `*_osx_dynamic.dylib` targets are linked
+      # IN-TREE by the just-built clang, long before any install, and Apple's ld
+      # rejects any `-lto_library` not literally named `libLTO.dylib`. So the
+      # link must exist in the BUILD tree as well.
+      #
+      # Same class as compiler-rt's post-install copies and the openmp headers:
+      # a layout conda-forge's INSTALLED tree has, that our union build tree
+      # does not, because upstream builds compiler-rt standalone against an
+      # installed clangdev. Osx run 34139827478 reached 6,706 of 6,908 steps
+      # before hitting it.
+      ^cmake --build $build --target LTO --parallel (cpu-count)
+      link-build-tree-lto $build
+    }
     # THEN clang, and only then the rest — because AdaptiveCpp's SSCP bitcode
     # steps invoke the just-built clang directly and BARE, so its config file
     # has to be in place before ninja reaches them. Building the target

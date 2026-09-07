@@ -28,24 +28,67 @@ const STAGE = "packages/_acpp-stage/build-stage.nu"
 # unversioned clang drivers, the openmp headers in the resource directory where
 # an in-tree build puts them, clang's own headers beside them, the compiler-rt
 # runtimes, libgomp and libarcher.
-def make-tree [root: string] {
+# ⚠ THE FIXTURE IS BUILT IN THE SHAPE OF THE PLATFORM UNDER TEST. It used to be
+# linux-shaped unconditionally, while the fixups branch on the OS — so on a mac
+# runner the darwin fixup met a linux tree and fired its own loud-empty guard
+# against the fixture, failing gate 1b in under two minutes (osx run
+# 34128626319). The harness was wrong, not the stage. A fixture that does not
+# match the branch it feeds is testing nothing.
+#
+# `os` is the value the fixups themselves read through ACPP_FAKE_OS, so the
+# tree and the branch cannot disagree.
+def make-tree [root: string, os: string] {
   rm -rf $root
-  mkdir $"($root)/bin" $"($root)/lib" $"($root)/lib/clang/21/include" $"($root)/lib/clang/21/lib/linux"
+  let rt_dir = (if $os == "macos" { "darwin" } else if $os == "windows" { "windows" } else { "linux" })
+  mkdir $"($root)/bin" $"($root)/lib" $"($root)/lib/clang/21/include" $"($root)/lib/clang/21/lib/($rt_dir)"
+
+  # The drivers the re-versioning loop and the symlink farm act on. `.exe` on
+  # Windows, because that loop globs `clang-*` and the win fixups look for
+  # names with the extension.
+  let exe = (if $os == "windows" { ".exe" } else { "" })
   for n in ["clang-21" "clang-tidy" "clang-format" "clang-scan-deps-21" "clang-offload-packager-21" "clangd"] {
-    $"#!/bin/sh\n# ($n)\n" | save -f $"($root)/bin/($n)"
+    $"#!/bin/sh\n# ($n)\n" | save -f $"($root)/bin/($n)($exe)"
   }
+
+  # OpenMP headers in the resource dir, where an in-tree build puts them, plus
+  # clang's own headers beside them — the move must take the first and leave
+  # the second, on every platform.
   for n in ["omp.h" "ompx.h" "omp-tools.h" "ompt.h" "ompt-multiplex.h"] {
     $"// openmp ($n)\n" | save -f $"($root)/lib/clang/21/include/($n)"
   }
   for n in ["stddef.h" "immintrin.h"] {
     $"// clang ($n)\n" | save -f $"($root)/lib/clang/21/include/($n)"
   }
+
+  # The compiler-rt runtimes, in each platform's own spelling: the shared
+  # sanitizer libraries the post-install copy moves, plus a static archive that
+  # must NOT be copied.
+  let rt_ext = (if $os == "macos" { ".dylib" } else if $os == "windows" { ".dll" } else { ".so" })
+  let rt_prefix = (if $os == "windows" { "clang_rt." } else { "libclang_rt." })
   for n in ["asan" "tsan" "ubsan_standalone"] {
-    $"// rt\n" | save -f $"($root)/lib/clang/21/lib/linux/libclang_rt.($n).so"
+    $"// rt\n" | save -f $"($root)/lib/clang/21/lib/($rt_dir)/($rt_prefix)($n)($rt_ext)"
   }
-  "// builtins\n" | save -f $"($root)/lib/clang/21/lib/linux/libclang_rt.builtins.a"
-  "// gomp\n" | save -f $"($root)/lib/libgomp.so"
-  "// archer\n" | save -f $"($root)/lib/libarcher.so"
+  let static_ext = (if $os == "windows" { ".lib" } else { ".a" })
+  $"// builtins\n" | save -f $"($root)/lib/clang/21/lib/($rt_dir)/($rt_prefix)builtins($static_ext)"
+
+  # openmp-install-fixups is unix-only in the stage, so its inputs are too.
+  if $os != "windows" {
+    let so = (if $os == "macos" { ".dylib" } else { ".so" })
+    $"// gomp\n" | save -f $"($root)/lib/libgomp($so)"
+    if $os == "linux" { "// archer\n" | save -f $"($root)/lib/libarcher.so" }
+  }
+  # The versioned libLTO the darwin clang fixup links into the resource dir.
+  if $os == "macos" { "// lto\n" | save -f $"($root)/lib/libLTO.21.1.dylib" }
+
+  # What the WINDOWS clang fixup reads: the unversioned driver it copies to the
+  # versioned names, and the libclang DLL whose SOVERSION patch 0007 fixes at
+  # 13. Both are real install products of an LLVM Windows build; the fixup
+  # errors by design if the DLL is absent, so a fixture without them tests the
+  # guard rather than the fixup.
+  if $os == "windows" {
+    "// clang driver\n" | save -f $"($root)/bin/clang.exe"
+    "// libclang\n" | save -f $"($root)/bin/libclang-13.dll"
+  }
 }
 
 # The tree's full state: every path, plus what each symlink points at. Two
@@ -64,17 +107,53 @@ def snapshot [root: string] {
   | sort
 }
 
-def run-fixups [root: string] {
-  ^nu -c $"source ($STAGE); compiler-rt-install-fixups '($root)' '($root)'; openmp-header-fixups '($root)' '($root)'; clang-install-fixups-unix '($root)'; openmp-install-fixups '($root)'"
+# The fixup sequence the stage runs after `cmake --install`, in the same order
+# and with the same branch for the platform under test. Windows takes
+# clang-install-fixups-WIN and has no openmp-install-fixups — mirroring
+# build-stage.nu exactly, because a harness that ran a different sequence would
+# be testing a program we do not ship.
+#
+# ACPP_FAKE_OS is set INSIDE the child, so the sourced predicates see it.
+def run-fixups [root: string, os: string] {
+  let clang_fixup = (if $os == "windows" {
+    $"clang-install-fixups-win '($root)'"
+  } else {
+    $"clang-install-fixups-unix '($root)'"
+  })
+  let openmp_fixup = (if $os == "windows" { "" } else { $"; openmp-install-fixups '($root)'" })
+  # ⚠ ONE EXTERNAL IS STUBBED, AND ONLY WHEN FORCING AN OS WE ARE NOT ON. The
+  # windows clang fixup shells out to `create-forwarder-dll`, which exists only
+  # in the Windows toolchain — so without a stub the win branch could be
+  # exercised on a Windows runner alone, which is the machine this harness is
+  # meant to protect. The stub stands in for a DLL forwarder we do not own and
+  # are not testing; everything either side of it is our own logic and runs for
+  # real. On an actual Windows runner `$os` equals the host and the real tool
+  # is used.
+  let stub_dir = $"($root)-stubs"
+  if $os == "windows" and $nu.os-info.name != "windows" {
+    rm -rf $stub_dir
+    mkdir $stub_dir
+    "#!/bin/sh\n# fixture stub for create-forwarder-dll: writes the forwarder it is asked for\ntouch \"$2\"\n" | save -f $"($stub_dir)/create-forwarder-dll"
+    ^chmod +x $"($stub_dir)/create-forwarder-dll"
+  }
+  let path_extra = (if ($stub_dir | path exists) { [$stub_dir] } else { [] })
+  with-env {PATH: ($path_extra | append $env.PATH)} {
+    ^nu -c $"$env.ACPP_FAKE_OS = '($os)'; source ($STAGE); compiler-rt-install-fixups '($root)' '($root)'; openmp-header-fixups '($root)' '($root)'; ($clang_fixup)($openmp_fixup)"
+  }
 }
 
-def main [] {
+def main [--os: string = ""] {
   cd ($env.FILE_PWD | path dirname | path dirname)
-  let root = "/tmp/stage-fixups"
+  # Default: the platform this is running on, which is what CI wants. `--os`
+  # forces another, which is how all three branches get exercised from one
+  # laptop before a metered runner sees them.
+  let os = (if $os == "" { $nu.os-info.name } else { $os })
+  let root = $"/tmp/stage-fixups-($os)"
+  print $"exercising the ($os) fixups"
   mut results = []
 
-  make-tree $root
-  let p1 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root | complete })
+  make-tree $root $os
+  let p1 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $os | complete })
   if $p1.exit_code != 0 {
     print "FAIL: the fixups do not survive their FIRST pass on a clean tree"
     print ($p1.stderr | lines | last 12 | str join "\n")
@@ -85,7 +164,7 @@ def main [] {
   let after_one = (snapshot $root)
 
   # THE ASSERTION. A cached run re-executes everything against this tree.
-  let p2 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root | complete })
+  let p2 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $os | complete })
   if $p2.exit_code != 0 {
     print "FAIL: pass TWO errored — a fixup is not idempotent, and a cache-restored run will die here"
     print ($p2.stderr | lines | last 12 | str join "\n")
@@ -110,17 +189,38 @@ def main [] {
 
   # And the specific shapes that were wrong, asserted by name so a regression
   # says WHICH one rather than only that something moved.
-  # clang-tidy, NOT clangd: the re-versioning loop globs `clang-*`, which needs
-  # the hyphen, so clangd is never touched by it. (Asserting on clangd was this
-  # harness FAILING ON ITS OWN WRONG EXPECTATION the first time it ran.)
-  let clangd = $"($root)/bin/clang-tidy"
-  let clangd_target = (if (($clangd | path type) == "symlink") { (ls -l $clangd | get 0.target | path basename) } else { "" })
-  if $clangd_target == "clang-tidy-21" and (($"($root)/bin/clang-tidy-21" | path type) == "file") {
-    print "PASS: the re-versioned driver is still a symlink to a REAL binary after two passes"
-    $results = ($results | append true)
+  #
+  # ⚠ PER PLATFORM, because the two branches produce DIFFERENT shapes and
+  # asserting one against the other is testing a program we do not ship. Unix
+  # re-versions by moving the binary and leaving a symlink; Windows copies
+  # clang.exe to the versioned names and creates no symlinks at all. Asserting
+  # the unix shape on windows was this harness failing on its own wrong
+  # expectation for the SECOND time — the first was asserting on `clangd`,
+  # which the `clang-*` glob never matches.
+  if $os == "windows" {
+    # The win fixup COPIES: both versioned names must be real files, and pass
+    # two must not have replaced either with something else.
+    let copies = ["clang-21.exe" "clang++-21.exe"]
+    let types = ($copies | each {|n| ($"($root)/bin/($n)" | path type) })
+    if ($types | all {|t| $t == "file" }) {
+      print $"PASS: the versioned drivers are still real files after two passes \(($copies | str join ', '))"
+      $results = ($results | append true)
+    } else {
+      print $"FAIL: versioned drivers are ($types | str join ', ') — expected real files"
+      $results = ($results | append false)
+    }
   } else {
-    print $"FAIL: bin/clangd -> '($clangd_target)' and clangd-21 is '($"($root)/bin/clangd-21" | path type)' — the self-referential-symlink defect"
-    $results = ($results | append false)
+    # clang-tidy, NOT clangd: the re-versioning loop globs `clang-*`, which
+    # needs the hyphen, so clangd is never touched by it.
+    let driver = $"($root)/bin/clang-tidy"
+    let target = (if (($driver | path type) == "symlink") { (ls -l $driver | get 0.target | path basename) } else { "" })
+    if $target == "clang-tidy-21" and (($"($root)/bin/clang-tidy-21" | path type) == "file") {
+      print "PASS: the re-versioned driver is still a symlink to a REAL binary after two passes"
+      $results = ($results | append true)
+    } else {
+      print $"FAIL: bin/clang-tidy -> '($target)' and clang-tidy-21 is '($"($root)/bin/clang-tidy-21" | path type)' — the self-referential-symlink defect"
+      $results = ($results | append false)
+    }
   }
 
   let flang_cfg = (glob $"($root)/bin/*-flang.cfg")
@@ -134,6 +234,22 @@ def main [] {
       print $"FAIL: the flang config file has ($n) lines but only ($uniq) distinct — it accumulates per pass"
       $results = ($results | append false)
     }
+  }
+
+  # ⚠ THE SEAM MUST STAY A TESTING SEAM. `ACPP_FAKE_OS` overrides the stage's
+  # platform predicates, so a recipe or workflow setting it would make a real
+  # build believe it was on another OS. It may appear only in build-stage.nu
+  # (where it is read) and under tools/tests (where it is set).
+  let leaks = (^git grep -l "ACPP_FAKE_OS" | complete | get stdout | lines
+    | where {|f| $f != "" }
+    | where {|f| not ($f | str starts-with "tools/tests/") }
+    | where {|f| $f != "packages/_acpp-stage/build-stage.nu" })
+  if ($leaks | is-empty) {
+    print "PASS: ACPP_FAKE_OS appears only where it is read and where tests set it"
+    $results = ($results | append true)
+  } else {
+    print $"FAIL: ACPP_FAKE_OS also appears in ($leaks | str join ', ') — a build must never read it"
+    $results = ($results | append false)
   }
 
   let bad = ($results | where {|r| not $r } | length)

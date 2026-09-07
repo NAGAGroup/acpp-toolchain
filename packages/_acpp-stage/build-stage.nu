@@ -33,13 +33,30 @@
 #     does not catch a wrong one; it silently evaluates.
 # ============================================================================
 
-def is-windows [] { $nu.os-info.name == "windows" }
-def is-darwin [] { $nu.os-info.name == "macos" }
+# ⚠ ONE TESTING SEAM, AND IT EXISTS SO THE WIN AND OSX BRANCHES CAN BE
+# EXERCISED WITHOUT A WIN OR OSX RUNNER. `ACPP_FAKE_OS` overrides the detected
+# OS for the platform predicates and NOTHING ELSE; it is set only by
+# tools/tests/*, never by a recipe or a workflow.
+#
+# The value it buys is concrete: the idempotency harness ran a LINUX-shaped
+# fixture through whatever branch the host took, so on a mac runner the darwin
+# fixup met a linux tree and failed gate 1b in under two minutes (osx run
+# 34128626319) — a red on a metered runner for a defect that is reproducible on
+# any laptop. With the seam, all three platforms' fixups are exercised before
+# either of those machines is asked to build anything.
+#
+# It is deliberately NOT a general platform override: the build itself reads
+# real paths, real compilers and a real prefix, and a build that believed it was
+# on another OS would be nonsense. Only these three predicates consult it.
+def detected-os [] { $env.ACPP_FAKE_OS? | default $nu.os-info.name }
+
+def is-windows [] { (detected-os) == "windows" }
+def is-darwin [] { (detected-os) == "macos" }
 # NB `is-linux` is defined because `not (is-windows) and not (is-darwin)` is
 # read twice and got it wrong once: a call to an UNDEFINED command parses
 # cleanly in nushell (it becomes an external lookup) and fails only at RUN
 # time — here, an hour into a build.
-def is-linux [] { $nu.os-info.name == "linux" }
+def is-linux [] { (detected-os) == "linux" }
 
 def cpu-count [] { $env.CPU_COUNT? | default (sys cpu | length | into string) | into int }
 

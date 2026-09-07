@@ -34,6 +34,22 @@
 # means the pattern carried an intentional escape, which nothing here wants,
 # and that assertion fires on ANY platform — including a linux laptop, where
 # `path join` would never have produced one.
+# ⚠ ONE CANONICALISER FOR BOTH SIDES OF EVERY PATH COMPARISON.
+# `path expand` makes a path absolute — on Windows that ADDS THE DRIVE LETTER,
+# because nushell resolves `/tmp/x` against the current drive as `C:\tmp\x` —
+# and canonicalize may return the verbatim `\\?\` prefix. Glob RESULTS come back
+# expanded; a root built by hand does not. Win run 34135577725 failed on exactly
+# that difference AFTER separators were already normalised: results
+# `C:/tmp/stage-fixups-windows/...` against a root `/tmp/stage-fixups-windows`,
+# and `path relative-to` cannot find a prefix that is missing a drive.
+#
+# nushell#15707's reporter stripped the drive letter to work around this;
+# canonicalising BOTH sides keeps it, which is the answer that stays correct
+# when the path is used for anything other than matching.
+def canon-path [p: string] {
+  $p | path expand | str replace '\\?\' '' | str replace --all '\' '/'
+}
+
 def glob-native [pattern: string, --no-dir] {
   # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
   # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no
@@ -130,13 +146,14 @@ def make-tree [root: string, os: string] {
 # The tree's full state: every path, plus what each symlink points at. Two
 # snapshots being equal is what "changed nothing" means.
 def snapshot [root_in: string] {
-  # ⚠ BOTH SIDES FORWARD-SLASH. glob-native returns normalised results; the root
-  # they are made relative to must be normalised as well, or on Windows
-  # `path relative-to` fails with "prefix not found" against a mixed pair like
-  # `/tmp/stage-fixups-windows\bin` vs `/tmp/stage-fixups-windows`. That is how
-  # win run 34134434830 died — in this snapshot, AFTER the fixups themselves had
-  # passed on a real Windows runner for the first time.
-  let root = $root_in
+  # ⚠ BOTH SIDES CANONICAL, not merely same-separator. Two Windows runs died
+  # here, one per half: 34134434830 on separators (results backslash, root
+  # forward-slash), then 34135577725 on the DRIVE LETTER — glob results come
+  # back EXPANDED, `C:/tmp/stage-fixups-windows/...`, while a hand-built root
+  # stays `/tmp/stage-fixups-windows`, and `path relative-to` cannot find a
+  # prefix that is missing a drive. canon-path does expand, strip verbatim and
+  # normalise in one place, so the two sides cannot differ by any of the three.
+  let root = (canon-path $root_in)
   glob-native $"($root)/**/*" --no-dir
   | each {|p|
       let rel = ($p | path relative-to $root)
@@ -208,7 +225,9 @@ def main [--os: string = ""] {
   # forces another, which is how all three branches get exercised from one
   # laptop before a metered runner sees them.
   let os = (if $os == "" { $nu.os-info.name } else { $os })
-  let root = $"/tmp/stage-fixups-($os)"
+  # $nu.temp-dir, not a literal /tmp: on Windows that IS drive-lettered, so the
+  # fixture root and the glob results agree before canon-path even runs.
+  let root = (canon-path ($nu.temp-dir | path join $"stage-fixups-($os)"))
   print $"exercising the ($os) fixups"
   mut results = []
 
@@ -300,13 +319,46 @@ def main [--os: string = ""] {
   # assertion that fires on a LAPTOP if a helper ever returns a Windows-spelled
   # path — the failure it guards is invisible on linux, where nothing produces a
   # backslash, so without it the only detector is a metered win runner.
+  # Two properties, and the SECOND is the one that actually fired on Windows:
+  # a path can be perfectly forward-slash and still not be relative to the root,
+  # because the root lacks a drive letter the result has.
   let mixed = ($after_two | where {|s| $s =~ '\\' })
-  if ($mixed | is-empty) {
-    print $"PASS: all ($after_two | length) snapshot paths are forward-slash and relative to the root"
+  let canon_root = (canon-path $root)
+  let unrelatable = (glob-native $"($canon_root)/**/*" --no-dir
+    | where {|p| (do -i { $p | path relative-to $canon_root } | describe) == "nothing" })
+  if ($mixed | is-empty) and ($unrelatable | is-empty) {
+    print $"PASS: all ($after_two | length) snapshot paths are forward-slash AND relative-to the root succeeds for every one"
     $results = ($results | append true)
   } else {
-    print $"FAIL: ($mixed | length) snapshot path\(s\) carry a backslash — glob-native or the root is not normalised"
-    for m in ($mixed | first 5) { print $"      ($m)" }
+    if not ($mixed | is-empty) {
+      print $"FAIL: ($mixed | length) snapshot path\(s\) carry a backslash — glob-native or the root is not normalised"
+      for m in ($mixed | first 5) { print $"      ($m)" }
+    }
+    if not ($unrelatable | is-empty) {
+      print $"FAIL: ($unrelatable | length) path\(s\) are not relative to ($canon_root) — the two sides differ by more than separators \(a drive letter, or a verbatim prefix)"
+      for u in ($unrelatable | first 5) { print $"      ($u)" }
+    }
+    $results = ($results | append false)
+  }
+
+  # ⚠ THE HELPER'S CONTRACT, TESTED WITHOUT A WINDOWS FILESYSTEM. The assertion
+  # above cannot fire on linux — a linux root is already canonical, so a raw one
+  # passes — which would leave the drive-letter half detectable only on a
+  # metered runner. This checks the property as STRINGS instead, which is where
+  # the failure actually lives: a Windows-shaped result is not relative to a
+  # Windows-shaped-but-unexpanded root, and canonicalising both sides is what
+  # makes it so. It is the run-34135577725 failure in two lines.
+  let win_result = "C:/tmp/stage-fixups-windows/bin/clang.exe"
+  let raw_root = "/tmp/stage-fixups-windows"
+  let drive_root = "C:/tmp/stage-fixups-windows"
+  let fails_raw = ((do -i { $win_result | path relative-to $raw_root } | describe) == "nothing")
+  let works_drive = ((do -i { $win_result | path relative-to $drive_root } | describe) != "nothing")
+  let canon_stable = ((canon-path (canon-path "/tmp")) == (canon-path "/tmp"))
+  if $fails_raw and $works_drive and $canon_stable {
+    print "PASS: a drive-lettered path is not relative to an unexpanded root, is relative to an expanded one, and canon-path is idempotent"
+    $results = ($results | append true)
+  } else {
+    print $"FAIL: the canonicalisation contract does not hold — fails_raw=($fails_raw) works_drive=($works_drive) idempotent=($canon_stable)"
     $results = ($results | append false)
   }
 

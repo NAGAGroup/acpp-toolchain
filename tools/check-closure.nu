@@ -37,6 +37,22 @@
 # means the pattern carried an intentional escape, which nothing here wants,
 # and that assertion fires on ANY platform — including a linux laptop, where
 # `path join` would never have produced one.
+# ⚠ ONE CANONICALISER FOR BOTH SIDES OF EVERY PATH COMPARISON.
+# `path expand` makes a path absolute — on Windows that ADDS THE DRIVE LETTER,
+# because nushell resolves `/tmp/x` against the current drive as `C:\tmp\x` —
+# and canonicalize may return the verbatim `\\?\` prefix. Glob RESULTS come back
+# expanded; a root built by hand does not. Win run 34135577725 failed on exactly
+# that difference AFTER separators were already normalised: results
+# `C:/tmp/stage-fixups-windows/...` against a root `/tmp/stage-fixups-windows`,
+# and `path relative-to` cannot find a prefix that is missing a drive.
+#
+# nushell#15707's reporter stripped the drive letter to work around this;
+# canonicalising BOTH sides keeps it, which is the answer that stays correct
+# when the path is used for anything other than matching.
+def canon-path [p: string] {
+  $p | path expand | str replace '\\?\' '' | str replace --all '\' '/'
+}
+
 def glob-native [pattern: string, --no-dir] {
   # Strip Windows' VERBATIM prefix FIRST. `path expand` calls Rust's canonicalize,
   # which on Windows returns extended-length paths like `\\?\C:\bld\...`, and no

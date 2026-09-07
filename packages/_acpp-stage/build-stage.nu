@@ -715,6 +715,66 @@ def darwin-sdk-version [] {
   $v
 }
 
+# ── DARWIN LINK DIAGNOSTICS ────────────────────────────────────────────────
+# An OBSERVATION step for the compiler-rt `*_osx_dynamic.dylib` links, which
+# fail with `ld: -lto_library library filename must be 'libLTO.dylib'` while
+# every LLVM dylib links fine through the SAME driver. Three theories have died
+# (the build-tree alias, the SDK probe, the zippered variant), so this run
+# collects facts instead of testing a fourth.
+#
+# EVERYTHING HERE IS NON-FATAL. A diagnostic that can fail the build is a
+# diagnostic that stops the run before it reaches the thing being diagnosed.
+#
+# ⚠ WHY NOT `-v` ON THE REAL LINK, which is the obvious instrument: compiler-rt
+# sets `DARWIN_osx_LINK_FLAGS` with an unguarded `set()` in its
+# cmake/config-ix.cmake, so a `-D` on the command line is SHADOWED, not
+# honoured — the same mechanism measured on AdaptiveCpp's
+# LLVMSPIRV_RELATIVE_INSTALLDIR earlier in this rebuild. The blunt alternative,
+# CMAKE_SHARED_LINKER_FLAGS, reaches every shared link in a 7,000-step build.
+# So the last probe below REPRODUCES the failing command's shape directly —
+# same driver, same distinguishing flags, `-v` — which prints ld's own banner
+# and the exact `-lto_library` argument in two seconds and cannot flood the log.
+def darwin-link-diagnostics [] {
+  let bp = ($env.BUILD_PREFIX? | default "")
+  let cxx = ($env.CXX? | default "clang++")
+  print "── darwin link diagnostics ─────────────────────────────────────────"
+  print $"  CXX=($cxx)  BUILD_PREFIX=($bp)"
+
+  # WHICH `ld` the driver can see. If the conda ld64 is absent from the build
+  # env, clang falls back to PATH and picks up Xcode's ld-prime.
+  for probe in [["which -a ld" {|| ^which -a ld }]
+                ["xcrun -f ld" {|| ^xcrun -f ld }]
+                ["ld -v" {|| ^ld -v }]] {
+    let r = (do -i $probe.1 | complete)
+    let out = ([$r.stdout $r.stderr] | str join "" | lines | first 4 | str join " | ")
+    print $"  ($probe.0): exit ($r.exit_code) — ($out)"
+  }
+
+  # Is a resolvable libLTO.dylib present in the BUILD environment, which is
+  # where the OUTER clang looks — as opposed to the build tree, where our own
+  # alias lives?
+  for p in [$"($bp)/lib/clang/21/lib/libLTO.dylib" $"($bp)/lib/libLTO.dylib" $"($bp)/lib"] {
+    let t = (do -i {|| ls -l $p } | complete)
+    print $"  ls ($p): exit ($t.exit_code) — ($t.stdout | lines | where {|l| $l =~ 'libLTO'} | first 3 | str join ' | ')"
+  }
+
+  # The exact -lto_library the driver passes, and the linker it names.
+  let d = (do -i {|| ^$cxx -### -dynamiclib -o /tmp/acpp-probe.dylib -x c /dev/null } | complete)
+  let joined = ([$d.stdout $d.stderr] | str join "")
+  print $"  -lto_library argument: ($joined | parse -r '\"-lto_library\" \"([^\"]*)\"' | get capture0.0? | default '(none in -### output)')"
+  print $"  linker the driver names: ($joined | lines | where {|l| $l =~ '/ld\"|/ld |ld64'} | first 1 | str join '' | str substring 0..160)"
+
+  # THE FAILING SHAPE, reproduced small. The flags are the ones that
+  # distinguish compiler-rt's dynamic sanitizer links from the LLVM dylib links
+  # that succeed in the same run.
+  let shape = (do -i {|| ^$cxx -v -dynamiclib -nodefaultlibs -nostdlib++ -fapplication-extension -o /tmp/acpp-probe2.dylib -x c /dev/null } | complete)
+  print $"  reproduced shape: exit ($shape.exit_code)"
+  for l in ([$shape.stdout $shape.stderr] | str join "" | lines | where {|l| $l =~ 'lto_library|ld:|@\(#\)|PROGRAM:ld|LTO' } | first 8) {
+    print $"      ($l | str trim | str substring 0..200)"
+  }
+  print "────────────────────────────────────────────────────────────────────"
+}
+
 def darwin-args [src: string, prefix: string] {
   [
     "-DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra;lld;lldb;openmp;compiler-rt"
@@ -984,9 +1044,15 @@ def clang-install-fixups-unix [prefix: string] {
 }
 
 # clangdev/build.bat's post-install section, windows.
-def clang-install-fixups-win [layout_root: string] {
+# ⚠ TAKES THE STAGE ROOT, NOT THE LAYOUT ROOT. Everything this build installs
+# lives under `<layout_root>/_stage`, and `$prefix` already carries the
+# `Library` segment on Windows — so `$layout_root` here pointed one level above
+# the tree these fixups act on. Three derivations had it (bin, the resource dir
+# and the omp.h source), and the openmp guard is what finally surfaced the class
+# after the whole toolchain had built and linked (win run 34142922796).
+def clang-install-fixups-win [prefix: string] {
   let major = $env.ACPP_LLVM_MAJOR
-  let bin = ($layout_root | path join "bin")
+  let bin = ($prefix | path join "bin")
   for n in [$"clang-($major).exe" $"clang++-($major).exe"] {
     let dest = ($bin | path join $n)
     if not ($dest | path exists) { cp -P ($bin | path join "clang.exe") $dest }
@@ -1001,8 +1067,16 @@ def clang-install-fixups-win [layout_root: string] {
   }
   ^create-forwarder-dll $versioned ($bin | path join "libclang.dll") --no-temp-dir
 
-  let resource_dir = ($layout_root | path join "lib" "clang" $major)
-  cp -P ($layout_root | path join "include" "omp.h") ($resource_dir | path join "include" "omp.h")
+  # Upstream''s win openmp ships omp.h in BOTH `Library/include` and the clang
+  # resource dir; openmp-header-fixups puts the real headers in include/ and
+  # this is the copy that mirrors upstream''s resource-dir entry for OUR major.
+  # (Upstream also copies to majors 18-20, and its own comment says why: those
+  # clangs lack the copy, "we do the copy in clang 21 and upwards, so this is
+  # unnecessary". We ship exactly one clang, 21, so those compat copies are
+  # deliberately not reproduced.)
+  let resource_dir = ($prefix | path join "lib" "clang" $major)
+  mkdir ($resource_dir | path join "include")
+  cp -P ($prefix | path join "include" "omp.h") ($resource_dir | path join "include" "omp.h")
 }
 
 # openmp/install_pkg.sh, unix.
@@ -1033,7 +1107,10 @@ def clang-install-fixups-win [layout_root: string] {
 def compiler-rt-install-fixups [prefix: string, layout_root: string] {
   if (is-windows) {
     let src = (glob-native ($prefix | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "lib" "windows" "*.dll"))
-    let dest = ($layout_root | path join "bin")
+    # The STAGE''s bin, not the layout root: the carve reads from the stage and
+    # writes to the layout root, so a copy placed outside the stage is invisible
+    # to it. Same class as the clang win fixups above.
+    let dest = ($prefix | path join "bin")
     mkdir $dest
     for f in $src { cp -f $f ($dest | path join ($f | path basename)) }
     print $"compiler-rt fixups: copied ($src | length) clang_rt DLL\(s\) to ($dest)"
@@ -1086,7 +1163,19 @@ def compiler-rt-install-fixups [prefix: string, layout_root: string] {
 # of stddef.h and the intrinsics headers, and a wildcard here would move the
 # compiler's headers into the prefix.
 def openmp-header-fixups [prefix: string, layout_root: string] {
-  let root = (if (is-windows) { $layout_root } else { $prefix })
+  # ⚠ THE STAGE ROOT, ON EVERY PLATFORM. This read `$layout_root` on win, which
+  # is `%PREFIX%\Library` — one level ABOVE the stage. `$prefix` is
+  # `<layout_root>/_stage` and is already Library-rooted on Windows, so it is
+  # correct everywhere and the branch was never needed. The win branch searched
+  # `Library\lib\clang\21\include` while the install had written
+  # `Library\_stage\lib\clang\21\include`, and the guard fired on a tree that
+  # was in fact complete (win run 34142922796, AFTER the whole toolchain built
+  # and linked — 7,201 of 7,201).
+  #
+  # The harness did not catch it because its fixture used one directory as both
+  # roots; it now builds the real `Library/_stage` shape on win, which is the
+  # only way this class fires on a laptop.
+  let root = $prefix
   let res_inc = ($root | path join "lib" "clang" $env.ACPP_LLVM_MAJOR "include")
   let inc = ($root | path join "include")
   mkdir $inc
@@ -1392,7 +1481,7 @@ def main [] {
   openmp-header-fixups $prefix $layout_root
 
   if (is-windows) {
-    clang-install-fixups-win $layout_root
+    clang-install-fixups-win $prefix
   } else {
     clang-install-fixups-unix $prefix
     openmp-install-fixups $prefix

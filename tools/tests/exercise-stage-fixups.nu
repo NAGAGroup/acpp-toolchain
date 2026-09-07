@@ -182,7 +182,7 @@ def snapshot [root_in: string] {
 # be testing a program we do not ship.
 #
 # ACPP_FAKE_OS is set INSIDE the child, so the sourced predicates see it.
-def run-fixups [root: string, os: string] {
+def run-fixups [root: string, layout_root: string, os: string] {
   let clang_fixup = (if $os == "windows" {
     $"clang-install-fixups-win '($root)'"
   } else {
@@ -223,7 +223,10 @@ def run-fixups [root: string, os: string] {
   }
   let path_extra = (if ($stub_dir | path exists) { [$stub_dir] } else { [] })
   with-env {PATH: ($path_extra | append $env.PATH)} {
-    ^nu -c $"$env.ACPP_FAKE_OS = '($os)'; source ($STAGE); compiler-rt-install-fixups '($root)' '($root)'; openmp-header-fixups '($root)' '($root)'; ($clang_fixup)($openmp_fixup)"
+    # BOTH roots, distinct, exactly as build-stage.nu passes them. Passing one
+    # directory as both is what let the win branch derive three paths from the
+    # layout root and still pass here (win run 34142922796).
+    ^nu -c $"$env.ACPP_FAKE_OS = '($os)'; source ($STAGE); compiler-rt-install-fixups '($root)' '($layout_root)'; openmp-header-fixups '($root)' '($layout_root)'; ($clang_fixup)($openmp_fixup)"
   }
 }
 
@@ -233,14 +236,26 @@ def main [--os: string = ""] {
   # forces another, which is how all three branches get exercised from one
   # laptop before a metered runner sees them.
   let os = (if $os == "" { $nu.os-info.name } else { $os })
+  # ⚠ THE REAL PREFIX SHAPE, WHICH IS NOT ONE DIRECTORY. The stage installs into
+  # `<layout_root>/_stage`, and on Windows the layout root is `<PREFIX>/Library`
+  # — so the fixups receive TWO different roots and the win branch derived three
+  # paths from the wrong one. This harness used a single directory as both,
+  # which is exactly why it passed while the real layout did not (win run
+  # 34142922796). Building the true shape is what makes that class fire here.
   # $nu.temp-dir, not a literal /tmp: on Windows that IS drive-lettered, so the
   # fixture root and the glob results agree before canon-path even runs.
-  let root = (canon-path ($nu.temp-dir | path join $"stage-fixups-($os)"))
+  let base = (canon-path ($nu.temp-dir | path join $"stage-fixups-($os)"))
+  # The two roots the stage really computes: layout_root is <PREFIX>/Library on
+  # Windows and <PREFIX> elsewhere; the stage lives one level inside it.
+  let layout_root = (if $os == "windows" { $"($base)/Library" } else { $base })
+  let root = $"($layout_root)/_stage"
   print $"exercising the ($os) fixups"
+  print $"  layout_root ($layout_root)"
+  print $"  stage       ($root)"
   mut results = []
 
   make-tree $root $os
-  let p1 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $os | complete })
+  let p1 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $layout_root $os | complete })
   if $p1.exit_code != 0 {
     print "FAIL: the fixups do not survive their FIRST pass on a clean tree"
     print ($p1.stderr | lines | last 12 | str join "\n")
@@ -251,7 +266,7 @@ def main [--os: string = ""] {
   let after_one = (snapshot $root)
 
   # THE ASSERTION. A cached run re-executes everything against this tree.
-  let p2 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $os | complete })
+  let p2 = (with-env {ACPP_LLVM_MAJOR: "21", ACPP_LLVM_MAJ_MIN: "21.1", CONDA_BUILD_SYSROOT: "", BUILD_PREFIX: ""} { run-fixups $root $layout_root $os | complete })
   if $p2.exit_code != 0 {
     print "FAIL: pass TWO errored — a fixup is not idempotent, and a cache-restored run will die here"
     print ($p2.stderr | lines | last 12 | str join "\n")

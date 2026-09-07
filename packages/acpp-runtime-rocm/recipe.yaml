@@ -8,8 +8,17 @@
 
 context:
   llvm_version: "21.1.8"
+  # ⚠ CI MUST SET ACPP_NIGHTLY_DATE. The default is a LOCAL-RENDER placeholder,
+  # not a shippable version: 0.dev0 sorts below every real date, so a set built
+  # without it would publish as a prerelease nobody resolves. E2E-4 fails the
+  # workflow if an unset date reaches a publish; this default exists so a dry
+  # run on a laptop does not need the variable.
   version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Read from the env ONCE, into context: `build_number` is undefined inside
+  # `requirements:`, so any spec that must agree with build.number has to read
+  # this variable instead. One read, one value, everywhere in the recipe.
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
 
   # THE CARVE — the subset acpp's own hip deployment manifest names, which the
   # stage build deployed from the TheRock tarball. Family-independent: no
@@ -27,8 +36,8 @@ source:
     target_directory: licenses
 
 build:
-  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
-  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   # The ROCm tarball is a linux-64 build input; nothing to carve elsewhere.
   skip:
     - target_platform != "linux-64"

@@ -69,6 +69,11 @@ context:
   # AdaptiveCpp's own version, which is a DATE — a different axis from the LLVM
   # one above. `acpp` is ours and date-versioned, so the host dependency below
   # cannot be written in terms of `version`.
+  # ⚠ CI MUST SET ACPP_NIGHTLY_DATE. The default is a LOCAL-RENDER placeholder,
+  # not a shippable version: 0.dev0 sorts below every real date, so a set built
+  # without it would publish as a prerelease nobody resolves. E2E-4 fails the
+  # workflow if an unset date reaches a publish; this default exists so a dry
+  # run on a laptop does not need the variable.
   acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
   # Read from the env ONCE, into context: `build_number` is undefined inside
@@ -77,7 +82,16 @@ context:
 
   # The minor above c_stdlib_version, so the deployment-target dependency below
   # can be bounded to exactly the macOS we chose.
-  c_stdlib_version_next: ${{ (c_stdlib_version | split(".") | first) ~ "." ~ ((c_stdlib_version | split(".") | last | int) + 1) }}
+  # GUARDED, because a recipe's `context:` is evaluated BEFORE its `skip:`.
+  # Every output here is skipped off this platform, but the expression below
+  # still runs on a Windows job walking the workspace — and variants.yaml
+  # deliberately defines NO win `c_stdlib_version` (there is no C standard
+  # library package to version on Windows). A conditional evaluates only the
+  # branch it takes, so the dummy keeps the render alive while the real value
+  # is still required where it matters. Same idiom as the win recipe's
+  # `${{ VCVER if win else "0.0" }}`.
+  c_stdlib_version_here: ${{ c_stdlib_version if not win else "0.0" }}
+  c_stdlib_version_next: ${{ (c_stdlib_version_here | split(".") | first) ~ "." ~ ((c_stdlib_version_here | split(".") | last | int) + 1) }}
 
   # Output names, spelled once so the recipe, the installed script filenames
   # and the tests cannot disagree.
@@ -145,7 +159,7 @@ outputs:
         # build exports __osx >=<its own version>, so a `>=` spec would resolve
         # to the newest and quietly raise the minimum macOS of everything built
         # with this toolchain.
-        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version }},<${{ c_stdlib_version_next }}.0a0
+        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
         # The activation sets CMAKE_AR, CMAKE_RANLIB, CMAKE_LINKER,
         # CMAKE_STRIP, CMAKE_INSTALL_NAME_TOOL and CMAKE_LIBTOOL to
         # ${CHOST}-<tool>. Those are cctools programs, not clang ones.
@@ -169,7 +183,7 @@ outputs:
           # the same variant key as the deployment-target dependency above.
           # Restated rather than inherited: that package exports it too, but as
           # a RUN dependency here, and run_exports propagate from HOST only.
-          - __osx >=${{ c_stdlib_version }}
+          - __osx >=${{ c_stdlib_version_here }}
         # NO WEAK EXPORTS, deliberately. A weak run_export fires for HOST
         # dependents, and nothing host-depends on an activation package — it is
         # build-time tooling. Upstream's activation outputs declare strong
@@ -270,7 +284,7 @@ outputs:
           # Repeated here, not inherited from the C package above — see its
           # comment; transitive run_exports do not work.
           - acpp-runtime >=${{ acpp_version }}
-          - __osx >=${{ c_stdlib_version }}
+          - __osx >=${{ c_stdlib_version_here }}
           # Upstream's note: transitive run_exports do not propagate, so the
           # libc++ floor has to be stated here rather than inherited from the
           # dev dependency above. OURS, for the reason given there.

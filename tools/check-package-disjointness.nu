@@ -3,12 +3,16 @@
 #
 # WHY THIS EXISTS. The old single recipe expressed each output as an include
 # list plus an exclude list and had a partition audit to prove the two agreed.
-# The rebuilt tree carves each package with its own glob list, and one package
-# — acpp-llvm-dev — is defined by SUBTRACTION: everything development-shaped
-# minus every sibling's claim. Subtraction trades the risk of shipping too
-# little for the risk of shipping too much, and shipping too much means two of
-# OUR packages owning the same path, which surfaces as a clobber in a user's
-# environment rather than as a red build in ours.
+# The rebuilt tree carves each package with its own list, and no two lists are
+# checked against each other anywhere — forty-odd packages slicing one stage is
+# forty-odd chances for two of them to claim the same path, which surfaces as a
+# clobber in a user's environment rather than as a red build in ours. One
+# package, acpp-clang-21, is additionally defined with an EXCLUDE list
+# (the clang resource directory minus the five subtrees compiler-rt21 owns),
+# and subtraction trades the risk of shipping too little for shipping too much.
+# (The original subtraction package, acpp-llvm-dev, is gone: the lift replaced
+# it with acpp-llvmdev, whose scope is a positive list from conda-forge's
+# published artifact.)
 #
 # So this asserts the PROPERTY (the packages are disjoint) instead of the
 # mechanism that is supposed to produce it (the glob lists agree). It reads

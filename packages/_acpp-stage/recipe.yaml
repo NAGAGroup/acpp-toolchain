@@ -56,6 +56,10 @@ context:
   # `_acpp-stage ==0.0.0` under requirements/host.
   stage_version: "0.0.0"
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  # Read from the env ONCE, into context: `build_number` is undefined inside
+  # `requirements:`, so any spec that must agree with build.number has to read
+  # this variable instead. One read, one value, everywhere in the recipe.
+  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
 
 package:
   name: _acpp-stage
@@ -219,8 +223,8 @@ source:
     target_directory: vendored-licenses
 
 build:
-  number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
-  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   dynamic_linking:
     missing_dso_allowlist:
       # CI machines have no GPU, so the CUDA toolkit install cannot provide

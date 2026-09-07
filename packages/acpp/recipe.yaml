@@ -24,6 +24,11 @@ context:
   llvm_version: "21.1.8"
   llvm_major: "21"
   llvm_major_next: "22"
+  # ⚠ CI MUST SET ACPP_NIGHTLY_DATE. The default is a LOCAL-RENDER placeholder,
+  # not a shippable version: 0.dev0 sorts below every real date, so a set built
+  # without it would publish as a prerelease nobody resolves. E2E-4 fails the
+  # workflow if an unset date reaches a publish; this default exists so a dry
+  # run on a laptop does not need the variable.
   version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
   # Read from the env ONCE, into context: `build_number` and `hash` are both
@@ -85,6 +90,13 @@ requirements:
     - acpp-runtime ==${{ version }}
   run:
     # The acpp driver is a python program.
+    #
+    # DELIBERATELY NOT BARE, which is the one thing that makes a variant pin
+    # inert: `python: "3.14"` in variants.yaml governs the interpreter lldb's
+    # bindings are COMPILED against, and applying it here would pin every
+    # consumer's runtime environment to that exact minor for a script that
+    # needs a floor. A run dependency on an interpreter is a floor by nature.
+    # If a later pass "fixes" this to a bare name, it changes the contract.
     - python >=3.9
     # THE COMPILER THIS PACKAGE USED TO SHIP. `host: acpp` must still hand a
     # consumer a working toolchain, so the drivers, the binutils-equivalent

@@ -52,11 +52,25 @@ context:
   # AdaptiveCpp's own version, which is a DATE — a different axis from the LLVM
   # one above. `acpp` is ours and date-versioned, so the host dependency below
   # cannot be written in terms of `version`.
+  # ⚠ CI MUST SET ACPP_NIGHTLY_DATE. The default is a LOCAL-RENDER placeholder,
+  # not a shippable version: 0.dev0 sorts below every real date, so a set built
+  # without it would publish as a prerelease nobody resolves. E2E-4 fails the
+  # workflow if an unset date reaches a publish; this default exists so a dry
+  # run on a laptop does not need the variable.
   acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   # The minor above c_stdlib_version, so the sysroot dependency below can be
   # bounded to exactly the glibc we chose. Derived, so the floor stays one
   # number in variants.yaml.
-  c_stdlib_version_next: ${{ (c_stdlib_version | split(".") | first) ~ "." ~ ((c_stdlib_version | split(".") | last | int) + 1) }}
+  # GUARDED, because a recipe's `context:` is evaluated BEFORE its `skip:`.
+  # Every output here is skipped off this platform, but the expression below
+  # still runs on a Windows job walking the workspace — and variants.yaml
+  # deliberately defines NO win `c_stdlib_version` (there is no C standard
+  # library package to version on Windows). A conditional evaluates only the
+  # branch it takes, so the dummy keeps the render alive while the real value
+  # is still required where it matters. Same idiom as the win recipe's
+  # `${{ VCVER if win else "0.0" }}`.
+  c_stdlib_version_here: ${{ c_stdlib_version if not win else "0.0" }}
+  c_stdlib_version_next: ${{ (c_stdlib_version_here | split(".") | first) ~ "." ~ ((c_stdlib_version_here | split(".") | last | int) + 1) }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
   # Read from the env ONCE, into context: `build_number` is undefined inside
   # requirements, and the outputs below need the same value build.number uses.
@@ -125,7 +139,7 @@ outputs:
         # __glibc >=<its own version>. A `>=` spec resolves to the newest, so
         # consumers would compile against 2.39 headers while the run_export
         # below still claimed 2.28 — the package would understate its own floor.
-        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version }},<${{ c_stdlib_version_next }}.0a0
+        - ${{ c_stdlib }}_${{ cross_target_platform }} >=${{ c_stdlib_version_here }},<${{ c_stdlib_version_next }}.0a0
         # The activation sets AR, RANLIB, NM, STRIP and LD to ${CHOST}-<tool>,
         # which are binutils programs, not clang ones. Without this the
         # exported environment names tools that need not exist in the prefix,
@@ -145,7 +159,7 @@ outputs:
           - acpp-runtime >=${{ acpp_version }}
           # The floor anything built with this toolchain must claim, driven by
           # the same variant key as the sysroot dependency above.
-          - __glibc >=${{ c_stdlib_version }}
+          - __glibc >=${{ c_stdlib_version_here }}
         # NO WEAK EXPORTS, deliberately. A weak run_export fires for HOST
         # dependents, and nothing host-depends on an activation package — it is
         # build-time tooling. Upstream's activation outputs declare strong
@@ -242,7 +256,7 @@ outputs:
           # Repeated here, not inherited from the C package above — see its
           # comment; transitive run_exports do not work.
           - acpp-runtime >=${{ acpp_version }}
-          - __glibc >=${{ c_stdlib_version }}
+          - __glibc >=${{ c_stdlib_version_here }}
       run_constraints:
         - clangxx_${{ cross_target_platform }} <0.0a0
     tests:

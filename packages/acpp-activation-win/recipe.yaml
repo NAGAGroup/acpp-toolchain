@@ -59,6 +59,11 @@ context:
   # AdaptiveCpp's own version, which is a DATE — a different axis from the LLVM
   # one above. `acpp` is ours and date-versioned, so the host dependency below
   # cannot be written in terms of `version`.
+  # ⚠ CI MUST SET ACPP_NIGHTLY_DATE. The default is a LOCAL-RENDER placeholder,
+  # not a shippable version: 0.dev0 sorts below every real date, so a set built
+  # without it would publish as a prerelease nobody resolves. E2E-4 fails the
+  # workflow if an unset date reaches a publish; this default exists so a dry
+  # run on a laptop does not need the variable.
   acpp_version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
   # Read from the env ONCE, into context: `build_number` is undefined inside

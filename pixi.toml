@@ -36,6 +36,25 @@ name = "acpp-toolchain"
 # channel: the same search against naga-labs-staging fails with "No packages
 # found matching 'cmake'". So conda-forge is declared explicitly here.
 # Staging comes first: our names win, and everything else falls through.
+#
+# ⚠ `./local-channel` IS DELIBERATELY NOT IN THIS LIST, and the reason is
+# measured rather than stylistic. Adding it as a third entry:
+#
+#   1. breaks EVERY environment solve until the directory exists with a
+#      repodata.json per subdir — including the `packaging` environment whose
+#      own task creates it. `pixi run -e packaging nu
+#      tools/init-local-channel.nu` cannot run when the channel is missing,
+#      which makes the gate circular;
+#   2. writes an ABSOLUTE, machine-specific URL into the committed lock
+#      (`file:///home/jack/projects/acpp-toolchain/local-channel/`), which is
+#      wrong on any other checkout — a CI runner's path is not this one.
+#
+# And nothing needs it: under the whole-workspace publish, no build resolves a
+# sibling from a channel mid-build — that ordering constraint died with the
+# `--path` loop. `pixi publish --to ./local-channel` WRITES there without the
+# directory being a declared channel, and `tools/init-local-channel.nu` makes
+# it solvable for anyone who wants to INSTALL from it afterwards, which is the
+# only case that needs an index.
 channels = [
   "https://prefix.dev/jackm97/naga-labs-staging",
   "conda-forge",
@@ -148,6 +167,14 @@ acpp-libcxx = { path = "packages/acpp-libcxx" }
 acpp-libcxx-headers = { path = "packages/acpp-libcxx-headers" }
 acpp-libcxx-devel = { path = "packages/acpp-libcxx-devel" }
 
+# ---- the root meta package ----
+# Everything this workspace ships, as one name — Jack''s ruling. It is what
+# makes a single `pixi publish` with no --path build and publish the whole set,
+# and what a user installs instead of forty names. Ships nothing, exports
+# nothing; two packages we ship are deliberately absent from it and its recipe
+# says which and why.
+acpp-toolkit = { path = "packages/acpp-toolkit" }
+
 # ---- Build backends --------------------------------------------------------
 # Backends are specified as "*" in every member manifest, NOT pinned to a
 # version (Jack's explicit ruling): a pinned backend rots, and breakage on a
@@ -182,3 +209,62 @@ description = "Build + publish every opted-in package into an indexed local chan
 cmd = "pixi publish --dry-run --to {{ channel }}"
 args = [{ arg = "channel", default = "./local-channel" }]
 description = "Print the publish set and its build order without building or uploading"
+
+# ---- the packaging environment ---------------------------------------------
+# NO DEFAULT FEATURE, and that is not tidiness: the default environment
+# installs this workspace's own packages, so a packaging task run in it would
+# trigger a full LLVM build to answer a question about metadata. These gates
+# must be cheap enough to run on every change, which means they must not be
+# able to start a build at all.
+#
+# They need nushell to run, libarchive for bsdtar (the disjointness check reads
+# a .conda without unpacking it), and rattler-index for the local channel.
+[feature.packaging.dependencies]
+nushell = ">=0.114,<0.115"
+libarchive = ">=3.8,<3.9"
+rattler-index = ">=0.31,<0.32"
+
+[environments.packaging]
+features = ["packaging"]
+no-default-feature = true
+
+# Create ./local-channel's empty indexes. A channel directory with no
+# repodata.json is not a channel, and it is git-ignored, so this is the
+# reproducible way to have one.
+[feature.packaging.tasks.init-local-channel]
+cmd = "nu tools/init-local-channel.nu --platform {{ platform }}"
+args = [{ arg = "platform", default = "linux-64" }]
+description = "Create ./local-channel/{noarch,<platform>}/repodata.json so the channel is solvable"
+
+# THE SUPERSET GATE: every upstream output in the ratified subset has an acpp
+# counterpart in what we ship. Reads the COMMITTED target list, never the
+# monolith, and asserts the count it examined — "no gaps" over an empty list is
+# not a result.
+[feature.packaging.tasks.check-superset]
+cmd = "nu tools/check-superset.nu --platform {{ platform }}"
+args = [{ arg = "platform", default = "linux-64" }]
+description = "Assert we ship the acpp analogue of every upstream output in the ratified subset"
+
+# Regenerating the target list is a DELIBERATE act with a reviewable diff, so
+# it is its own task and needs the reference monolith checked out beside us.
+[feature.packaging.tasks.regen-superset-targets]
+cmd = "nu tools/check-superset.nu --regenerate"
+description = "Rebuild packaging/upstream-subset.json from the reference monolith's outputs.json"
+
+# One NAME must have one VERSION. Not one build — acpp-clang and acpp-clangxx
+# are each built twice, once per with_cfg row.
+[feature.packaging.tasks.check-name-collisions]
+cmd = "nu tools/check-name-collisions.nu --platform {{ platform }}"
+args = [{ arg = "platform", default = "linux-64" }]
+description = "Assert no package name is produced at more than one version"
+
+# THE ONLY GATE HERE THAT READS BUILT ARTIFACTS, so it runs after a real build
+# rather than on a dry run. --expect is mandatory and must be at least 2: a
+# pairwise-disjointness claim over one artifact is vacuously true.
+[feature.packaging.tasks.check-disjointness]
+cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"
+args = [
+  { arg = "artifacts", default = "./dist" },
+  { arg = "expect", default = "30" },
+]
+description = "Assert no two built acpp-* packages of one platform ship the same file"

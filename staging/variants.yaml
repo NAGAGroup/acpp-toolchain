@@ -1,0 +1,110 @@
+# variants.yaml — the pinning file for the staging workspace.
+#
+# Source of truth: every version, source revision and build choice lives here,
+# so recipe.yaml stays fixed. rattler-build applies an entry to any bare
+# requirement whose name matches the key; keys matching no requirement are
+# plain variables the recipe reads.
+#
+# linux-64 only. Other platforms add selectors to these keys, not new files.
+
+# ---- sources ---------------------------------------------------------------
+llvm_major:
+  - "21"
+llvm_version:
+  - "21.1.8"
+# llvm-project's official release tarball; the URL templates off llvm_version.
+llvm_sha256:
+  - "6898f963c8e938981e6c4a302e83ec5beb4630147c7311183cf61069af16333d"
+
+# AdaptiveCpp is OUR FORK: NAGAGroup/AdaptiveCpp, branch naga/develop.
+# Iteration lands commits there and bumps this line. The diff against upstream
+# is the patchset, derived later when we package upstream releases.
+acpp_rev:
+  - "fb0f3e2fed2fd646df7bb6649998b7b18a82ad24"
+
+# The SPIR-V translator is fetched by acpp's own cmake, pinned to a commit
+# rather than tracking a branch. Requires a fork commit so this value reaches
+# the git ref instead of the hardcoded origin/<branch>.
+llvmspirv_rev:
+  - "f0ae76f12c62ede090e57ece8c986f4c3c971a71"
+
+# ---- compilers and standard library ----------------------------------------
+c_compiler:
+  - gcc
+cxx_compiler:
+  - gxx
+# 14, not conda-forge's default 15: their pinning carries a separate CUDA row
+# capping gcc at 14, because nvcc accepts only host compilers it has been
+# qualified against. We build a CUDA backend, so we are on that row.
+c_compiler_version:
+  - "14"
+cxx_compiler_version:
+  - "14"
+c_stdlib:
+  - sysroot
+c_stdlib_version:
+  - "2.28"
+
+zip_keys:
+  - [c_compiler, cxx_compiler]
+  - [c_compiler_version, cxx_compiler_version]
+  - [c_stdlib, c_stdlib_version]
+
+# ---- what the monolith builds ----------------------------------------------
+# acpp documents clang;openmp;lld plus compiler-rt as a runtime.
+# clang-tools-extra adds clangd and clang-tidy; lldb adds the debugger.
+# Targets are acpp's documented set: X86 hosts, NVPTX serves llvm-to-ptx
+# (CUDA), AMDGPU serves llvm-to-amdgpu (ROCm). Level Zero and OpenCL go
+# through the SPIR-V translator, which is not an LLVM target.
+llvm_projects:
+  - "clang;clang-tools-extra;lld;lldb;openmp"
+llvm_runtimes:
+  - "compiler-rt"
+llvm_targets:
+  - "X86;NVPTX;AMDGPU"
+
+# ---- CUDA ------------------------------------------------------------------
+# The full toolkit through the compiler activation, used as
+# ${{ compiler('cuda') }}: LLVM needs nvcc present to find the toolkit, the
+# activation isolates the build, and it puts the development packages in host.
+# QUOTED on purpose: unquoted 12.10 is the YAML float 12.1.
+cuda_compiler:
+  - cuda-nvcc
+cuda_compiler_version:
+  - "12.9"
+
+# ---- ROCm ------------------------------------------------------------------
+# TheRock's stable core tarball, not conda-forge: their ROCm trails the LLVM
+# this toolchain needs, and the generic JIT requires acpp's LLVM <= ROCm's.
+# gfx1150 is the smallest family tarball — the pieces acpp deploys (hiprtc,
+# amdhip64, hsa-runtime64, amd_comgr, device-lib bitcode) are family-independent;
+# the difference between families is ROCm's own math kernels, never deployed.
+rocm_version:
+  - "10.0.0"
+rocm_gfx:
+  - "gfx1150"
+rocm_sha256:
+  - "e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b"
+
+# ---- other backends --------------------------------------------------------
+level-zero-devel:
+  - "1.29"
+# OpenCL is deliberately unpinned: opencl-headers is header-only and
+# date-versioned, and an ICD loader's purpose is a stable ABI.
+
+# ---- libraries the toolchain links -----------------------------------------
+zlib:
+  - "1"
+zstd:
+  - "1.5"
+libxml2-devel:
+  - "2.15"
+numactl:
+  - "2.0"
+
+# ---- python ----------------------------------------------------------------
+# One interpreter for the whole build: lldb's bindings are compiled against
+# whichever interpreter host resolves, so build and host must not solve
+# separately.
+python:
+  - "3.14"

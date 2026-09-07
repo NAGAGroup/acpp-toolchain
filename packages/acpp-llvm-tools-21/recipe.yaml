@@ -1,0 +1,66 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvm-tools-21 — the LLVM tools carrying a version suffix. Lifted from the
+# reference monolith's `llvm-tools-${{ major_ver }}` output (llvmdev-feedstock).
+#
+# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 3 — every
+# `bin/*` copied with a `-<major>` suffix, minus `llvm-config-<major>`, which
+# belongs to llvmdev.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-llvm-tools-${{ llvm_major }}
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  # "On Windows there are no symlinks and copying will create a new package
+  # that is 300MB+"
+  skip: win
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - zlib
+    - zstd
+    - if: osx
+      then: libcxx ==${{ cxx_compiler_version }}
+  run:
+    # UPSTREAM: pin_subpackage("libllvm" ~ major_ver, exact=True)
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ cxx_compiler_version }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - bin/llc-${{ llvm_major }}
+        not_exists:
+          - bin/llvm-config-${{ llvm_major }}
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: LLVM tools, version-suffixed

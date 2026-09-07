@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvmdev — "Contains everything". Lifted from the reference monolith's
+# `llvmdev` output (llvmdev-feedstock).
+#
+# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 5 —
+# "install everything else". THE SUBTRACTION IS UPSTREAM'S OWN MECHANISM, not a
+# policy of ours: upstream declares libllvm<major> and llvm-tools as HOST
+# dependencies of this output, so their files are already in the prefix when it
+# builds, and a conda package is the file DIFF of its build. Those host deps are
+# preserved below, so the same subtraction happens for the same reason.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-llvmdev
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    # These two are the SUBTRACTION. Upstream's own host deps, preserved.
+    # UPSTREAM: pin_subpackage(..., exact=True) on each
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - if: win
+      then: acpp-libllvm-c${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-llvm-tools[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - zlib
+    - zstd
+    - if: osx
+      then: libcxx ==${{ cxx_compiler_version }}
+  run:
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - if: win
+      then: acpp-libllvm-c${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - acpp-llvm-tools[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ cxx_compiler_version }}
+  run_constraints:
+    - acpp-llvm        ==${{ llvm_version }}
+    - acpp-llvm-tools  ==${{ llvm_version }}
+    - acpp-clang       ==${{ llvm_version }}
+    - acpp-clang-tools ==${{ llvm_version }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: not win
+            then:
+              - include/llvm/Pass.h
+              - lib/libLLVMCore.a
+              - libexec/llvm/not
+              - bin/llvm-config
+          - if: win
+            then:
+              - ${{ library_prefix }}include/llvm/Pass.h
+              - ${{ library_prefix }}libexec/llvm/not.exe
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: Development headers and libraries for LLVM

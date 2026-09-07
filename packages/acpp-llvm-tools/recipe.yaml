@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvm-tools — the unsuffixed LLVM tools. Lifted from the reference
+# monolith's `llvm-tools` output (llvmdev-feedstock).
+#
+# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 4. On unix
+# this package is a SYMLINK FARM onto acpp-llvm-tools-21 plus `share/*`, minus
+# `llvm-config`; on win, where there are no symlinks, it carries the real
+# `bin/*.exe` and takes no dependency on the suffixed package (which does not
+# exist there).
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  # Written ONCE, here, and used at every path site — conda's Windows layout
+  # puts binaries under Library/.
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-llvm-tools
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    - _acpp-stage ==0.0.0
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - if: not win
+      then: acpp-llvm-tools-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    # "on unix, there's only symlinks"
+    - if: win
+      then:
+        - libxml2-devel
+        - zlib
+        - zstd
+  run:
+    # UPSTREAM: pin_subpackage(..., exact=True) on both
+    - acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+    - if: not win
+      then: acpp-llvm-tools-${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+  run_constraints:
+    - acpp-llvm        ==${{ llvm_version }}
+    - acpp-llvmdev     ==${{ llvm_version }}
+    - acpp-clang       ==${{ llvm_version }}
+    - acpp-clang-tools ==${{ llvm_version }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: win
+            then: ${{ library_prefix }}bin/llc.exe
+          - if: not win
+            then: bin/llc
+        not_exists:
+          - if: win
+            then: ${{ library_prefix }}bin/llvm-config.exe
+          - if: not win
+            then: bin/llvm-config
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: LLVM tools

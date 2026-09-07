@@ -267,3 +267,30 @@ khronos-opencl-icd-loader:
 # whichever one host resolved, so a mismatch ships a module that cannot import.
 python:
   - "3.14"
+
+# ---- clangdev's own variant axes (lifted from clangdev-feedstock's cbc) -----
+# These three are consumed by nearly every clangdev-derived output, so they are
+# not optional decoration: a key that is undefined where a recipe reads it is a
+# TEMPLATE ERROR, not a skip.
+#
+# `with_cfg` is a REAL TWO-ROW AXIS and the only one in this file. Upstream
+# ships two builds of the single name `clang`: the cfg build carries the conda
+# config files that make clang prefix-aware (--sysroot, -I$PREFIX/include,
+# -L$PREFIX/lib), the nocfg build is a vanilla clang for tooling and analysis.
+# `clang-no-conda-cfg` is a 24 kB selector metapackage that exists ONLY at the
+# false row (`skip: with_cfg`) and pins the nocfg build. Dropping the axis would
+# silently delete a published package name.
+with_cfg:
+  - true
+  - false
+
+# "keep for use with root when it catches up" — clangdev's own cbc comment.
+# One row; it is the leading component of every clangdev build string.
+variant:
+  - default
+
+# "Starting from LLVM 14, the ABI of libclang doesn't necessarily match the
+# major version anymore" — clangdev's cbc. This is the SOVERSION, not our LLVM
+# major, and it is what names acpp-libclang13.
+libclang_soversion:
+  - "13"

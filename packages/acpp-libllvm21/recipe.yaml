@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libllvm21 — the LLVM shared libraries. Lifted from the reference
+# monolith's `libllvm${{ major_ver }}` output (llvmdev-feedstock). Upstream's
+# own comment: "Contains the shared libraries. To make different LLVM libraries
+# co-installable soversion is appended to the package name."
+#
+# SLICING FORM: upstream's $PKG_NAME-branching install script, arm 2 — NOT a
+# glob list. See ../_shared/install_llvm.nu.
+
+context:
+  # Lifted packages carry the FULL PATCH version. Activation packages carry
+  # MAJOR.MINOR, and ours (acpp, acpp-runtime, the backend metapackages) stay
+  # date-versioned, because they are AdaptiveCpp and not LLVM.
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_maj_min: "21.1"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+
+package:
+  name: acpp-libllvm${{ llvm_major }}
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  # THE TAG LEADS EVERY BUILD STRING IN THIS WORKSPACE. Our same-build coupling
+  # between our own packages is a bracket MatchSpec `build="<tag>_*"`, and that
+  # only matches when the tag is the first component.
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_llvm.nu
+    env:
+      ACPP_LLVM_MAJOR: ${{ llvm_major }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
+
+requirements:
+  build:
+    # Upstream carries `stdlib('c')` and `compiler('cxx')` here and says why:
+    # "these deps are added because of the static libraries". They are kept
+    # because their STRONG run_exports are what put libgcc/libstdcxx into this
+    # package's run deps. Upstream's cmake/ninja/python are NOT kept — build
+    # machinery, and this package compiles nothing, it copies.
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+  host:
+    # THE STAGE. Never a run dep of anything, so it reaches no shipped
+    # metadata; the fixed 0.0.0 is what lets it upload once and be skipped.
+    - _acpp-stage ==0.0.0
+    - if: unix
+      then: libxml2-devel
+    - zlib
+    - zstd
+    - if: osx
+      then: libcxx ==${{ cxx_compiler_version }}
+  run:
+    # "we need to do this manually because clang_bootstrap has no run-export"
+    - if: osx
+      then: libcxx >=${{ cxx_compiler_version }}
+  run_exports:
+    # UPSTREAM: `pin_subpackage("libllvm" ~ major_ver, upper_bound="x.x")`,
+    # absent on win. TIGHTENED to the exact same-build form: there is no
+    # cross-recipe pin_subpackage under this backend, and exact pins between
+    # our own packages are what make it impossible for an all-21 tree to float
+    # one member onto a different build.
+    - if: not win
+      then: acpp-libllvm${{ llvm_major }}[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          # old style
+          - if: linux
+            then: lib/libLLVM-${{ llvm_major }}.so
+          - if: osx
+            then: lib/libLLVM-${{ llvm_major }}.dylib
+          # new style
+          - if: linux
+            then:
+              - lib/libLLVM.so.${{ llvm_maj_min }}
+              - lib/libLTO.so.${{ llvm_maj_min }}
+          - if: osx
+            then:
+              - lib/libLLVM.${{ llvm_maj_min }}.dylib
+              - lib/libLTO.${{ llvm_maj_min }}.dylib
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: LLVM shared libraries, with AdaptiveCpp linked into the toolchain

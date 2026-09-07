@@ -82,6 +82,14 @@ acpp-activation-win = { path = "packages/acpp-activation-win" }
 acpp-activation-osx = { path = "packages/acpp-activation-osx" }
 acpp-llvm-spirv = { path = "packages/acpp-llvm-spirv" }
 
+# ---- lifted from the reference monolith (task 2) ----
+acpp-libllvm21 = { path = "packages/acpp-libllvm21" }
+acpp-llvm = { path = "packages/acpp-llvm" }
+acpp-llvm-tools-21 = { path = "packages/acpp-llvm-tools-21" }
+acpp-llvm-tools = { path = "packages/acpp-llvm-tools" }
+acpp-libllvm-c21 = { path = "packages/acpp-libllvm-c21" }
+acpp-llvmdev = { path = "packages/acpp-llvmdev" }
+
 # ---- Build backends --------------------------------------------------------
 # Backends are specified as "*" in every member manifest, NOT pinned to a
 # version (Jack's explicit ruling): a pinned backend rots, and breakage on a

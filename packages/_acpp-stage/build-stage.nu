@@ -612,7 +612,19 @@ def windows-args [src: string, libprefix: string, build: string] {
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($src)/OpenCL-Headers"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-CXX-HEADERS=($src)/OpenCL-CLHPP"
     "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
-    "-DLLVM_TOOL_BUGPOINT_BUILD=OFF"
+    # ⚠ NO `LLVM_TOOL_BUGPOINT_BUILD=OFF` HERE, AND ITS ABSENCE IS THE FIX.
+    # This line was lifted verbatim from `main`'s stage, where it was harmless
+    # because that build also set `LLVM_INCLUDE_TESTS=OFF`. The rebuild turned
+    # tests ON — deliberately, because llvmdev's own package test asserts
+    # libexec/llvm/{not,FileCheck} and the superset rule requires them — and the
+    # two settings are incompatible: with tests included, `check-all` takes a
+    # dependency on every tool, `bugpoint` among them, and a tool that is not
+    # built makes the GENERATE step fail. Win run 34137060436 emitted 1,280
+    # errors of that one shape after configuring successfully.
+    #
+    # Upstream does not pass it: llvmdev's bld.bat sets INCLUDE_TESTS,
+    # INCLUDE_UTILS and INSTALL_UTILS all ON and disables no tools. Matching
+    # upstream means dropping the trim, not switching tests off to keep it.
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX"
     "-DLLVM_HOST_TRIPLE=x86_64-pc-windows-msvc"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-pc-windows-msvc"

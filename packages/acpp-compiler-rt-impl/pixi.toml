@@ -1,4 +1,4 @@
-# acpp-compiler-rt — the unversioned compiler-rt selector metapackage.
+# acpp-compiler-rt-impl — the unversioned compiler-rt_<platform> selector metapackage.
 #
 # A SLICER over _acpp-stage. PACKAGE-ONLY manifest; the sole [workspace] is the
 # repo root.
@@ -12,7 +12,7 @@
 # authority for what a dependency IS. [package.run-dependencies] is accepted by
 # this backend and SILENTLY IGNORED.
 [package]
-name = "acpp-compiler-rt"
+name = "acpp-compiler-rt-impl"
 version = "21.1.8"
 publish = true
 
@@ -20,8 +20,7 @@ publish = true
 backend = { name = "pixi-build-rattler-build", version = "*" }
 
 [package.build-dependencies]
-acpp-compiler-rt21 = { workspace = true }
-acpp-libcompiler-rt = { workspace = true }
+acpp-compiler-rt21-impl = { workspace = true }
 
 [package.build.config]
 # The slice scripts live in ../_shared so the family cannot drift apart; the

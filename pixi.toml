@@ -83,6 +83,22 @@ acpp-activation-osx = { path = "packages/acpp-activation-osx" }
 acpp-llvm-spirv = { path = "packages/acpp-llvm-spirv" }
 
 # ---- lifted from the reference monolith (task 2) ----
+# compiler-rt family. The two `-impl` names are DIRECTORY names, not package
+# names: those recipes emit `acpp-compiler-rt{21,}_<target_platform>`, and a
+# pixi package manifest needs a fixed [package] name.
+acpp-libcompiler-rt = { path = "packages/acpp-libcompiler-rt" }
+acpp-compiler-rt21-impl = { path = "packages/acpp-compiler-rt21-impl" }
+acpp-compiler-rt21 = { path = "packages/acpp-compiler-rt21" }
+acpp-compiler-rt-impl = { path = "packages/acpp-compiler-rt-impl" }
+
+# clangdev family.
+"acpp-libclang-cpp21.1" = { path = "packages/acpp-libclang-cpp21.1" }
+acpp-libclang-cpp = { path = "packages/acpp-libclang-cpp" }
+acpp-libclang13 = { path = "packages/acpp-libclang13" }
+acpp-libclang = { path = "packages/acpp-libclang" }
+acpp-clang-format-21 = { path = "packages/acpp-clang-format-21" }
+acpp-clang-format = { path = "packages/acpp-clang-format" }
+
 acpp-libllvm21 = { path = "packages/acpp-libllvm21" }
 acpp-llvm = { path = "packages/acpp-llvm" }
 acpp-llvm-tools-21 = { path = "packages/acpp-llvm-tools-21" }

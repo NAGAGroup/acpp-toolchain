@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-libcompiler-rt — the SHARED sanitizer runtimes. Lifted from the reference
+# monolith's `libcompiler-rt` output (compiler-rt-feedstock).
+#
+# SLICING FORM: GLOB LIST, upstream's own. The globs name `libclang_rt*` files
+# directly at the top of lib/ (bin/ on win), so they are already scoped to
+# compiler-rt by the file names themselves and cannot reach another project's
+# output in our union stage. No artifact derivation was needed here; the shape
+# was checked against conda-forge's libcompiler-rt-21.1.8 artifact all the same
+# (linux-64: ten `lib/libclang_rt.*.so`, nothing else).
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-libcompiler-rt
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  # Upstream: "clang_rt.asan_dynamic-x86_64.dll is the only DLL for x64; as of
+  # LLVM v22, asan isn't being built for win-arm64". Inert for us — win-arm64 is
+  # not a round-1 platform — and kept because it states a fact about the
+  # upstream build, not a preference of ours.
+  skip: win and arm64
+  script:
+    interpreter: nu
+    file: ../_shared/carve.nu
+    env:
+      ACPP_CARVE: >-
+        ${{ "lib/libclang_rt*.so" if linux
+        else "lib/libclang_rt*.dylib" if osx
+        else "Library/bin/clang_rt*.dll" }}
+
+requirements:
+  build:
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
+    - nushell
+  host:
+    # Upstream declares `host: []` because its slice comes out of its own build
+    # tree. Ours comes out of the stage, so the stage is the one host entry that
+    # has no upstream counterpart in this package.
+    - _acpp-stage ==0.0.0
+  run: []
+  run_constraints:
+    # Upstream: "This is when compiler-rt and compiler-rt_<target_platform>
+    # split". The name is rewritten to ours: nothing ships under a conda-forge
+    # name, and a constraint naming `compiler-rt` would be a constraint on a
+    # package our channel does not provide.
+    - acpp-compiler-rt >=9.0.1
+  run_exports:
+    # UPSTREAM: pin_subpackage("libcompiler-rt", upper_bound=None)
+    - acpp-libcompiler-rt[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: osx
+            then: lib/libclang_rt.asan_osx_dynamic.dylib
+          - if: linux and x86_64
+            then: lib/libclang_rt.tsan-x86_64.so
+          - if: win
+            then: ${{ library_prefix }}bin/clang_rt.asan_dynamic-x86_64.dll
+
+about:
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
+  license: Apache-2.0 WITH LLVM-exception
+  # Upstream points at compiler-rt/LICENSE.TXT in its own source tree. A slicer
+  # has no source tree, so the licence is the vendored copy the stage asserts
+  # byte-for-byte against the extracted sources; it is the same LLVM licence
+  # text that file carries.
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: compiler-rt shared sanitizer runtime libraries

@@ -112,13 +112,35 @@ def generate [dir: string, plat: string] {
   } else {
     "target_platform: this output is architecture-specific"
   })
+  # ⚠ AND A NOARCH COPY MUST IGNORE `build_platform` IN ITS VARIANT HASH.
+  #
+  # Referencing build_platform in the skip makes rattler-build hash it, and
+  # pixi's two paths do not agree about that: the ENUMERATION computes a hash
+  # without it, the BUILD computes one with it, and pixi then rejects its own
+  # backend's artifact — "the build backend did not return the expected
+  # package", after the archive has been written. Run 34110381268 died there,
+  # and pixi retried the whole build exactly once before failing.
+  #
+  # `variant: ignore_keys: [build_platform]` removes it from the HASH while
+  # leaving it available to the SKIP, which is the exact distinction we want:
+  # build_platform decides whether this copy is built here, and says nothing
+  # about the content, so it does not belong in the identity of the artifact.
+  # Reproduced and fixed on a five-line throwaway package before being applied
+  # here. Arch copies are unaffected — measured, their two hashes already agree
+  # because nothing in them references build_platform.
+  let ignore_block = (if $is_noarch {
+    "\n  variant:\n    ignore_keys:\n      # See the skip above: build_platform selects the JOB, not the content.\n      - build_platform"
+  } else { "" })
+  if $is_noarch and ($src | lines | any {|l| $l =~ '^\s*variant:' }) {
+    error make {msg: $"gen-platform-packages: ($path) already has a `variant:` block; the generated ignore_keys would duplicate it"}
+  }
   let skip_lines = ($src | lines | where {|l| $l =~ '^  skip: ' })
   let with_name = ($src | str replace $name_line $literal)
   let out = (if ($skip_lines | is-empty) {
     # No authored skip: insert one directly after the literal name's build
     # `number:` line, where a skip conventionally sits.
     let anchor = ($with_name | lines | where {|l| $l =~ '^  number: ' } | first)
-    $with_name | str replace $anchor $"($anchor)\n  # GENERATED: this copy exists for ($plat) alone, keyed on ($why).\n  skip: ($test)"
+    $with_name | str replace $anchor $"($anchor)\n  # GENERATED: this copy exists for ($plat) alone, keyed on ($why).\n  skip: ($test)($ignore_block)"
   } else {
     let authored = ($skip_lines | first)
     let expr = ($authored | str replace "  skip: " "" | str trim)
@@ -206,6 +228,16 @@ def main [--check] {
       }
       if $noarch and (not ($skips | any {|s| $s =~ 'build_platform' })) {
         $axis_bad = ($axis_bad | append $"($out) is noarch and its skip never mentions build_platform — the only axis that means anything at build time there")
+      }
+      # ⚠ A NOARCH COPY THAT REFERENCES build_platform MUST IGNORE IT IN THE
+      # HASH. Otherwise pixi's enumeration and its build compute different
+      # variant hashes and pixi rejects its own backend's artifact AFTER the
+      # archive is written — run 34110381268, which it retried once first.
+      if $noarch and ($t | str contains "build_platform") {
+        let ignores = ($t | lines | any {|l| $l =~ '^\s*- build_platform\s*$' })
+        if not $ignores {
+          $axis_bad = ($axis_bad | append $"($out) references build_platform but does not list it under `variant: ignore_keys:` — its enumeration and build hashes will diverge and pixi will reject the built package")
+        }
       }
       # The platform booleans must be CONSTANTS in a generated copy. If one is
       # still an expression, the recipe is deciding at build time what the

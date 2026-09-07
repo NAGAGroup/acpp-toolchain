@@ -70,6 +70,10 @@ build:
   number: ${{ build_num }}
   # GENERATED: this copy exists for linux-64 alone, keyed on BOTH axes: build_platform is what holds at build time (target_platform is `noarch` here), target_platform is what keeps this copy visible to a local cross-render.
   skip: target_platform != "linux-64" and build_platform != "linux-64"
+  variant:
+    ignore_keys:
+      # See the skip above: build_platform selects the JOB, not the content.
+      - build_platform
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   noarch: generic
   # UPSTREAM: `detect_binary_files_with_prefix: false  # [win]`

@@ -214,6 +214,11 @@ source:
       # kernel-link time. The baked LIB_MVEC_DIR is the build sysroot, which
       # does not exist on user machines, and lld has no default search paths.
       - patches/acpp/0008-host-jit-find-libmvec-via-loader.patch
+      # The pass plugin must declare LLVMPasses. Invisible with a shared
+      # libLLVM, fatal with a static one: the plugin is linked INTO every LLVM
+      # tool, and bugpoint does not link Passes itself. Windows first, but true
+      # of any static LLVM.
+      - patches/acpp/0004-plugin-declare-llvm-passes-dependency.patch
 
   # OpenCL headers, consumed through FETCHCONTENT_SOURCE_DIR_* so the build
   # never reaches the network.

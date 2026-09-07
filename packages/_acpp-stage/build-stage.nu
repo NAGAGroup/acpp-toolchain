@@ -681,6 +681,23 @@ def openmp-install-fixups [prefix: string] {
 
 # ============================================================================
 def main [] {
+  # THE STAGE-EXECUTION COUNTER, and it is an OBSERVATION, not a gate.
+  #
+  # The whole cost model of this workspace rests on one claim: the expensive
+  # build runs ONCE per platform and every slicer reuses it through pixi's
+  # .pixi/bld cache. That claim has never been measured on a real runner, and
+  # it cannot be measured from inside the build tree — each build gets its own
+  # copy of it. So each execution appends ONE line that cannot collide with
+  # another execution's, to a file the workflow puts OUTSIDE the tree; the
+  # number of DISTINCT lines is the number of times this script actually ran.
+  # If the variable is unset (a local build, a laptop), nothing happens.
+  let run_log = ($env | get -o ACPP_STAGE_RUN_LOG | default "")
+  if $run_log != "" {
+    let stamp = $"(date now | format date '%Y-%m-%dT%H:%M:%S%.9f') (random chars --length 12)"
+    $"($stamp)\n" | save --append --raw $run_log
+    print $"stage-execution counter: appended ($stamp) to ($run_log)"
+  }
+
   # Empty values forwarded from the recipe env mean "unset" — hide them so the
   # tools fall back to their own defaults instead of seeing "".
   for v in [CCACHE_DIR CCACHE_MAXSIZE CCACHE_BASEDIR CCACHE_NOHASHDIR ACPP_BUILD_DIR] {

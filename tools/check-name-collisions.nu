@@ -15,23 +15,35 @@
 # VISIBLE — a third build of a name at one version is not an error but is worth
 # seeing, and a silently growing variant matrix is how build times double.
 #
+# `--log` reads a publish run that already happened instead of rendering a new
+# one. In CI the real publish has just printed the set, and re-deriving it costs
+# minutes and can disagree with what was actually uploaded — the log is the
+# stronger evidence, not merely the cheaper one.
+#
 #   pixi run -e packaging nu tools/check-name-collisions.nu --platform linux-64
+#   pixi run -e packaging nu tools/check-name-collisions.nu --platform linux-64 --log publish.log
 
-def main [--platform: string] {
+def main [--platform: string, --log: string] {
   if ($platform | is-empty) {
     error make {msg: "check-name-collisions: --platform <p> is required"}
   }
 
-  let r = (^pixi publish --dry-run --target-platform $platform --to ./local-channel | complete)
-  if $r.exit_code != 0 {
-    print $r.stderr
-    error make {msg: $"check-name-collisions: the dry run for ($platform) failed"}
-  }
+  let text = (if ($log | is-empty) {
+    let r = (^pixi publish --dry-run --target-platform $platform --to ./local-channel | complete)
+    if $r.exit_code != 0 {
+      print $r.stderr
+      error make {msg: $"check-name-collisions: the dry run for ($platform) failed"}
+    }
+    $r.stderr
+  } else {
+    if not ($log | path exists) { error make {msg: $"check-name-collisions: ($log) does not exist"} }
+    open --raw $log
+  })
 
   # The build list goes to STDERR, one `  - <name> v<version> [<build>]` line
   # per BUILD (not per name).
-  let builds = ($r.stderr | lines
-    | each {|l| $l | parse -r '^  - (?P<name>\S+) v(?P<version>\S+) \[(?P<build>[^\]]+)\]' }
+  let builds = ($text | lines
+    | each {|l| $l | parse -r '^\s*- (?P<name>\S+) v(?P<version>\S+) \[(?P<build>[^\]]+)\]' }
     | flatten)
 
   if ($builds | is-empty) {

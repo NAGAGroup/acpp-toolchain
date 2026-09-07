@@ -224,6 +224,15 @@ nushell = ">=0.114,<0.115"
 libarchive = ">=3.8,<3.9"
 rattler-index = ">=0.31,<0.32"
 
+# bash and grep are ONLY for tools/tests/exercise-workflow-guards.sh, which
+# replays staging.yml''s own bash guards. Scoped to linux because that is where
+# they exist as conda packages and where the test is run; scoping them here
+# rather than above keeps the environment solvable on win and osx, where a
+# bare `bash` has no candidate at all.
+[feature.packaging.target.linux-64.dependencies]
+bash = ">=5.2,<5.3"
+grep = ">=3.11,<3.13"
+
 [environments.packaging]
 features = ["packaging"]
 no-default-feature = true
@@ -261,6 +270,20 @@ description = "Assert no package name is produced at more than one version"
 # THE ONLY GATE HERE THAT READS BUILT ARTIFACTS, so it runs after a real build
 # rather than on a dry run. --expect is mandatory and must be at least 2: a
 # pairwise-disjointness claim over one artifact is vacuously true.
+# THE GATES' OWN TEST. Every guard above is run twice — once over input it must
+# accept, once over input it must REJECT — against synthetic .conda artifacts
+# built for the purpose, so the gates run their real extraction paths. A guard
+# that has never fired is untested code, and this is what keeps that from being
+# true. It found a live nushell defect in publish-accounting.nu that a
+# parse-check could not see.
+[feature.packaging.tasks.test-gates]
+cmd = "nu tools/tests/exercise-gates.nu"
+description = "Exercise every packaging gate on good AND bad input"
+
+[feature.packaging.tasks.test-workflow-guards]
+cmd = "bash tools/tests/exercise-workflow-guards.sh"
+description = "Exercise staging.yml's bash guards (the version gate, the platform matrix)"
+
 [feature.packaging.tasks.check-disjointness]
 cmd = "nu tools/check-package-disjointness.nu --artifacts {{ artifacts }} --expect {{ expect }}"
 args = [

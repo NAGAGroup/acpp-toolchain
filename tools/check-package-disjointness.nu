@@ -39,6 +39,13 @@ def package-paths [artifact: string] {
   $raw | from json | get paths | get _path
 }
 
+# The package NAME, read from the artifact's own metadata rather than parsed
+# off the filename. It decides which pairs are comparable at all — see below.
+def package-name [artifact: string] {
+  let raw = (^bsdtar -xOf $artifact "info-*.tar.zst" | ^bsdtar -xOf - "info/index.json")
+  $raw | from json | get name
+}
+
 def main [
   --artifacts: string    # directory of platform subdirectories holding .conda files
   --expect: int          # minimum artifacts REQUIRED in each platform subdirectory
@@ -69,23 +76,44 @@ def main [
     }
 
     let entries = ($pkgs | each {|p| {
-      name: ($p | path basename),
+      file: ($p | path basename),
+      name: (package-name $p),
       paths: (package-paths $p)
     }})
 
-    # Every unordered pair, once.
+    # Every unordered pair, once — EXCEPT two builds of ONE package name.
+    #
+    # ⚠ SKIPPING SAME-NAME PAIRS IS REQUIRED, NOT A LOOSENING. `acpp-clang` and
+    # `acpp-clangxx` are each built TWICE on every platform, once per `with_cfg`
+    # row, and the two builds ship very nearly the same files by design — that
+    # is what a variant IS. They can never be installed together (one name, one
+    # version, the solver picks one build), so a shared path between them is not
+    # a clobber. Comparing them would make this gate RED on a correct tree,
+    # which is the failure mode that gets a gate deleted rather than fixed.
+    #
+    # The count printed below is therefore the number of pairs actually
+    # COMPARED, not C(n,2): a reader who sees a smaller number should find the
+    # variant pairs named in the line above it.
+    let variant_pairs = ($entries | group-by name | items {|name, rows| {name: $name, builds: ($rows | length)} } | where builds > 1)
+    if not ($variant_pairs | is-empty) {
+      for v in $variant_pairs { print $"($platform): ($v.name) has ($v.builds) builds of one name \(a variant axis) — not compared against itself" }
+    }
+
     mut compared = 0
+    mut skipped = 0
     for i in 0..<(($entries | length) - 1) {
       for j in ($i + 1)..<($entries | length) {
         let a = ($entries | get $i)
         let b = ($entries | get $j)
+        if $a.name == $b.name { $skipped = $skipped + 1; continue }
         $compared = $compared + 1
         let shared = ($a.paths | where {|p| $p in $b.paths })
         if not ($shared | is-empty) {
-          $failures = ($failures | append $"($platform): ($a.name) and ($b.name) both ship ($shared | length) path\(s\), e.g. ($shared | first 5 | str join ', ')")
+          $failures = ($failures | append $"($platform): ($a.file) and ($b.file) both ship ($shared | length) path\(s\), e.g. ($shared | first 5 | str join ', ')")
         }
       }
     }
+    if $skipped > 0 { print $"($platform): ($skipped) same-name pair\(s\) skipped" }
     let total_files = ($entries | get paths | flatten | length)
     print $"($platform): compared ($compared) package pairs over ($total_files) shipped paths"
   }

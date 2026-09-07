@@ -243,6 +243,13 @@ build:
       CCACHE_BASEDIR: ${{ env.get("CCACHE_BASEDIR", default="") }}
       CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
       ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
+      # THE STAGE-EXECUTION COUNTER. A path OUTSIDE the build tree that the
+      # script appends one unique line to per execution, so the workflow can
+      # count how many times the expensive build actually ran — the once-only
+      # claim the whole cost model rests on, never yet measured. Forwarded the
+      # same way CCACHE_DIR is, and empty on a laptop, where the script does
+      # nothing. It is an OBSERVATION: nothing gates on it yet.
+      ACPP_STAGE_RUN_LOG: ${{ env.get("ACPP_STAGE_RUN_LOG", default="") }}
       # The LLVM version reaches the script from here rather than from
       # PKG_VERSION: PKG_VERSION is the STAGE's fixed 0.0.0, and every piece of
       # inherited upstream logic that parses a version number (resource-dir

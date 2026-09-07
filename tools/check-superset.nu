@@ -102,20 +102,31 @@ def build_targets [] {
   $out
 }
 
-def shipped_names [platform: string] {
-  # The publish set, from the instrument that produces it. The build list goes
-  # to STDERR, and `acpp-clang`/`acpp-clangxx` appear twice — once per with_cfg
-  # row — so the list is deduped.
-  let r = (^pixi publish --dry-run --target-platform $platform --to ./local-channel | complete)
-  if $r.exit_code != 0 {
-    print $r.stderr
-    error make {msg: $"check-superset: the dry run for ($platform) failed"}
+# The publish set. From a SAVED LOG when one is given — in CI the real publish
+# has already printed the set, and that log is what was actually uploaded,
+# which is stronger evidence than a fresh render as well as minutes cheaper.
+# Otherwise from the dry run, which is the same instrument.
+def shipped_names [platform: string, log: string] {
+  let text = (if ($log | is-empty) {
+    let r = (^pixi publish --dry-run --target-platform $platform --to ./local-channel | complete)
+    if $r.exit_code != 0 {
+      print $r.stderr
+      error make {msg: $"check-superset: the dry run for ($platform) failed"}
+    }
+    $r.stderr
+  } else {
+    if not ($log | path exists) { error make {msg: $"check-superset: ($log) does not exist"} }
+    open --raw $log
+  })
+  let names = ($text | lines
+    | each {|l| $l | parse -r '^\s*- (?P<n>\S+) v\S+ \[' | get n.0? } | compact | uniq)
+  if ($names | is-empty) {
+    error make {msg: $"check-superset: parsed zero package names for ($platform) — a comparison against nothing is not a pass"}
   }
-  $r.stderr | lines | where {|l| $l starts-with "  - " }
-    | each {|l| $l | parse -r '^  - (?P<n>\S+) v' | get n.0? } | compact | uniq
+  $names
 }
 
-def main [--platform: string, --regenerate] {
+def main [--platform: string, --regenerate, --log: string, --targets-file: string = $TARGET_FILE] {
   if $regenerate {
     let targets = (build_targets)
     let payload = {
@@ -135,10 +146,10 @@ def main [--platform: string, --regenerate] {
   if ($platform | is-empty) {
     error make {msg: "check-superset: --platform <p> is required (or --regenerate)"}
   }
-  if not ($TARGET_FILE | path exists) {
-    error make {msg: $"check-superset: ($TARGET_FILE) is missing — run with --regenerate"}
+  if not ($targets_file | path exists) {
+    error make {msg: $"check-superset: ($targets_file) is missing — run with --regenerate"}
   }
-  let doc = (open $TARGET_FILE)
+  let doc = (open $targets_file)
   let targets = ($doc.names | get $platform)
   let expected = ($doc.counts | get $platform)
 
@@ -152,7 +163,7 @@ def main [--platform: string, --regenerate] {
     error make {msg: $"check-superset: only ($targets | length) target names for ($platform); the ratified subset is far larger, so this is a broken filter rather than a pass"}
   }
 
-  let shipped = (shipped_names $platform)
+  let shipped = (shipped_names $platform $log)
   let missing = ($targets | where {|t| $t not-in $shipped })
   print $"check-superset: ($platform) — examined ($targets | length) upstream names against ($shipped | length) shipped packages"
   if not ($missing | is-empty) {

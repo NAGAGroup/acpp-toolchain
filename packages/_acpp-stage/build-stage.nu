@@ -618,12 +618,25 @@ def windows-args [src: string, libprefix: string, build: string] {
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"
     "-DCMAKE_POLICY_DEFAULT_CMP0111=NEW"
     $"-DCMAKE_PREFIX_PATH=($libprefix)"
-    # See linux-args: XRay has no Windows port, and MemProf/ORC are not built
-    # for Windows by conda-forge's clang either. ASan, the profile runtime and
-    # libFuzzer DO support Windows and are enabled in common-args.
-    "-DCOMPILER_RT_BUILD_XRAY=OFF"
-    "-DCOMPILER_RT_BUILD_MEMPROF=OFF"
-    "-DCOMPILER_RT_BUILD_ORC=OFF"
+    # ⚠ NO COMPILER_RT_BUILD_* TOGGLES HERE, AND THE ARTIFACT IS WHY. This block
+    # carried XRAY/MEMPROF/ORC=OFF under a `main`-era comment asserting "XRay has
+    # no Windows port, and MemProf/ORC are not built for Windows by conda-forge's
+    # clang either". Conda-forge's win-64 compiler-rt21 ships
+    # `lib/clang/21/include/orc/c_api.h`, `lib/clang/21/lib/windows/orc_rt-x86_64.lib`,
+    # all three `include/xray/*.h` and `include/sanitizer/memprof_interface.h` —
+    # so the premise was false and the comment stated a wrong mechanism, which is
+    # worse than no comment.
+    #
+    # Upstream's compiler-rt bld.bat passes NO toggles at all: CMake decides per
+    # platform. Matching that is what makes the stage produce the paths our
+    # carve — scoped from that same artifact — asks for. Win run 34146202664
+    # failed on `include/orc/**` matching nothing, which is the carve and the
+    # stage disagreeing about a set upstream had already settled.
+    #
+    # Same class as the bugpoint trim: a lift whose premise died. Linux and osx
+    # were checked against THEIR artifacts rather than against a green run —
+    # both ship orc, xray and memprof, and both blocks set them ON, so they
+    # already agree.
     # lldb/bld.bat: swig-generated bindings against the host interpreter, and
     # the site-packages layout conda uses on win.
     "-DLLDB_ENABLE_SWIG=ON"

@@ -402,6 +402,26 @@ def main [--os: string = ""] {
     rm -rf $bt $empty
   }
 
+  # ⚠ THE STAGE'S PATH LISTING IS STAGE-RELATIVE. It is the input
+  # check-carves-against-stage resolves forward-slash carve globs against, so an
+  # entry prefixed with `_stage/` — which relativising against the LAYOUT root
+  # on Windows produces — would make all forty carves read as matching nothing.
+  # That is a tool lying about the tree rather than a broken tree, which is the
+  # worst failure a diagnostic can have, and it is invisible on linux where the
+  # two roots differ by nothing.
+  let listing = (^nu -c $"$env.ACPP_FAKE_OS = '($os)'; $env.ACPP_LLVM_MAJOR = '21'; source ($STAGE); stage-path-listing '($root)' | to json" | complete)
+  let entries = (try { $listing.stdout | from json } catch { [] })
+  let staged = ($entries | where {|e| $e | str starts-with "_stage/" })
+  let backslashed = ($entries | where {|e| $e =~ '\\' })
+  if ($entries | length) > 0 and ($staged | is-empty) and ($backslashed | is-empty) {
+    print $"PASS: the stage listing is stage-relative and forward-slash \(($entries | length) entries)"
+    $results = ($results | append true)
+  } else {
+    print $"FAIL: listing has ($entries | length) entries, ($staged | length) prefixed with _stage/, ($backslashed | length) with a backslash"
+    for s in ($staged | first 3) { print $"      ($s)" }
+    $results = ($results | append false)
+  }
+
   # ⚠ THE HELPER'S CONTRACT, TESTED WITHOUT A WINDOWS FILESYSTEM. The assertion
   # above cannot fire on linux — a linux root is already canonical, so a raw one
   # passes — which would leave the drive-letter half detectable only on a

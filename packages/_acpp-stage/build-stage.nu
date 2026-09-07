@@ -742,10 +742,23 @@ def darwin-link-diagnostics [] {
 
   # WHICH `ld` the driver can see. If the conda ld64 is absent from the build
   # env, clang falls back to PATH and picks up Xcode's ld-prime.
-  for probe in [["which -a ld" {|| ^which -a ld }]
-                ["xcrun -f ld" {|| ^xcrun -f ld }]
-                ["ld -v" {|| ^ld -v }]] {
-    let r = (do -i $probe.1 | complete)
+  # ⚠ `complete` ONLY WORKS ON AN EXTERNAL COMMAND, and `do -i` returns nothing
+  # when the block fails — so `do -i {...} | complete` is itself an error, which
+  # is how the first version of this diagnostic aborted the build it was meant
+  # to observe. Each probe is therefore run as a plain external inside `do`,
+  # whose non-zero exit `complete` captures rather than raises.
+  for probe in [["which -a ld" ["which" "-a" "ld"]]
+                ["xcrun -f ld" ["xcrun" "-f" "ld"]]
+                ["ld -v" ["ld" "-v"]]] {
+    let argv = $probe.1
+    # ⚠ A MISSING COMMAND IS A NUSHELL ERROR, NOT AN EXIT CODE, so `complete`
+    # does not catch it and the diagnostic would abort the build on any host
+    # without the tool — `xcrun` on linux, for instance. Check first.
+    if (which ($argv | first) | is-empty) {
+      print $"  ($probe.0): not on PATH"
+      continue
+    }
+    let r = (do { ^($argv | first) ...($argv | skip 1) } | complete)
     let out = ([$r.stdout $r.stderr] | str join "" | lines | first 4 | str join " | ")
     print $"  ($probe.0): exit ($r.exit_code) — ($out)"
   }
@@ -754,12 +767,23 @@ def darwin-link-diagnostics [] {
   # where the OUTER clang looks — as opposed to the build tree, where our own
   # alias lives?
   for p in [$"($bp)/lib/clang/21/lib/libLTO.dylib" $"($bp)/lib/libLTO.dylib" $"($bp)/lib"] {
-    let t = (do -i {|| ls -l $p } | complete)
-    print $"  ls ($p): exit ($t.exit_code) — ($t.stdout | lines | where {|l| $l =~ 'libLTO'} | first 3 | str join ' | ')"
+    # `ls` is a nushell builtin: `complete` cannot wrap it, and a missing path
+    # raises. Ask first.
+    if ($p | path exists) {
+      let names = (ls $p | get name | each {|n| $n | path basename } | where {|n| $n =~ "libLTO" } | first 4)
+      print $"  ($p): EXISTS — ($names | str join ', ')"
+    } else {
+      print $"  ($p): absent"
+    }
   }
 
   # The exact -lto_library the driver passes, and the linker it names.
-  let d = (do -i {|| ^$cxx -### -dynamiclib -o /tmp/acpp-probe.dylib -x c /dev/null } | complete)
+  if (which $cxx | is-empty) {
+    print $"  ($cxx): not on PATH — skipping the driver probes"
+    print "────────────────────────────────────────────────────────────────────"
+    return
+  }
+  let d = (do { ^$cxx -### -dynamiclib -o /tmp/acpp-probe.dylib -x c /dev/null } | complete)
   let joined = ([$d.stdout $d.stderr] | str join "")
   print $"  -lto_library argument: ($joined | parse -r '\"-lto_library\" \"([^\"]*)\"' | get capture0.0? | default '(none in -### output)')"
   print $"  linker the driver names: ($joined | lines | where {|l| $l =~ '/ld\"|/ld |ld64'} | first 1 | str join '' | str substring 0..160)"
@@ -767,7 +791,7 @@ def darwin-link-diagnostics [] {
   # THE FAILING SHAPE, reproduced small. The flags are the ones that
   # distinguish compiler-rt's dynamic sanitizer links from the LLVM dylib links
   # that succeed in the same run.
-  let shape = (do -i {|| ^$cxx -v -dynamiclib -nodefaultlibs -nostdlib++ -fapplication-extension -o /tmp/acpp-probe2.dylib -x c /dev/null } | complete)
+  let shape = (do { ^$cxx -v -dynamiclib -nodefaultlibs -nostdlib++ -fapplication-extension -o /tmp/acpp-probe2.dylib -x c /dev/null } | complete)
   print $"  reproduced shape: exit ($shape.exit_code)"
   for l in ([$shape.stdout $shape.stderr] | str join "" | lines | where {|l| $l =~ 'lto_library|ld:|@\(#\)|PROGRAM:ld|LTO' } | first 8) {
     print $"      ($l | str trim | str substring 0..200)"
@@ -1162,6 +1186,44 @@ def compiler-rt-install-fixups [prefix: string, layout_root: string] {
 # By NAME, never by glob: the resource include directory is clang's own, full
 # of stddef.h and the intrinsics headers, and a wildcard here would move the
 # compiler's headers into the prefix.
+# The stage's own path listing, STAGE-RELATIVE on every platform.
+#
+# ⚠ THE FIFTH MEMBER OF THE win-root CLASS, and the only one that is not a build
+# failure: relativising against the LAYOUT root on Windows would prefix every
+# entry with `_stage/`, so `check-carves-against-stage --platform win-64` would
+# report all forty carves as matching nothing — a tool lying about the tree
+# rather than the tree being wrong. The carve globs are written as final package
+# paths and carve.nu strips `Library/` from them, so stage-relative is the
+# spelling both sides already agree on.
+#
+# TYPE AND TARGET, not just the path: a bare path list cannot say whether an
+# entry is a real file, a symlink, or a DANGLING one — the discriminator that
+# was missing when acpp-libclang-cpp21.1 carved one file into a package with
+# zero content (run 34116494098).
+#
+# A function rather than an inline block so the harness can run it against a
+# synthetic tree; the listing is an instrument, and an instrument nobody tests
+# is one more thing to distrust when it disagrees with a runner.
+def stage-path-listing [stage: string] {
+  let root = (canon-path $stage)
+  glob-native ($root | path join "**" "*") --no-dir
+  | each {|p|
+      # norm-rel: this string is compared against forward-slash carve globs, and
+      # `path relative-to` returns native separators on Windows whatever it was
+      # given.
+      let rel = (norm-rel ($p | path relative-to $root))
+      let t = ($p | path type)
+      if $t == "symlink" {
+        let target = (ls -l $p | get 0.target)
+        let resolves = ($p | path expand | path exists)
+        $"($rel)\tsymlink\t($target)\t(if $resolves { 'resolves' } else { 'DANGLING' })"
+      } else {
+        $"($rel)\t($t)\t\t"
+      }
+    }
+  | sort
+}
+
 def openmp-header-fixups [prefix: string, layout_root: string] {
   # ⚠ THE STAGE ROOT, ON EVERY PLATFORM. This read `$layout_root` on win, which
   # is `%PREFIX%\Library` — one level ABOVE the stage. `$prefix` is
@@ -1381,6 +1443,10 @@ def main [] {
     | append (if (is-windows) {
         (windows-args $src $layout_root $build)
       } else if (is-darwin) {
+        # The link diagnostics run BEFORE the configure, so their output is at
+        # the top of the log rather than buried 6,700 steps down next to the
+        # failure. They gate nothing.
+        darwin-link-diagnostics
         # Say what compiler-rt was pinned to, so the run's own log answers it.
         # These two decide whether compiler-rt probes the SDK with xcrun and
         # takes the zippered path that fails the sanitizer links; a run that
@@ -1587,30 +1653,8 @@ def main [] {
     # Normalised, because the glob results below are: `path relative-to` needs
     # BOTH sides in the same spelling or it fails with "prefix not found" on
     # Windows (win run 34134434830).
-    let root = (canon-path (if (is-windows) { $layout_root } else { $prefix }))
-    # ⚠ TYPE AND TARGET, not just the path. A bare path list cannot answer the
-    # question that actually matters about an install tree — whether an entry is
-    # a real file, a symlink, or a DANGLING symlink — and that is precisely the
-    # discriminator that was missing when acpp-libclang-cpp21.1 carved one file
-    # into a package with zero content (run 34116494098). A listing that cannot
-    # tell those apart is a listing that cannot settle the next one either.
-    let paths = (glob-native ($root | path join "**" "*") --no-dir
-      | each {|p|
-          # norm-rel: this string is WRITTEN to the listing that
-          # check-carves-against-stage resolves carve globs against, and those
-          # globs are forward-slash. A backslash here would make every glob
-          # "match nothing" on a win listing.
-          let rel = (norm-rel ($p | path relative-to $root))
-          let t = ($p | path type)
-          if $t == "symlink" {
-            let target = (ls -l $p | get 0.target)
-            let resolves = ($p | path expand | path exists)
-            $"($rel)\tsymlink\t($target)\t(if $resolves { 'resolves' } else { 'DANGLING' })"
-          } else {
-            $"($rel)\t($t)\t\t"
-          }
-        })
-    $paths | sort | str join "\n" | save -f $listing
+    let paths = (stage-path-listing $prefix)
+    $paths | str join "\n" | save -f $listing
     let dangling = ($paths | where {|l| $l =~ 'DANGLING' })
     print $"stage path listing: ($paths | length) paths written to ($listing)"
     if not ($dangling | is-empty) {

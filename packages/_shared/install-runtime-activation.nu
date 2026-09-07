@@ -1,23 +1,32 @@
 #!/usr/bin/env nu
 # Install the CUDA backend-bitcode activation scripts into the package.
 #
-# Runs as the acpp-runtime-CUDA output's build script: base packages ship no
+# Runs as acpp-runtime-cuda's build script: the base runtime ships no
 # activation, and this is the package whose install guarantees libdevice
-# exists. Deliberately NOT part of the staging build — the staging cache is
-# keyed on SHA(resolved requirements + variant vars) and does NOT hash
-# shared/, so staging-copied scripts go stale silently. Output scripts run
-# on every build, so these files are always current.
+# exists. Its recipe asserts these files in package_contents, so this script is
+# load-bearing and not scaffolding.
 #
-# Sources come from this output's own fetched copy of shared/ (target dir
-# shared-fresh on staging-inheriting outputs, shared on plain ones).
-# Missing files are a hard error, never a silent skip.
+# ⚠ THE SOURCE DIRECTORY IS `activation/`, WHICH IS WHAT THE RECIPE PROVIDES.
+# This script was written for round 1's rattler `staging:` design, where the
+# shared tree arrived as `shared/` (or `shared-fresh/` on staging-inheriting
+# outputs) — both of which died with that design. The recipe has said
+# `- path: ../_shared/activation / target_directory: activation` since the
+# group-7 redesign, so the script was reading a directory nothing provides and
+# failing with "activation source missing" (run 34119652637).
+#
+# The recipe's `target_directory` and the path read here are ONE fact written
+# in two files; tools/check-source-paths.nu now asserts they agree, which is
+# the only reason this cannot drift apart again silently.
+#
+# Missing files stay a hard error, never a silent skip.
 
 def is-windows [] { $nu.os-info.name == "windows" }
 
 def main [] {
-  let fresh = ($env.SRC_DIR | path join "shared-fresh")
-  let root = (if ($fresh | path exists) { $fresh } else { $env.SRC_DIR | path join "shared" })
-  let src = ($root | path join "activation")
+  let src = ($env.SRC_DIR | path join "activation")
+  if not ($src | path exists) {
+    error make {msg: $"activation directory missing at ($src) — the recipe must provide `- path: ../_shared/activation` with `target_directory: activation`"}
+  }
   # Activation scripts always live under $PREFIX/etc, never %PREFIX%\Library\etc.
   let act = ($env.PREFIX | path join "etc" "conda" "activate.d")
   mkdir $act

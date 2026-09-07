@@ -84,7 +84,44 @@ def main [] {
     error make {msg: $"check-source-paths: ($dupes | length) recipe\(s\) have two sources targeting one directory — rattler refuses the second with \"File already exists\""}
   }
 
-  print $"check-source-paths: ($checked) path source\(s\) across ($recipes | length) recipes, no two targeting one directory"
+  # ── WHAT A SCRIPT READS UNDER $SRC_DIR MUST BE WHAT ITS RECIPE PROVIDES ──
+  # The recipe's `target_directory` and the directory its build script reads are
+  # ONE fact written in two files, and nothing checked that they agree:
+  # acpp-runtime-cuda's recipe provided `activation/` while its script read
+  # `shared/` — round 1's layout, dead since the group-7 redesign — and it
+  # failed an hour into run 34119652637. The existing checks could not see it:
+  # the source EXISTS and resolves, so this is a different property.
+  mut mismatched = []
+  for r in $recipes {
+    let dir = ($r | path dirname)
+    let text = (open --raw $r)
+    # The script a recipe runs, as `file: ../_shared/x.nu` or `file: x.nu`.
+    let files = ($text | lines | each {|l| $l | parse -r '^\s*file:\s*(?P<v>\S+)\s*$' } | flatten | get v)
+    if ($files | is-empty) { continue }
+    # Directories this recipe's sources place inside $SRC_DIR. `.` is always
+    # available: it is the recipe directory itself.
+    let targets = ($text | lines | each {|l| $l | parse -r '^\s*target_directory:\s*(?P<v>\S+)\s*$' } | flatten | get v)
+    for f in $files {
+      let script = ($dir | path join $f)
+      if not ($script | path exists) { continue }
+      # `$env.SRC_DIR | path join "x"` — the only form used in this tree, and
+      # matching the form rather than guessing keeps this honest.
+      let reads = (open --raw $script | lines
+        | each {|l| $l | parse -r 'SRC_DIR \| path join "(?P<v>[^"]+)"' }
+        | flatten | get v | uniq)
+      for want in $reads {
+        if $want not-in $targets {
+          $mismatched = ($mismatched | append $"($r | path relative-to (pwd)): its script ($f) reads $SRC_DIR/($want), but the recipe's sources provide [($targets | str join ', ')]")
+        }
+      }
+    }
+  }
+  if not ($mismatched | is-empty) {
+    for m in $mismatched { print $"MISMATCH ($m)" }
+    error make {msg: $"check-source-paths: ($mismatched | length) script\(s\) read a $SRC_DIR directory their recipe does not provide — each fails at BUILD time"}
+  }
+
+  print $"check-source-paths: ($checked) path source\(s\) across ($recipes | length) recipes, no two targeting one directory, every script's $SRC_DIR reads provided"
   if $checked < 10 {
     error make {msg: $"check-source-paths: only ($checked) path sources found — this tree is built out of them, so that is a broken scan"}
   }

@@ -1,0 +1,118 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+#
+# acpp-llvm-openmp — LLVM's OpenMP runtime. Lifted from the reference monolith's
+# `llvm-openmp` output (openmp-feedstock).
+#
+# SLICING FORM: upstream's install SCRIPT, not globs — openmp is a single-output
+# recipe whose package is "whatever the build installed". See
+# ../_shared/install_openmp.nu for the scope and for the one win path we
+# deliberately do not ship.
+#
+# HOW OUR BUILD DIFFERS FROM UPSTREAM'S, because it decides what exists to slice:
+# openmp-feedstock builds openmp STANDALONE, with LLVM_ENABLE_RUNTIMES=openmp
+# over ../runtimes. `_acpp-stage` builds it as an LLVM_ENABLE_PROJECTS entry
+# inside the full tree, and sets OPENMP_ENABLE_LIBOMPTARGET=OFF. Verified at
+# source that this is still supported in 21.1.8: llvm/CMakeLists.txt removes
+# openmp from the project list on AIX only, and otherwise emits a deprecation
+# warning. That warning is expected in the stage's build log and is not a defect.
+
+context:
+  llvm_version: "21.1.8"
+  llvm_major: "21"
+  llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
+  build_num: 0
+  library_prefix: ${{ "Library/" if win else "" }}
+
+package:
+  name: acpp-llvm-openmp
+  version: ${{ llvm_version }}
+
+build:
+  number: ${{ build_num }}
+  string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
+  script:
+    interpreter: nu
+    file: ../_shared/install_openmp.nu
+
+requirements:
+  build:
+    # Upstream's cmake, ninja, python and the win clang / llvm-tools entries are
+    # dropped: they are build machinery, and a copy cannot use them.
+    - ${{ stdlib('c') }}
+    - ${{ compiler('cxx') }}
+    - nushell
+    # Upstream lists this too, under "for run-exports". Here it is load-bearing
+    # at build time: libiomp5md.dll is generated as a forwarder, not copied.
+    - if: win
+      then: create-forwarder-dll
+  host:
+    - _acpp-stage ==0.0.0
+    # UPSTREAM: llvmdev ==${{ version }} — its host dep, needed to LINK
+    # libomptarget against LLVM. We set OPENMP_ENABLE_LIBOMPTARGET=OFF and ship
+    # no libomptarget, and upstream's own run list is empty, so nothing this
+    # package ships carries an LLVM link. Not lifted.
+  run: []
+  run_constraints:
+    # UPSTREAM: `openmp ==${{ version }}|${{ version }}.*` and
+    # `intel-openmp <0.0a0`. Both exist to stop a second OpenMP runtime landing
+    # in the same prefix. Ours must additionally exclude conda-forge's
+    # `llvm-openmp`: our package is named acpp-llvm-openmp, so that name is NOT
+    # shadowed by our channel and would install BESIDE us, putting a second
+    # libomp in the prefix.
+    - llvm-openmp <0.0a0
+    - intel-openmp <0.0a0
+    - openmp <0.0a0
+  run_exports:
+    strong:
+      # UPSTREAM: pin_subpackage("llvm-openmp", upper_bound=None)
+      - acpp-llvm-openmp[version="==${{ llvm_version }}",build="${{ llvm_build_tag }}_*"]
+      # UPSTREAM ALSO EXPORTS, on linux: `_openmp_mutex >=4.5` and
+      # `_openmp_mutex * *_llvm`. NOT LIFTED. That mutex is how conda-forge makes
+      # a prefix choose one OpenMP implementation, and its `*_llvm` build selects
+      # itself by depending on conda-forge's `llvm-openmp` — the very package the
+      # run_constraint above excludes. Exporting it would force every consumer of
+      # ours into an unsolvable prefix. The exclusions above are the substitute;
+      # the gap they do not cover is that a consumer may still pull libgomp
+      # through some other dependency, which the mutex would have prevented.
+  ignore_run_exports:
+    from_package:
+      - ${{ compiler('cxx') }}
+
+tests:
+  - package_contents:
+      files:
+        exists:
+          - if: linux
+            then:
+              - lib/libomp.so
+              - lib/libiomp5.so
+              - include/omp.h
+          - if: osx
+            then:
+              - lib/libomp.dylib
+              - lib/libiomp5.dylib
+              - include/omp.h
+          - if: win
+            then:
+              - ${{ library_prefix }}bin/libomp.dll
+              - ${{ library_prefix }}bin/libiomp5md.dll
+              - ${{ library_prefix }}lib/libomp.lib
+              - ${{ library_prefix }}include/omp.h
+        # Upstream asserts the Fortran module files are ABSENT. Kept: they would
+        # mean a flang was picked up, which we do not build.
+        not_exists:
+          - if: not win
+            then:
+              - include/omp_lib.mod
+              - include/omp_lib_kinds.mod
+          - if: win
+            then:
+              - ${{ library_prefix }}include/omp_lib.mod
+              - ${{ library_prefix }}include/omp_lib_kinds.mod
+
+about:
+  homepage: http://openmp.llvm.org/
+  repository: https://github.com/llvm/llvm-project/
+  license: Apache-2.0 WITH LLVM-exception
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: The OpenMP API supports multi-platform shared-memory parallel programming in C/C++ and Fortran.

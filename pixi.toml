@@ -106,6 +106,9 @@ acpp-llvm-tools = { path = "packages/acpp-llvm-tools" }
 acpp-libllvm-c21 = { path = "packages/acpp-libllvm-c21" }
 acpp-llvmdev = { path = "packages/acpp-llvmdev" }
 
+# openmp family — one package, and a source dependency of acpp-clang.
+acpp-llvm-openmp = { path = "packages/acpp-llvm-openmp" }
+
 # ---- Build backends --------------------------------------------------------
 # Backends are specified as "*" in every member manifest, NOT pinned to a
 # version (Jack's explicit ruling): a pinned backend rots, and breakage on a

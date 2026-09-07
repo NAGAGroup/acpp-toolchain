@@ -65,6 +65,19 @@ context:
   # metapackages that need it depend on it.
   carve_linux: >-
     lib/libacpp-rt.so*;lib/libacpp-common.so*;lib/hipSYCL/**;etc/AdaptiveCpp/**
+  # ⚠ THE AMD DEVICE BITCODE IS acpp-runtime-rocm's, NOT OURS. `lib/hipSYCL/**`
+  # sweeps it in, and acpp-runtime-rocm carves
+  # `lib/hipSYCL/ext/bitcode/amdgcn/**` explicitly — so both packages claimed
+  # the same ~90 files. That is not merely an install-time clobber: rocm takes
+  # acpp-runtime as a HOST dependency, so those paths are already in its prefix
+  # when its carve runs, and rattler counts them as pre-existing rather than
+  # new. The package reports a successful copy and SHIPS THEM EMPTY — the exact
+  # failure acpp-libclang-cpp21.1 hit in runs 34116494098 / 34118069537.
+  #
+  # Found by tools/check-carves-against-stage.nu against a real stage listing,
+  # BEFORE it reached a runner, which is what that instrument exists for.
+  carve_exclude_linux: >-
+    lib/hipSYCL/ext/bitcode/amdgcn/**
   carve_osx: >-
     lib/libacpp-rt*.dylib;lib/libacpp-common*.dylib;lib/hipSYCL/**;etc/AdaptiveCpp/**
   # win: DLLs are RUNTIME artifacts and live under bin, so the hipSYCL plugins
@@ -102,6 +115,11 @@ build:
     file: ../_shared/carve.nu
     env:
       ACPP_CARVE: ${{ carve }}
+      # The AMD device bitcode belongs to acpp-runtime-rocm — see the note by
+      # carve_exclude_linux. Linux only: rocm is a linux-only backend, and an
+      # exclude glob matching nothing is not an error, but saying so per
+      # platform keeps the reason attached to the platform it applies to.
+      ACPP_CARVE_EXCLUDE: ${{ carve_exclude_linux if linux else "" }}
       PKG_NAME: acpp-runtime
 
 requirements:

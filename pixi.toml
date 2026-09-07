@@ -337,6 +337,13 @@ description = "Exercise the in-tree clang config-file guard, both branches"
 cmd = "nu tools/tests/exercise-stage-fixups.nu"
 description = "Assert every stage fixup is idempotent"
 
+# Resolve every carve against a REAL stage listing from a run artifact: globs
+# that match nothing, and paths two packages both claim. Skipped without a
+# listing — that is not a pass.
+[feature.packaging.tasks.check-carves-against-stage]
+cmd = "nu tools/check-carves-against-stage.nu"
+description = "Resolve every carve against a real stage listing and name collisions"
+
 [feature.packaging.tasks.check-source-paths]
 cmd = "nu tools/check-source-paths.nu"
 description = "Assert every path: source resolves from its own recipe directory"

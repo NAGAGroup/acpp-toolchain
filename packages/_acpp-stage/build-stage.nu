@@ -1174,28 +1174,24 @@ def main [] {
     # versioned sonames are what the runtime needs. The slicers decide which
     # package each lands in, so the unversioned links are recreated there, not
     # here.
-    # ⚠ ONLY IF IT IS A SYMLINK. The intent here is to drop the UNVERSIONED
-    # development link and keep the versioned soname the runtime needs — but
-    # `path exists` follows links, so this happily deleted whatever sat at that
-    # name. If any of these libraries has the reversed convention (the plain
-    # name real, the versioned name a link to it), this removed the REAL
-    # library and left a DANGLING versioned link behind — which is one of the
-    # two live hypotheses for acpp-libclang-cpp21.1 carving one file into a
-    # package with zero content (run 34116494098).
+    # ⚠ THE UNVERSIONED SYMLINKS STAY. This step used to delete
+    # lib/lib{LLVM,LTO,Remarks,clang,clang-cpp}.so, on the reasoning that they
+    # are development files the runtime does not need and that whichever slicer
+    # wanted them would recreate them. Both halves are now false, and every one
+    # of those five names is REQUIRED by a package that has not yet been
+    # reached:
     #
-    # Fail loudly on a real file rather than deleting it: if the convention is
-    # reversed for one of these, that is a fact about the LLVM build worth
-    # learning from an error message instead of from an empty package. Same
-    # class as the re-versioning loop that deleted binaries on a cached run.
-    for f in [libLLVM.so libLTO.so libRemarks.so libclang.so libclang-cpp.so] {
-      let p = ($prefix | path join "lib" $f)
-      let t = ($p | path type)
-      if $t == "symlink" {
-        rm $p
-      } else if $t == "file" {
-        error make {msg: $"stage: lib/($f) is a REAL FILE, not the unversioned symlink this step expects to drop. Deleting it would leave the versioned name dangling and its package would ship empty. The LLVM install convention for this library is reversed from the assumption here — package the plain name instead"}
-      }
-    }
+    #   * acpp-libclang carves `lib/libclang.so` and acpp-libclang-cpp carves
+    #     `lib/libclang-cpp.so` — measured against a real stage listing, both
+    #     match NOTHING, so both would have failed their carve;
+    #   * install_llvm.nu's llvmdev arm calls `require` on libLLVM.so,
+    #     libLTO.so and libRemarks.so, which fails the build outright when they
+    #     are absent.
+    #
+    # Deleting them was a leftover from before the lift, when acpp-runtime
+    # carved `lib/*.so*` and would have swallowed them. Now every one has a
+    # named owner, so the stage keeps what the packages ask for and the
+    # ownership question is settled in the carve lists where it belongs.
   }
 
   # default-cpu-cxx is baked as CMAKE_CXX_COMPILER — the BUILD machine's

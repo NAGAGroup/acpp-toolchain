@@ -174,14 +174,37 @@ def main [] {
       }
     }
   } else if ($name | str starts-with "acpp-libllvm") {
-    # -- upstream arm 2: all other shared libraries --
-    # `|| true` upstream: exactly one of the two versioned patterns matches on a
-    # given platform, so an empty match is expected, not a defect.
-    let pats = [
-      $"($stage)/lib/libLLVM-($major)($ext)"
-      $"($stage)/lib/lib*.so.($sover)"
-      $"($stage)/lib/lib*.($sover).dylib"
-    ]
+    # -- upstream arm 2: LLVM's own shared libraries --
+    #
+    # ⚠ NAMED, NOT WILDCARDED, AND THAT IS THE WHOLE POINT. Upstream writes
+    # `lib/lib*.so.<sover>`, which is correct in ITS prefix: llvmdev-feedstock
+    # builds LLVM alone, so the only libraries carrying that soversion are
+    # LLVM's. Our stage is a UNION of llvm, clang, lldb and openmp, where the
+    # same glob also matches libclang-cpp.so.21.1, liblldb.so.21.1 and
+    # liblldbIntelFeatures.so.21.1 — three libraries belonging to other
+    # packages.
+    #
+    # That is not hypothetical: acpp-libllvm21 shipped libclang-cpp.so.21.1, and
+    # because it is a HOST dependency of acpp-libclang-cpp21.1 the file was
+    # already in the prefix when that package's carve ran — so the carve
+    # reported "copied 1 files" while rattler counted "0 content" and the
+    # package shipped empty (runs 34116494098 and 34118069537).
+    #
+    # SCOPED FROM THE ARTIFACT, like every other slice here. conda-forge's
+    # libllvm21-21.1.8 ships exactly four paths on linux — libLLVM-21.so,
+    # libLLVM.so.21.1, libLTO.so.21.1, libRemarks.so.21.1 — and the same four
+    # on osx with dylib spelling. Fetched, not remembered:
+    # `nu tools/upstream-paths.nu libllvm21 21.1.8 linux-64`.
+    #
+    # Same law as compiler-rt21's resource-dir subtree: an upstream glob that
+    # is exact in a single-project prefix over-selects in our union stage.
+    let versioned = (if (is-darwin) {
+      [$"libLLVM.($sover).dylib" $"libLTO.($sover).dylib" $"libRemarks.($sover).dylib"]
+    } else {
+      [$"libLLVM.so.($sover)" $"libLTO.so.($sover)" $"libRemarks.so.($sover)"]
+    })
+    let pats = ([$"($stage)/lib/libLLVM-($major)($ext)"]
+      | append ($versioned | each {|n| $"($stage)/lib/($n)" }))
     for p in $pats {
       for f in (glob $p) {
         place $f $layout_root $stage

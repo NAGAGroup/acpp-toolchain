@@ -1,95 +1,122 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
 #
-# acpp-lldb — the LLDB debugger and its Python bindings, carved from the stage.
+# acpp-lldb — the LLDB debugger, its shared library, its public headers and its
+# Python bindings. Lifted from the reference monolith's `lldb` output
+# (lldb-feedstock).
 #
-# ON ALL THREE PLATFORMS THIS ROUND, including Windows. lldb's absence from our
-# Windows build was OUR omission, not upstream's: conda-forge ships lldb for
-# win-64 at 21.1.x. Two reasons it belongs everywhere — it is a strong debugger
-# Windows users want, and our own run_constraints would otherwise PREVENT a
-# Windows user from installing conda-forge's lldb alongside this toolchain.
+# SLICING FORM: SCRIPT, upstream's own — lldb-feedstock is a single-package
+# recipe with no `outputs:` and no `files:`. See ../_shared/install_lldb.nu.
 #
-# ⚠ WIN AND OSX ARE UNPROVEN. Enabling lldb on those platforms is a change to
-# the stage's LLVM_ENABLE_PROJECTS and to its build requirements (swig and
-# python were linux-only), so the first real build on each is where it gets
-# tested. This package is correct by construction; the stage build is what may
-# need iteration.
+# ⚠ SCOPE DERIVED FROM CONDA-FORGE'S lldb-21.1.8 ARTIFACT, not from the build,
+# because our union stage removes the per-project scoping upstream's own prefix
+# provided. 705 / 720 / 702 paths on linux-64 / osx-arm64 / win-64.
+#
+# VERSION SKEW IN THE REFERENCE, resolved here: the monolith carries lldb at
+# 22.1.8 because conda-forge's lldb-feedstock lags the others at HEAD. We build
+# ONE llvm-project tree, so lldb is 21.1.8 like everything else, and every
+# `lldb_version` in the lifted metadata becomes `llvm_version`.
+#
+# THIS PACKAGE SPANS BOTH WINDOWS ROOTS — binaries under %PREFIX%\Library,
+# Python bindings under %PREFIX%\Lib\site-packages. That is why it cannot use
+# carve.nu, whose ACPP_CARVE_DEST picks one destination per package. The script
+# handles it, and _acpp-stage's win LLDB_PYTHON_RELATIVE_PATH was corrected in
+# the same change so the bindings land inside the stage at all.
 
 context:
   llvm_version: "21.1.8"
   llvm_major: "21"
-  llvm_major_next: "22"
-  version: ${{ env.get("ACPP_NIGHTLY_DATE", default="0.dev0") }}
+  llvm_maj_min: "21.1"
   llvm_build_tag: ${{ "llvm" ~ (llvm_version | replace(".", "_")) }}
-  build_num: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+  build_num: 0
   library_prefix: ${{ "Library/" if win else "" }}
-
-  # THE CARVE. The debugger binaries, the shared library, and the Python
-  # bindings module. Each platform names itself; no fall-through branch, and
-  # the empty final case makes an unknown platform fail loudly in carve.nu
-  # rather than silently receive another platform's list.
-  carve_unix: >-
-    bin/lldb*;lib/liblldb*;lib/python*/**
-  carve_win: >-
-    Library/bin/lldb*.exe;Library/bin/liblldb.dll;Library/lib/liblldb.lib;Library/lib/python*/**
-  carve: ${{ carve_win if win else (carve_unix if (linux or osx) else "") }}
 
 package:
   name: acpp-lldb
-  version: ${{ version }}
-
-source:
-  - path: ../_shared/licenses
-    target_directory: licenses
+  version: ${{ llvm_version }}
 
 build:
   number: ${{ build_num }}
   string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_num }}
   script:
     interpreter: nu
-    file: ../_shared/carve.nu
+    file: ../_shared/install_lldb.nu
     env:
-      ACPP_CARVE: ${{ carve }}
-      PKG_NAME: acpp-lldb
+      # The script names the versioned shared libraries; both numbers come from
+      # this recipe rather than from a second copy inside the script.
+      ACPP_LLVM_VERSION: ${{ llvm_version }}
+      ACPP_LLVM_MAJ_MIN: ${{ llvm_maj_min }}
 
 requirements:
   build:
+    # Upstream's cmake and ninja are dropped — build machinery a copy cannot
+    # use. Its cross-compilation branch (cross-python, swig, a second llvmdev)
+    # goes with them: we build all three platforms natively.
+    - ${{ compiler('cxx') }}
+    - ${{ stdlib('c') }}
     - nushell
   host:
     - _acpp-stage ==0.0.0
-    # Supplies the exact acpp-runtime spec to `run` via its weak run_export,
-    # pinning version, LLVM tag and build number in one place.
-    - acpp-runtime ==${{ version }}
-  run:
-    # This package ships the lldb Python bindings, so it needs an interpreter
-    # to be of any use. python's own run_export supplies python_abi, which
-    # pins the interpreter ABI *if* python is present but does not require it
-    # to be there — so without this the bindings could land in an environment
-    # with nothing able to import them.
+    # A BARE `python` is what upstream writes, and it is deliberately left bare:
+    # `python` is a key in ../../variants.yaml, so rattler-build pins it to the
+    # one interpreter this workspace builds against and enters it in the variant
+    # hash. Writing a version here would be a second place to keep in step.
     - python
+    - acpp-llvmdev ==${{ llvm_version }}
+    - acpp-clangdev ==${{ llvm_version }}
+    - acpp-llvm ==${{ llvm_version }}
+    - acpp-libclang-cpp ==${{ llvm_version }}
+    - swig
+    - if: not win
+      then:
+        - ncurses
+        - libedit
+    - libxml2-devel
+    - liblzma-devel
+    - zlib
+    - zstd
+    - six
+  run:
+    - if: not win
+      then:
+        - ncurses
+        - libedit
+    - python
+    - six
   run_constraints:
-    # Same-major window: a different-major lldb cannot collide with ours, so
-    # only our own major is excluded. This is exactly the constraint that would
-    # have locked Windows users out of conda-forge's lldb had we kept shipping
-    # no lldb of our own there.
-    - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
-  # NO ignore_run_exports. Under the old design every output inherited the
-  # staging host environment, so each one carried a long from_package list
-  # naming the CUDA, Level Zero and OpenCL packages to suppress. This package
-  # does not host-depend on any of them, so there is nothing to suppress —
-  # the list is not shorter, it is unnecessary.
+    # Upstream names `llvmdev` and `clangdev`; ours name ours, because nothing
+    # ships under a conda-forge name and a constraint on a name our channel
+    # provides would be a hard solve failure under strict channel priority
+    # rather than a fall-through.
+    - acpp-llvmdev ==${{ llvm_version }}
+    - acpp-clangdev ==${{ llvm_version }}
 
 tests:
   - package_contents:
       files:
         exists:
           - ${{ library_prefix }}bin/lldb${{ ".exe" if win else "" }}
-          - if: not win
+          - ${{ library_prefix }}bin/lldb-server${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}include/lldb/API/SBDebugger.h
+          - if: linux
+            then: lib/liblldb.so.${{ llvm_version }}
+          - if: osx
+            then: lib/liblldb.${{ llvm_version }}.dylib
+          - if: win
             then:
-              - bin/lldb-server
+              - ${{ library_prefix }}bin/liblldb.dll
+              - ${{ library_prefix }}lib/liblldb.lib
+        not_exists:
+          # the linker is acpp-lld's, llvm's own tools acpp-llvm-tools'
+          - ${{ library_prefix }}bin/ld.lld${{ ".exe" if win else "" }}
+          - ${{ library_prefix }}bin/llvm-config${{ ".exe" if win else "" }}
+          # the Python bindings must NOT land under the win layout root; the
+          # interpreter looks for them at %PREFIX%\Lib\site-packages
+          - if: win
+            then: Library/lib/site-packages/lldb/__init__.py
 
 about:
-  homepage: https://lldb.llvm.org/
+  homepage: http://llvm.org/
+  repository: https://github.com/llvm/llvm-project
   license: Apache-2.0 WITH LLVM-exception
-  license_file:
-    - licenses/llvm-LICENSE.TXT
-  summary: LLDB debugger built alongside the acpp toolchain
+  license_file: ../_shared/licenses/llvm-LICENSE.TXT
+  summary: The LLVM Debugger

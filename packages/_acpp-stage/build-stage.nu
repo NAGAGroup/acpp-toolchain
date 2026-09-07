@@ -365,7 +365,21 @@ def windows-args [src: string, libprefix: string, build: string] {
     # the site-packages layout conda uses on win.
     "-DLLDB_ENABLE_SWIG=ON"
     "-DLLDB_EMBED_PYTHON_HOME=OFF"
-    '-DLLDB_PYTHON_RELATIVE_PATH=../Lib/site-packages'
+    # UPSTREAM WRITES `..\Lib\site-packages` — relative to CMAKE_INSTALL_PREFIX,
+    # which for upstream is %LIBRARY_PREFIX%, so `..` reaches %PREFIX% and the
+    # bindings land where a conda python looks for them. OUR install prefix is
+    # <layout_root>/_stage, so the same value would put them at
+    # <layout_root>/Lib/site-packages — OUTSIDE THE STAGE, where no slicer can
+    # reach them and where they would instead become content of _acpp-stage
+    # itself, at a path nothing consumes. The `..` is dropped so they land
+    # INSIDE the stage; acpp-lldb's install script is what carries them the rest
+    # of the way, to %PREFIX%\Lib\site-packages.
+    #
+    # This is the one place the stage cannot mirror the final layout by relative
+    # depth, because site-packages sits ABOVE the layout root on win. Safe here
+    # and only here: the module it contains is a .pyd, and Windows resolves its
+    # DLLs through the search path rather than through a stored relative rpath.
+    '-DLLDB_PYTHON_RELATIVE_PATH=Lib/site-packages'
     "-DLLDB_ENABLE_LIBEDIT=OFF"
     "-DLLDB_ENABLE_CURSES=OFF"
     # Level Zero and OpenCL loaders BOTH ship for win-64 (level-zero-devel,

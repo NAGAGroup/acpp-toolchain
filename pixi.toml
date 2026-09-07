@@ -120,6 +120,11 @@ acpp-llvmdev = { path = "packages/acpp-llvmdev" }
 # openmp family — one package, and a source dependency of acpp-clang.
 acpp-llvm-openmp = { path = "packages/acpp-llvm-openmp" }
 
+# lld and lldb. Neither upstream feedstock slices — both are single-package
+# recipes — so both are SCRIPT-form slicers, like llvm-openmp above.
+# `acpp-lldb` reuses the pre-methodology directory, whose contents this replaces.
+acpp-lld = { path = "packages/acpp-lld" }
+
 # ---- Build backends --------------------------------------------------------
 # Backends are specified as "*" in every member manifest, NOT pinned to a
 # version (Jack's explicit ruling): a pinned backend rots, and breakage on a

@@ -72,6 +72,14 @@
 # nushell#15707's reporter stripped the drive letter to work around this;
 # canonicalising BOTH sides keeps it, which is the answer that stays correct
 # when the path is used for anything other than matching.
+# ⚠ SEPARATOR-ONLY, AND DISTINCT FROM canon-path FOR A REASON. nushell's path
+# commands emit NATIVE separators on their OUTPUT regardless of the input, so
+# `path relative-to` returns `bin\clang.exe` on Windows even when both of its
+# arguments were forward-slash (win run 34136409058). A relative result must
+# NOT go through canon-path, which would expand it to an absolute path; it needs
+# the separators swapped and nothing else.
+def norm-rel [p: string] { $p | str replace --all '\' '/' }
+
 def canon-path [p: string] {
   $p | path expand | str replace '\\?\' '' | str replace --all '\' '/'
 }
@@ -1363,7 +1371,11 @@ def main [] {
     # tell those apart is a listing that cannot settle the next one either.
     let paths = (glob-native ($root | path join "**" "*") --no-dir
       | each {|p|
-          let rel = ($p | path relative-to $root)
+          # norm-rel: this string is WRITTEN to the listing that
+          # check-carves-against-stage resolves carve globs against, and those
+          # globs are forward-slash. A backslash here would make every glob
+          # "match nothing" on a win listing.
+          let rel = (norm-rel ($p | path relative-to $root))
           let t = ($p | path type)
           if $t == "symlink" {
             let target = (ls -l $p | get 0.target)

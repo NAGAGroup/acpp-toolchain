@@ -90,6 +90,27 @@ build:
       # `lib\clang\<major>\lib` while the arch-specific compiler-rt21 beside it
       # writes `Library\lib\clang\<major>\lib`.
       #
+      # ⚠ A STATED DIVERGENCE ON osx: THE FLAT PER-ARCH ARCHIVES ARE NOT OURS TO
+      # SHIP. conda-forge's compiler-rt21_osx-arm64 carries 23 paths under
+      # `lib/darwin/` and TEN flat ones beside it —
+      # `libclang_rt.{builtins,cc_kext}_{arm64,arm64e,i386,x86_64,x86_64h}_osx.a`.
+      # Those are compiler-rt's PER-ARCH builtin and cc_kext libraries, produced
+      # by `darwin_add_builtin_library` once per entry in
+      # `DARWIN_<os>_BUILTIN_ARCHS` (read at source; upstream's build.sh has no
+      # lipo step — its osx post-install is one `cp` of the dynamic dylibs).
+      # Five arches appear because conda-forge builds a UNIVERSAL toolchain.
+      #
+      # We build `DARWIN_osx_ARCHS=arm64` deliberately — osx-arm64 is the only
+      # macOS platform in this round — so a per-arch set of five cannot exist
+      # here, and osx run 34146880830 failed on `lib/libclang_rt.*` matching
+      # nothing. The carve therefore names what this toolchain produces.
+      #
+      # THIS IS A DIVERGENCE FROM THE ARTIFACT, not a scoping fix, and it is
+      # stated rather than silent: our osx compiler-rt21_<platform> ships fewer
+      # files than conda-forge's, and closing the gap means building the other
+      # four arches, which is a product decision about what a mac user gets. It
+      # belongs with the osx interface items already batched for Jack.
+      #
       # THE PER-PLATFORM SUBTREE, NOT `lib/**`. Upstream's glob is the whole
       # `lib/clang/<major>/lib` directory, which is correct in compiler-rt's own
       # build prefix because nothing else installs there. In our union stage
@@ -101,7 +122,7 @@ build:
       # `libclang_rt.*` archives sitting directly in lib/.
       ACPP_CARVE: >-
         ${{ "lib/clang/" ~ llvm_major ~ "/lib/linux/**" if is_linux
-        else "lib/clang/" ~ llvm_major ~ "/lib/libclang_rt.*;lib/clang/" ~ llvm_major ~ "/lib/darwin/**" if is_osx
+        else "lib/clang/" ~ llvm_major ~ "/lib/darwin/**" if is_osx
         else "lib/clang/" ~ llvm_major ~ "/lib/windows/**" }}
       ACPP_CARVE_DEST: prefix
 

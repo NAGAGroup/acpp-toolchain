@@ -12,9 +12,13 @@ llvm_major:
   - "21"
 llvm_version:
   - "21.1.8"
-# llvm-project's official release tarball; the URL templates off llvm_version.
+# llvm-project's official release tarball. The URL templates off llvm_version
+# but this does not, so the two must be moved together - the first value here
+# was 20.1.8's, lifted from the `main` lane, and the build caught it.
+# GitHub publishes the digest: the release's asset list carries it, as
+# `gh api repos/llvm/llvm-project/releases/tags/llvmorg-<version>`.
 llvm_sha256:
-  - "6898f963c8e938981e6c4a302e83ec5beb4630147c7311183cf61069af16333d"
+  - "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142"
 
 # AdaptiveCpp is OUR FORK: NAGAGroup/AdaptiveCpp, branch naga/develop.
 # Iteration lands commits there and bumps this line. The diff against upstream

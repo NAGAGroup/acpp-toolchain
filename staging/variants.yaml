@@ -20,7 +20,7 @@ llvm_sha256:
 # Iteration lands commits there and bumps this line. The diff against upstream
 # is the patchset, derived later when we package upstream releases.
 acpp_rev:
-  - "fb0f3e2fed2fd646df7bb6649998b7b18a82ad24"
+  - "83c05f444e4b85f3946e2824275f18f017ff8714"
 
 # The SPIR-V translator is fetched by acpp's own cmake, pinned to a commit
 # rather than tracking a branch. Requires a fork commit so this value reaches

@@ -78,7 +78,13 @@ let rocm_root = (
 # If the ROCm backend later turns out to need one more library, this is a
 # one-line addition - and the moment to make it is when we can test on AMD
 # hardware, not now.
-let rocm_keep_dirs = ["amdgcn" "include"]
+# amdgcn is the device bitcode; include is the HIP headers; lib/cmake is HIP's
+# CMake package, and it is NOT optional even though nothing installs from it.
+# acpp does find_package(HIP ... HINTS ${ROCM_PATH} ${ROCM_PATH}/lib/cmake),
+# and when that misses it falls back to hipcc AND reassigns ROCM_PATH to
+# /opt/rocm - so a missing CMake package does not merely disable the ROCm
+# backend, it moves every later lookup off our prefix. 1.5 MB.
+let rocm_keep_dirs = ["amdgcn" "include" "lib/cmake"]
 let rocm_keep_libs = [
   "libamdhip64.so*"
   "libamd_comgr.so*"
@@ -93,8 +99,14 @@ print $"  into ($targets_dir)"
 mkdir $targets_dir
 for d in $rocm_keep_dirs {
   let s = ($rocm_root | path join $d)
-  cp -r $s $targets_dir
-  print $"  dir  ($d | fill -a l -w 22) ((du $s | get 0.physical))"
+  let dest = ($targets_dir | path join $d | path dirname)
+  mkdir $dest
+  cp -r $s $dest
+  let landed = ($targets_dir | path join $d)
+  if not ($landed | path exists) {
+    error make {msg: $"ROCm keep-list directory did not land: ($landed)"}
+  }
+  print $"  dir  ($d | fill -a l -w 22) ((du $landed | get 0.physical))  -> ($landed)"
 }
 let libdir = ($targets_dir | path join "lib")
 mkdir $libdir
@@ -171,8 +183,12 @@ let args = [
   # llvm-to-ptx, so it must be one that survives into the package.
   $"-DCUDA_DEVICE_LIBS_PATH=($prefix | path join 'nvvm' 'libdevice')"
 
-  # ROCm has no compiler package doing that work, so it is told directly.
+  # ROCm has no compiler package doing that work, so it is told directly. The
+  # device libraries are named explicitly rather than left to the hint off
+  # ROCM_PATH: acpp reassigns ROCM_PATH when HIP detection fails, so a hint
+  # that depends on it turns one failure into two.
   $"-DROCM_PATH=($targets_dir)"
+  $"-DROCM_DEVICE_LIBS_PATH=($targets_dir | path join 'amdgcn' 'bitcode')"
 
   # Pin the SPIR-V translator rather than tracking a branch.
   $"-DLLVMSPIRV_COMMIT=($env.LLVMSPIRV_COMMIT)"

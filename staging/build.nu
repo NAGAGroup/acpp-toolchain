@@ -99,10 +99,23 @@ print $"  into ($targets_dir)"
 mkdir $targets_dir
 for d in $rocm_keep_dirs {
   let s = ($rocm_root | path join $d)
-  let dest = ($targets_dir | path join $d | path dirname)
-  mkdir $dest
-  cp -r $s $dest
   let landed = ($targets_dir | path join $d)
+  let parent = ($landed | path dirname)
+
+  # `cp -r SRC DST` means two different things depending on DST: if DST is an
+  # existing directory the source lands INSIDE it, and if DST does not exist
+  # then DST BECOMES the source - contents flattened one level up. Naming the
+  # full target path and guaranteeing it is absent makes both cases identical.
+  # cp will not create intermediate parents, so the parent is made first and
+  # asserted, because a silently missing parent is what produces the flattened
+  # shape.
+  mkdir $parent
+  if not ($parent | path exists) {
+    error make {msg: $"could not create the ROCm destination parent: ($parent)"}
+  }
+  rm -rf $landed
+  cp -r $s $landed
+
   if not ($landed | path exists) {
     error make {msg: $"ROCm keep-list directory did not land: ($landed)"}
   }

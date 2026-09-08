@@ -376,8 +376,26 @@ let args = [
   # exports LLVMConfig.cmake at configure time.
   $"-DLLVM_DIR=($build_dir | path join 'lib' 'cmake' 'llvm')"
 
-  # Leave the build machine's paths out of the installed configuration.
+  # Leave the build machine's paths out of the installed configuration, and out
+  # of the deployment manifests and the binaries. What a package we redistribute
+  # records about this machine should be nothing.
   -DACPP_CONFIG_FILE_OMIT_ENVIRONMENT_PATHS=ON
+  -DACPP_OMIT_RECORDED_INSTALL_PREFIX=ON
+
+  # The same rule for LLVM's own output: -ffile-prefix-map over the source root
+  # and the build directory, which reaches the runtimes children too
+  # (LLVMExternalProjectUtils forwards it), so compiler-rt stops carrying our
+  # paths in its debug info. Fuchsia's release caches set this, so it is a
+  # supported configuration rather than an obscure one.
+  -DLLVM_USE_RELATIVE_PATHS_IN_FILES=ON
+
+  # Not because we ship lit and FileCheck - we do not, and what we ship is a
+  # slicing decision made later. It is that the install-tree LLVMConfig.cmake
+  # only recomputes LLVM_DEFAULT_EXTERNAL_LIT inside
+  # `if(LLVM_INSTALL_UTILS AND LLVM_BUILD_UTILS)`; with the guard false the
+  # variable keeps the value the BUILD-tree pass gave it, and a build path ships
+  # inside an installed cmake package.
+  -DLLVM_INSTALL_UTILS=ON
 
   # Everything the translator's own cmake needs, since it inherits nothing.
   $"-DACPP_SPIRV_CMAKE_ARGS=($spirv_args)"

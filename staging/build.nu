@@ -235,6 +235,14 @@ let args = [
   # Pin the SPIR-V translator rather than tracking a branch.
   $"-DLLVMSPIRV_COMMIT=($env.LLVMSPIRV_COMMIT)"
 
+  # The translator is a sub-build, and acpp forwards ${LLVM_DIR} into it. When
+  # AdaptiveCpp is built as an LLVM component nothing calls find_package(LLVM),
+  # so that variable is empty and the sub-build's own find_package(LLVM 21.1.0)
+  # falls through to the system - on this runner, Ubuntu's llvm-16/17/18, none
+  # of which it accepts. Point it at the LLVM being built, whose build tree
+  # exports LLVMConfig.cmake at configure time.
+  $"-DLLVM_DIR=($build_dir | path join 'lib' 'cmake' 'llvm')"
+
   # Leave the build machine's paths out of the installed configuration.
   -DACPP_CONFIG_FILE_OMIT_ENVIRONMENT_PATHS=ON
 

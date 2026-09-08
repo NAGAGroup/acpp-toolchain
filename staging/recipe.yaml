@@ -64,7 +64,12 @@ requirements:
     # find the toolkit, and the activation isolates the build and puts the
     # development packages in host.
     - ${{ compiler('cuda') }}
-    - cmake
+    # Bounded below 4. conda-forge pins cmake nowhere in its global config, so
+    # an unbounded requirement takes whatever is newest - which was 4.4. This
+    # build drives four separate cmake invocations (outer, builtins, runtimes,
+    # SPIR-V translator) plus config files shipped by ROCm and Khronos, and 4.x
+    # changes policy defaults across all of them at once.
+    - cmake >=3.28,<4
     - ninja
     - nushell
     - python

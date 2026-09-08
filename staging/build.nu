@@ -197,6 +197,36 @@ print $"  triple      ($conda_triple)"
 print $"  sysroot     ($conda_sysroot)"
 print $"  gcc install ($gcc_install_dir)"
 
+# The compile flags are captured and then REMOVED from the environment. The
+# runtimes are configured by a child cmake that seeds CMAKE_C_FLAGS and
+# CMAKE_CXX_FLAGS from the environment, and it compiles with the just-built
+# clang rather than conda's gcc wrapper. That is how -fno-merge-constants -
+# which gcc accepts and clang does not - reaches a clang that warns about it,
+# and CMake's check_c_compiler_flag treats that warning as failure:
+#
+#   FAIL_REGEX "optimization flag [^\n]* not supported"    # Clang
+#
+# every probe in that configure then answers no, including -nostdinc++, which
+# is what keeps libstdc++ out of the sanitizer sources.
+#
+# The outer configure is given the same flags explicitly, unchanged - it is
+# compiled by conda's gcc, which accepts them. Only what reaches clang needs
+# the flag removed, and that is the config files.
+#
+# LDFLAGS deliberately stays in the environment.
+let cflags = ($env.CFLAGS? | default "")
+let cxxflags = ($env.CXXFLAGS? | default "")
+hide-env --ignore-errors CFLAGS
+hide-env --ignore-errors CXXFLAGS
+
+# Flags conda passes that clang does not accept. Removed only from the config
+# files; the outer build keeps them. One entry today, and each one costs a
+# whole configure's worth of feature detection, so the list is worth keeping.
+let clang_rejects = ["-fno-merge-constants"]
+def sanitise-for-clang [flags: string, rejects: list<string>] {
+  $flags | split row -r '\s+' | where {|f| ($f != "") and (not ($f in $rejects))} | str join " "
+}
+
 # ── configure ────────────────────────────────────────────────────────────
 # CMAKE_ARGS comes from the conda-forge activations and carries the sysroot,
 # find-root and CUDA settings. It is a space separated string and must be
@@ -317,6 +347,11 @@ let args = [
   # Everything the translator's own cmake needs, since it inherits nothing.
   $"-DACPP_SPIRV_CMAKE_ARGS=($spirv_args)"
 
+  # Passed explicitly because they have been taken out of the environment.
+  # Unsanitised: this build is driven by conda's gcc, which accepts them.
+  $"-DCMAKE_C_FLAGS=($cflags)"
+  $"-DCMAKE_CXX_FLAGS=($cxxflags)"
+
   -DCMAKE_C_COMPILER_LAUNCHER=ccache
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -353,12 +388,20 @@ print $"  cache ($build_dir | path join 'CMakeCache.txt')"
 # with the `$` stripped. Without it every compile-only invocation would carry
 # linker flags it cannot use. It is per OPTION, not per line, which is why
 # LDFLAGS is split before being marked.
+#
+# The names carry the HOST TRIPLE, and that is the whole point rather than a
+# convention. Clang looks first for <triple>-<driver>.cfg using the triple of
+# the target being compiled, so a host compile finds these and a device
+# compile - acpp builds its SSCP bitcode for nvptx64-nvidia-cuda,
+# spir64-unknown-unknown and amdgcn-amd-amdhsa with this same clang - looks for
+# a name that does not exist and gets nothing. A plain clang.cfg would be found
+# by BOTH, and -march=nocona is not a thing on NVPTX.
 let cfg_dir = ($build_dir | path join "bin")
 mkdir $cfg_dir
 let link_tail = ($env.LDFLAGS? | default "" | split row -r '\s+' | where {|t| $t != ""} | each {|t| ('$' + $t)} | str join " ")
 print $"── clang cfg ──"
-for d in [[driver, flags]; ["clang", ($env.CFLAGS? | default "")] ["clang++", ($env.CXXFLAGS? | default "")]] {
-  let path = ($cfg_dir | path join $"($d.driver).cfg")
+for d in [[driver, flags]; ["clang", (sanitise-for-clang $cflags $clang_rejects)] ["clang++", (sanitise-for-clang $cxxflags $clang_rejects)]] {
+  let path = ($cfg_dir | path join $"($conda_triple)-($d.driver).cfg")
   [
     $"--sysroot=($conda_sysroot) --gcc-toolchain=($build_prefix) --gcc-triple=($conda_triple)"
     $d.flags

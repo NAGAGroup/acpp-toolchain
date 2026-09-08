@@ -1,0 +1,127 @@
+# llvm.yaml — build the monolithic LLVM + AdaptiveCpp tree and publish it as a
+# release asset.
+#
+# This is the EXPENSIVE half, and it exists to run rarely. Everything that
+# slices the result lives in `packaging/`, which consumes the tarball this
+# produces by URL and never rebuilds LLVM. A packaging mistake costs a
+# packaging run, not an LLVM build.
+#
+# The tag is reused while we are getting this green, so the assets do not
+# accumulate. Once `packaging/` starts pinning a sha256, the tag stops moving:
+# reusing it after that point would change what a pinned hash refers to,
+# silently.
+
+name: llvm
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish under (reused until green)"
+        required: true
+        default: staging-linux-64
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: Linux-x64-64
+    timeout-minutes: 600
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # What this build needs, in rough order: the 1.7 GB ROCm archive, the
+      # extracted copy of it, llvm-project's source, and an LLVM object tree.
+      # Reported first because "out of space" arrives an hour in otherwise.
+      - name: Disk before
+        run: df -h .
+
+      # run-install: false — the staging workspace declares no environments to
+      # install. All we need from this action is the pixi binary; `pixi publish`
+      # creates the build and host environments itself.
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+
+      # ccache is what makes a second attempt cheap after a red. It is restored
+      # and saved explicitly rather than through the action's post-step, which
+      # only runs on success — the run we most want a cache from is the one
+      # that failed.
+      #
+      # .pixi/bld is deliberately NOT cached: it holds the extracted ROCm tree
+      # and the LLVM object directory, which together are far past the 10 GB
+      # per-repository cache limit. It would evict the ccache to store
+      # something that fits worse.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: staging/.ccache
+          key: ccache-linux-64-${{ github.run_id }}
+          restore-keys: ccache-linux-64-
+
+      - name: Build and install
+        working-directory: staging
+        run: pixi publish --target-dir ./output --package-format tar-bz2
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: staging/.ccache
+          key: ccache-linux-64-${{ github.run_id }}
+
+      - name: Disk after
+        if: always()
+        run: df -h .
+
+      # A release asset must be under the per-file limit for the repository
+      # owner's plan. NAGAGroup is on Team, which is 4 GB, but GitHub's own
+      # docs also state a flat 2 GiB for release assets — so this fails at the
+      # lower number rather than discovering the disagreement during a
+      # multi-gigabyte upload at the end of an hour-long build.
+      - name: Identify the artifact
+        id: art
+        run: |
+          set -euo pipefail
+          file=$(ls staging/output/*.tar.bz2)
+          test -f "$file"
+          bytes=$(stat -c%s "$file")
+          sha=$(sha256sum "$file" | cut -d' ' -f1)
+          echo "file=$file"   >> "$GITHUB_OUTPUT"
+          echo "sha=$sha"     >> "$GITHUB_OUTPUT"
+          {
+            echo "### staging tarball"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| file | \`$(basename "$file")\` |"
+            echo "| size | $((bytes / 1024 / 1024)) MiB |"
+            echo "| sha256 | \`$sha\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$bytes" -ge 2147483648 ]; then
+            echo "::error::artifact is $((bytes / 1024 / 1024)) MiB, at or over the 2 GiB release-asset limit"
+            exit 1
+          fi
+
+      # The tag is reused while iterating, so create-if-missing then upload
+      # with --clobber. `gh release create` fails if the tag already has a
+      # release, which is why its failure is tolerated and the upload is the
+      # step that must succeed.
+      - name: Publish the release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          FILE: ${{ steps.art.outputs.file }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "LLVM + AdaptiveCpp staging tree (linux-64)" \
+              --notes "Monolithic build that \`packaging/\` slices. Rebuilt in place while iterating." \
+              --prerelease
+          fi
+          gh release upload "$TAG" "$FILE" --clobber
+          echo "https://github.com/${{ github.repository }}/releases/download/$TAG/$(basename "$FILE")" \
+            >> "$GITHUB_STEP_SUMMARY"

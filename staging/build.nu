@@ -219,6 +219,7 @@ let cxxflags = ($env.CXXFLAGS? | default "")
 hide-env --ignore-errors CFLAGS
 hide-env --ignore-errors CXXFLAGS
 
+
 # Flags conda passes that clang does not accept. Removed only from the config
 # files; the outer build keeps them. One entry today, and each one costs a
 # whole configure's worth of feature detection, so the list is worth keeping.
@@ -322,6 +323,15 @@ let args = [
   # libdevice outside the toolkit root, and acpp bakes this path into
   # llvm-to-ptx, so it must be one that survives into the package.
   $"-DCUDA_DEVICE_LIBS_PATH=($prefix | path join 'nvvm' 'libdevice')"
+
+  # AMD, stated rather than detected. hip-config.cmake runs `hipconfig
+  # --platform` when HIP_PLATFORM is unset, and on a machine with CUDA present
+  # and no AMD runtime that answers "nvidia" - which takes the NVIDIA branch,
+  # where hip::host is an INTERFACE target carrying include directories and no
+  # library at all. The HIP backend then links nothing and every hipMemcpy is
+  # undefined. We are building the ROCm backend against an AMD distribution;
+  # there is nothing to detect.
+  -DHIP_PLATFORM=amd
 
   # ROCm has no compiler package doing that work, so it is told directly. The
   # device libraries are named explicitly rather than left to the hint off

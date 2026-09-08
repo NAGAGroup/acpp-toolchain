@@ -372,7 +372,87 @@ outputs:
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      # Our fork omits from the generated config every setting that names a path
+      # outside the AdaptiveCpp installation, because the path a build machine
+      # used is wrong in a redistributable package - the driver then reports the
+      # setting missing by name rather than resolving a directory that is not
+      # there. These scripts supply the three that always point inside our own
+      # prefix. The CUDA and ROCm pairs belong to their backend packages, and we
+      # ship no nvhpc, so ACPP_NVCXX stays unset.
+      script:
+        content: |
+          mkdir -p "$PREFIX/etc/conda/activate.d" "$PREFIX/etc/conda/deactivate.d"
+
+          cat > "$PREFIX/etc/conda/activate.d/10-acpp.sh" <<'ACTIVATE'
+          #!/bin/sh
+          # During a conda BUILD the compiler is a build-platform tool and lives
+          # in the build prefix, while the headers it must match belong to the
+          # host prefix. Outside a build the two collapse to one prefix.
+          if [ "${CONDA_BUILD:-0}" = "1" ]; then
+            _acpp_cxx="${BUILD_PREFIX}/bin/clang++"
+            _acpp_inc="${PREFIX}/lib/clang/LLVM_MAJOR/include"
+          else
+            _acpp_cxx="${CONDA_PREFIX}/bin/clang++"
+            _acpp_inc="${CONDA_PREFIX}/lib/clang/LLVM_MAJOR/include"
+          fi
+
+          # Any prior value is saved, so a compiler activation package sourcing
+          # LATER by filename can override ACPP_CPU_CXX and have deactivation
+          # restore this one rather than unset it.
+          if [ -n "${ACPP_CLANG:-}" ]; then
+            _CONDA_BACKUP_ACPP_CLANG="${ACPP_CLANG}"; export _CONDA_BACKUP_ACPP_CLANG
+          fi
+          if [ -n "${ACPP_CPU_CXX:-}" ]; then
+            _CONDA_BACKUP_ACPP_CPU_CXX="${ACPP_CPU_CXX}"; export _CONDA_BACKUP_ACPP_CPU_CXX
+          fi
+          if [ -n "${ACPP_CLANG_INCLUDE_PATH:-}" ]; then
+            _CONDA_BACKUP_ACPP_CLANG_INCLUDE_PATH="${ACPP_CLANG_INCLUDE_PATH}"
+            export _CONDA_BACKUP_ACPP_CLANG_INCLUDE_PATH
+          fi
+
+          # ACPP_CLANG is NOT a user choice: the AdaptiveCpp clang plugin is ABI
+          # bound to the clang it was compiled against, which is the one we ship.
+          export ACPP_CLANG="${_acpp_cxx}"
+          export ACPP_CPU_CXX="${_acpp_cxx}"
+          export ACPP_CLANG_INCLUDE_PATH="${_acpp_inc}"
+
+          unset _acpp_cxx _acpp_inc
+          ACTIVATE
+
+          cat > "$PREFIX/etc/conda/deactivate.d/10-acpp.sh" <<'DEACTIVATE'
+          #!/bin/sh
+          # Restore rather than unset: leaving a nested environment must not
+          # break an outer one that also set these.
+          if [ -n "${_CONDA_BACKUP_ACPP_CLANG:-}" ]; then
+            export ACPP_CLANG="${_CONDA_BACKUP_ACPP_CLANG}"
+            unset _CONDA_BACKUP_ACPP_CLANG
+          else
+            unset ACPP_CLANG
+          fi
+          if [ -n "${_CONDA_BACKUP_ACPP_CPU_CXX:-}" ]; then
+            export ACPP_CPU_CXX="${_CONDA_BACKUP_ACPP_CPU_CXX}"
+            unset _CONDA_BACKUP_ACPP_CPU_CXX
+          else
+            unset ACPP_CPU_CXX
+          fi
+          if [ -n "${_CONDA_BACKUP_ACPP_CLANG_INCLUDE_PATH:-}" ]; then
+            export ACPP_CLANG_INCLUDE_PATH="${_CONDA_BACKUP_ACPP_CLANG_INCLUDE_PATH}"
+            unset _CONDA_BACKUP_ACPP_CLANG_INCLUDE_PATH
+          else
+            unset ACPP_CLANG_INCLUDE_PATH
+          fi
+          DEACTIVATE
+
+          # The LLVM major is a variant, so it is substituted here rather than
+          # written into the scripts by hand.
+          sed -i "s/LLVM_MAJOR/${{ llvm_major }}/g" \
+            "$PREFIX/etc/conda/activate.d/10-acpp.sh"
+
+          echo "-- activation scripts --"
+          cat "$PREFIX/etc/conda/activate.d/10-acpp.sh"
       files:
+        - etc/conda/activate.d/10-acpp.sh
+        - etc/conda/deactivate.d/10-acpp.sh
         - bin/acpp
         - bin/acpp-*
         - bin/syclcc

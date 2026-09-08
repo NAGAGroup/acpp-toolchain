@@ -27,7 +27,12 @@ channels = ["conda-forge"]
 # 2.34 is where glibc merged libpthread into libc, and it is the floor recent
 # Level Zero needs. The Level Zero conda packages do not declare it, so nothing
 # in a solve will corroborate this; we set it because it is true.
-platforms = [{ platform = "linux-64", glibc = "2.34" }]
+#
+# cuda declares __cuda, the DRIVER version a machine must have - distinct from
+# the cuda-version run export that comes off the compiler package. Stated for
+# the same reason as glibc: the solve should be told what we target rather than
+# inheriting whatever the builder happens to have.
+platforms = [{ platform = "linux-64", glibc = "2.34", cuda = "12.9" }]
 
 preview = ["pixi-build"]
 

@@ -61,25 +61,52 @@ let rocm_root = (
     $rocm_src
   }
 )
-# TheRock ships ROCm's own clang/LLVM toolchain under llvm/. We are building
-# an LLVM, and acpp uses ours; what the ROCm backend needs from this tree is
-# the HIP and HSA runtimes, amd_comgr, and the device bitcode under amdgcn/.
-# Nothing reaches for ROCm's compiler, so it does not go into the tarball.
-let rocm_skip = ["llvm"]
+# TheRock's distribution is 11.7 GB of the whole ROCm stack. We take a KEEP
+# LIST rather than a skip list, because we know exactly what is wanted and
+# guessing at exclusions leaves the rest to chance.
+#
+# The libraries are the ones acpp's own hip deployment manifest names -
+# amdhip64, hsa-runtime64, amd_comgr, hiprtc - so the list comes from acpp
+# rather than from us. Everything else is an ML and math stack acpp never
+# calls: MIOpen, hipDNN, hipTensor, rocSPARSE, rocShmem, Tensile's kernels,
+# rocprofiler, ROCm's own clang (twice, at llvm/ and lib/llvm), and 2.4 GB of
+# static archives that could not be a runtime dependency of anything.
+#
+# It is also what keeps the package buildable: rattler must relocate every
+# binary it packages, and patchelf fails outright on many of those files.
+#
+# If the ROCm backend later turns out to need one more library, this is a
+# one-line addition - and the moment to make it is when we can test on AMD
+# hardware, not now.
+let rocm_keep_dirs = ["amdgcn" "include"]
+let rocm_keep_libs = [
+  "libamdhip64.so*"
+  "libamd_comgr.so*"
+  "libhsa-runtime64.so*"
+  "libhiprtc.so*"
+  "libhiprtc-builtins.so*"
+]
 
 print $"── ROCm ──"
-print $"  from ($rocm_root)"
+print $"  from ($rocm_root)  ((du $rocm_root | get 0.physical))"
 print $"  into ($targets_dir)"
-let entries_all = (ls $rocm_root)
-for e in $entries_all {
-  let n = ($e.name | path basename)
-  let mark = (if ($n in $rocm_skip) { "SKIP" } else { "    " })
-  print $"  ($mark) ($n | fill -a l -w 12) ((du $e.name | get 0.physical))"
-}
 mkdir $targets_dir
-let to_copy = ($entries_all | where {|e| not (($e.name | path basename) in $rocm_skip)} | get name)
-cp -r ...$to_copy $targets_dir
-print $"  installed ((ls $targets_dir | length)) entries, ((du $targets_dir | get 0.physical))"
+for d in $rocm_keep_dirs {
+  let s = ($rocm_root | path join $d)
+  cp -r $s $targets_dir
+  print $"  dir  ($d | fill -a l -w 22) ((du $s | get 0.physical))"
+}
+let libdir = ($targets_dir | path join "lib")
+mkdir $libdir
+for pat in $rocm_keep_libs {
+  let matched = (glob ($rocm_root | path join "lib" $pat))
+  if ($matched | is-empty) {
+    error make {msg: $"ROCm keep-list pattern matched nothing: ($pat). The distribution's layout changed."}
+  }
+  cp ...$matched $libdir
+  print $"  libs ($pat | fill -a l -w 22) ($matched | length) files"
+}
+print $"  installed ((du $targets_dir | get 0.physical)), ((ls $libdir | length)) libraries"
 
 # ── configure ────────────────────────────────────────────────────────────
 # CMAKE_ARGS comes from the conda-forge activations and carries the sysroot,

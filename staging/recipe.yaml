@@ -75,6 +75,14 @@ requirements:
     - git
 
   host:
+    # cudart and the driver are NOT here: they arrive with the CUDA compiler,
+    # which is where a project using nvcc gets them, and find_package locates
+    # the toolkit from nvcc in the build prefix. Host carries only what we
+    # need at a path that survives into the package - the device bitcode,
+    # whose location acpp bakes into llvm-to-ptx - and the version marker
+    # that pins it to the same series as the compiler.
+    - cuda-version ${{ cuda_compiler_version }}
+    - cuda-nvvm-tools
     - python
     - zlib
     - zstd

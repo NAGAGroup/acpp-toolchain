@@ -119,13 +119,15 @@ outputs:
   # An EMPTY staging output for the noarch packages. They cannot inherit the
   # real one - it carries ${{ compiler('c') }}, which resolves to a nonexistent
   # gcc_noarch on a noarch target - but they still need to inherit something.
+  # Plain shell, NOT nu: this output declares no requirements, so nothing would
+  # provide a nushell interpreter. The real staging output can use nu because it
+  # depends on nushell.
   - staging:
       name: acpp-noarch-base
     build:
       script:
-        interpreter: nu
         content: |
-          print "noarch base: nothing to unpack"
+          echo "noarch base: nothing to unpack"
 
   # ── the mutexes ───────────────────────────────────────────────────────────
   #

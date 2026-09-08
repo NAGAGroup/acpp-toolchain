@@ -49,52 +49,123 @@ tooling boundary lives, separable only by filename.
 
 ## The package split — PROPOSED, not ratified
 
-Close but not signed off. Moves to `DESIGN.md` when it is. Order of work is
-**slices first, then dependency specs, then activation packages.**
+Approved 2026-09-08, with one pass still owed against the next tarball (the
+newly-installed LLVM utils). Activation packages are NOT designed here.
+Order of work was slices, then dependency specs, then activation.
 
 Deliberately NOT conda-forge's 40-plus package split: that is an unbearable
 maintenance burden for a one-person team, on a toolchain that may never see
-wide use. Installing more than strictly necessary beats missing a shared
-library and breaking at runtime.
+wide use. The point is splitting, not trimming — a large HPC toolchain is
+normal, and installing more beats missing a shared library at runtime.
+
+### The two use cases the split serves
+
+- **Base packages** are the "I do not care about sysroots or packaging" case:
+  `pixi global install acpp` gives a working SYCL compiler that builds against
+  whatever system it is on. No cfg files, no triplet, no sysroot pinning, zero
+  isolation. Prefix libraries take priority and the system is a real fallback.
+- **The activation package** is the "I care about sysroots and packaging" case
+  and is where the cfg files live. Generated from upstream's activation
+  feedstocks repointed at our packages. Not designed yet.
+
+### Contents
 
 | package | holds |
 |---|---|
-| `acpp` | executables of the core toolchain only — the acpp CLI tools, the clang drivers, lld. 17 files, 8.5 MiB. |
-| `acpp-compiler-rt` | THE runtime. Everything a binary built with this toolchain needs to run. |
-| `acpp-dev` | static libs, headers, cmake config — everything else needed to make a complete toolchain. ~900 MiB, and that is intended. |
-| `acpp-clang-tools` | clangd, clang-tidy, clang-format, the scan-build family, and their private libs. |
-| `acpp-llvm-tools` | the `llvm-*` family, opt, llc, lli, bugpoint, **and lldb** with `liblldb.so`. |
-| `acpp-runtime-{cuda,rocm}` | `targets/x86_64-linux`, already sliced by the staging manifest. |
+| `acpp-compiler-rt` | THE runtime, and the base of the graph: `libacpp-rt`, `libacpp-common`, `rt-backend-omp`, `llvm-to-host`, `llvm-to-backend`, host bitcode, `libLLVM`, sanitizer `.so`, our own OpenMP runtimes, and `llc`/`opt`/`ld.lld`. |
+| `acpp-dev` | static archives, all headers, all cmake config. ~900 MiB, intended. |
+| `acpp` | the 17 executables and `etc/AdaptiveCpp/*.json`. **No cfg files.** |
+| `acpp-clang-tools` | clangd, tidy, format, the scan-build family, `libclang`, `libclang-cpp`, and their supporting files. |
+| `acpp-llvm-tools` | the `llvm-*` family, bugpoint, and lldb with `liblldb.so` and its Python bindings. |
+| `acpp-runtime-rocm` | `rt-backend-hip`, `llvm-to-amdgpu`, amdgpu bitcode, and `targets/x86_64-linux`. The only runtime that repackages files. |
+| `acpp-runtime-cuda` · `-level-zero` · `-ocl` | that backend's `rt-backend-*`, `llvm-to-*` and bitcode; otherwise metapackages over conda-forge. |
+| `acpp-runtime-ocl-system` | metapackage adding `ocl-icd-system`. |
+| `acpp-toolkit` | root meta package. |
 
-Dependency direction: `acpp` → `acpp-dev` → `acpp-compiler-rt`.
+**OpenMP is baked into `acpp-compiler-rt` unconditionally** so that every
+install has one working backend regardless of hardware. The other backends are
+sliced out so their conda dependencies are not forced on everyone; acpp loads
+backends fail-soft, and this also removes the "backend not found" warning at
+the default debug level.
 
-### What the runtime actually needs — measured, not assumed
+**The runtime needs three EXECUTABLES** — `llc`, `opt`, `ld.lld` — because acpp
+JITs at run time and shells out to them. They live in `acpp-compiler-rt`. That
+is a design philosophy question, not a rule: "`acpp` holds the executables"
+describes what `acpp` contains, not a prohibition elsewhere.
 
-From acpp's own `etc/AdaptiveCpp/deploy/acpp-deployment-manifest-core.json`
-and the ELF `DT_NEEDED` entries in the artifact:
+### Dependencies — stated once, at the package that owns them
 
-- `libacpp-rt`, `libacpp-common`, and `lib/hipSYCL/**` — backends,
-  `llvm-to-backend`, and the SSCP bitcode.
-- **`libLLVM.so.21.1` (120 MiB)** — `libllvm-to-backend.so` and
-  `libllvm-to-host.so` both link it directly.
-- `libomp.so`, `libnuma` — `librt-backend-omp.so` links both.
-- **Three EXECUTABLES: `llc`, `opt`, `ld.lld`.** acpp JITs at runtime, so it
-  shells out to them. A run-only environment needs them, which cuts across
-  "`acpp` holds the executables" and is unresolved.
+`acpp-compiler-rt` is the base, so what it pulls reaches everything through it.
 
-So the runtime floor is ~200 MiB and cannot be trimmed without breaking the
-JIT.
+| package | conda-forge | ours |
+|---|---|---|
+| `acpp-compiler-rt` | `libgcc >=14`, `libstdcxx >=14`, `libzlib`, `zstd`, `libxml2`, `libxml2-16`, `ncurses`, `libedit`, `libnuma` | — |
+| `acpp-dev` | `libstdcxx-devel_linux-64`, `libgcc-devel_linux-64` | `acpp-compiler-rt ==${version}` |
+| `acpp` | `python` | `acpp-dev ==${version}` |
+| `acpp-clang-tools` | `python` | `acpp-compiler-rt ==${version}` |
+| `acpp-llvm-tools` | `python`, `python_abi` | `acpp-compiler-rt ==${version}` |
+| `acpp-runtime-cuda` | `cuda-version >=12.9,<13`, `cuda-cudart` | `acpp-compiler-rt ==${version}` |
+| `acpp-runtime-level-zero` | `level-zero >=1.29.0,<2.0a0` | `acpp-compiler-rt ==${version}` |
+| `acpp-runtime-ocl` | `ocl-icd >=2.3.4,<3.0a0` | `acpp-compiler-rt ==${version}` |
+| `acpp-runtime-ocl-system` | `ocl-icd-system` | `acpp-runtime-ocl ==${version}` |
+| `acpp-runtime-rocm` | — | `acpp-compiler-rt ==${version}` |
 
-Not runtime, confirmed by the same manifest: `libclang.so`, `libclang-cpp.so`,
-`liblldb.so` — each belongs with the tools that use it.
+Two the artifact's metadata cannot show, because rattler only sees ELF linkage:
+`python` on `acpp` (`bin/acpp` is a Python script) and the two `*-devel_linux-64`
+packages on `acpp-dev` (our headers include libstdc++'s, our archives were
+compiled against them, and `libstdcxx-devel_linux-64` has no dependencies of its
+own so it does not pull `libgcc-devel`).
 
-### Still unassigned
+No `sysroot_linux-64`, `binutils` or `libgcc-devel` on `acpp` — those belong to
+the activation package, because the base is the no-isolation case. No
+`llvm-openmp`: we build and ship our own.
 
-`share/` (editor integrations, scan-view assets) · `libexec/` (scan-build
-shims) · `lib/libscanbuild` + `lib/libear` (Python modules scan-build imports)
-· `lib/python3.14/` (lldb bindings) · `etc/AdaptiveCpp/*.json` (acpp's config,
-read by the driver at runtime) · `lib/cmake/OpenSYCL/` (the pre-rename
-compatibility alias upstream still installs).
+### Exports
+
+A package's **strong** exports fire when it is in a consumer's BUILD
+environment, landing in that consumer's host and run. Its **weak** exports fire
+when it is in HOST, landing in run. Exports do not chain — upstream states this
+twice in `ctng-compiler-activation`: *"this should be a transitive dependency,
+but conda-build doesn't support those"*.
+
+- `acpp-compiler-rt` — **weak**, of itself. It is a host dependency in every
+  path that reaches it, and weak is what turns "in host" into "in run".
+- `acpp-dev` — **weak**, of `acpp-compiler-rt ==${version}`.
+- `acpp` — none. The activation package lands in build, so the strong export
+  belongs there.
+
+### Constraints
+
+Exact `==${version}` among our own packages; every one is a slice of one build.
+
+Against conda-forge, driven by what actually collides on a filename rather than
+by family. Unversioned names collide regardless of major:
+`clang`, `clangxx`, `clang-cl`, `clang-tools`, `clang-format`,
+`clang-scan-deps`, `llvm-tools`, `lld`, `lldb`, `llvm-spirv`, `compiler-rt`,
+`llvm-openmp`. Versioned names collide only at ours: `libllvm21`, `clang-21`,
+`libclang21`, `libclang-cpp21.1`, `compiler-rt21`, `clang-format-21`,
+`llvmdev`, `clangdev`. Not constrained: `libcxx`, `libcxx-devel` — we build
+against libstdc++ on linux and ship no libc++.
+
+**Measured cost of the `libllvm21` constraint, 2026-09-08**: nothing sampled on
+the channel depends on it. `qt6-main` uses `libllvm20`, `halide` `libllvm19`,
+`mesalib` vendors its own `mesa-llvmpipe`, `numba` reaches LLVM through
+`llvmlite` which links it statically, and `pocl` declares none. Six majors are
+live (18-23). conda-forge's global pin is `clang_compiler_version: 21`, so the
+collision surface is packages being BUILT today, not packages being installed.
+Staying at 21 was judged right: anything built against a prior LLVM is still
+recent, and LLVM is forward compatible.
+
+### Open
+
+- One pass against the next tarball for the newly-installed LLVM utils.
+- The mutex: needed (an acpp version is identical across LLVM variants, which no
+  version pin can express), but its name and shape are undecided in this split.
+  `acpp-llvm` was `main`'s name and does not carry over automatically.
+- `lib/cmake/OpenSYCL/` — upstream's pre-rename compatibility alias. Shipping it
+  means a consumer's `find_package(OpenSYCL)` resolves against us.
+- `libLTO.so` / `libRemarks.so` — linker-side rather than JIT-side, so `acpp`
+  rather than `acpp-compiler-rt`, unconfirmed.
 
 ## Next
 

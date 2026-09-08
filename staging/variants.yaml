@@ -14,7 +14,8 @@ llvm_version:
   - "21.1.8"
 # llvm-project's official release tarball. The URL templates off llvm_version
 # but this does not, so the two must be moved together - the first value here
-# was 20.1.8's, lifted from the `main` lane, and the build caught it.
+# was 20.1.8's, taken from `main`'s RELEASE lane, which pins an older acpp
+# release and therefore an older LLVM. The nightly lane is the LLVM 21 one.
 # GitHub publishes the digest: the release's asset list carries it, as
 # `gh api repos/llvm/llvm-project/releases/tags/llvmorg-<version>`.
 llvm_sha256:
@@ -26,11 +27,12 @@ llvm_sha256:
 acpp_rev:
   - "7c42b2e5eecf6ccfae520baff31dd4252c55542c"
 
-# The SPIR-V translator is fetched by acpp's own cmake. Left alone it tracks a
-# branch, so two builds of the same source can link different translators;
-# LLVMSPIRV_COMMIT pins it.
+# The SPIR-V translator is fetched by acpp's own cmake. Left alone it tracks
+# llvm_release_<major>0, so two builds of the same source can link different
+# translators; LLVMSPIRV_COMMIT pins it. THE COMMIT IS LLVM-MAJOR SPECIFIC -
+# this is a commit on the 21 branch, and moving llvm_major means moving it.
 llvmspirv_commit:
-  - "f0ae76f12c62ede090e57ece8c986f4c3c971a71"
+  - "3d3f0dece590232aab1851f1bea860c2a381ec34"
 
 # ---- compilers and standard library ----------------------------------------
 c_compiler:

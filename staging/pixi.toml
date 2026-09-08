@@ -1,0 +1,38 @@
+# The staging workspace: one package, one build.
+#
+# It produces the monolithic LLVM + AdaptiveCpp tree that the packaging
+# workspace slices. The package itself is never installed anywhere — the
+# workflow takes the tarball it produces and uploads it to a release — which
+# is why its version is fixed and meaningless.
+#
+# Workspace and package live in one file because there is exactly one package
+# here. `packaging/` is a separate workspace with its own manifest.
+
+[workspace]
+name = "acpp-stage"
+
+# conda-forge only. Nothing here resolves one of our own packages: this build
+# takes its sources from upstream releases and our AdaptiveCpp fork, and every
+# dependency it needs is a compiler or a library conda-forge already ships.
+channels = ["conda-forge"]
+
+# linux-64 alone, deliberately. The other platforms follow one at a time.
+platforms = ["linux-64"]
+
+preview = ["pixi-build"]
+
+# build-variants-files is the only route to zip_keys — inline
+# [workspace.build-variants] cannot zip — and one file is what makes the
+# pinning reviewable in the conda-forge pinning-feedstock shape.
+requires-pixi = ">=0.78"
+build-variants-files = ["./variants.yaml"]
+
+[package]
+name = "acpp-stage"
+version = "1.0"
+publish = true
+
+[package.build]
+# Unpinned on purpose: a pinned backend rots, and breakage on a backend
+# update is CI's job to catch rather than something to defer with a bound.
+backend = { name = "pixi-build-rattler-build", version = "*" }

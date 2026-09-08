@@ -16,6 +16,32 @@ Read these before working a platform.
 - Knowledge base — OpenMP:
   <https://conda-forge.org/docs/maintainer/knowledge_base/#openmp>
 
+## Pointing the just-built clang at conda's toolchain
+
+The compiler we build has no conda configuration of its own, so anything it
+compiles during the build (compiler-rt above all) finds the *system* GCC
+headers unless told otherwise.
+
+- Clang configuration files — searched in the user dir, the system dir, and
+  **the directory where the clang executable resides**; names fall back to
+  `clang++.cfg` + `<triple>.cfg`, and it is not an error if either is absent:
+  <https://clang.llvm.org/docs/UsersManual.html#configuration-files>
+- AdaptiveCpp's own note on the same problem, recommending config files:
+  `doc/install-llvm.md`, "GCC toolchain/C++ standard library is in a
+  non-standard location"
+- Clang command line reference (LLVM 21.1.0) — three related flags:
+  <https://releases.llvm.org/21.1.0/tools/clang/docs/ClangCommandLineReference.html>
+  - `--gcc-install-dir=<dir>` — names the installation directly, ending in
+    `lib/gcc/$triple/$version`. No triple search, no version guess.
+  - `--gcc-toolchain=<dir>` — *searches* `<dir>/lib/gcc/$triple/$version` and
+    takes the largest version, so it depends on the target triple matching.
+  - `--gcc-triple=<value>` — search with a given triple instead of the target's.
+- How to cross-compile LLVM — the source for `LLVM_HOST_TRIPLE` (which
+  implicitly sets `LLVM_DEFAULT_TARGET_TRIPLE`) and `CMAKE_*_COMPILER_TARGET`.
+  Note it describes true cross-compilation: `CMAKE_SYSTEM_NAME` turns on
+  `CMAKE_CROSSCOMPILING`, which we do not want for a native build.
+  <https://llvm.org/docs/HowToCrossCompileLLVM.html>
+
 ## Global pinning
 
 - `conda_build_config.yaml`:

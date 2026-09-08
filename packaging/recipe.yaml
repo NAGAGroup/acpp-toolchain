@@ -391,6 +391,8 @@ outputs:
         # lib/cmake and would otherwise be dropped.
         - lib/x86_64-conda-linux-gnu/cmake/**
         - share/cmake/**
+        # pkgconfig for the same headers whose cmake config sits above.
+        - share/pkgconfig/**
         - lib/*.a
         # Link-time halves of the sanitizer runtimes, plus the CRT objects and
         # symbol lists that belong beside them.

@@ -195,6 +195,28 @@ mkdir $build_dir
 cmake ...$args ...$conda_args
 
 print $"── configured ──"
-print $"  cache     ($build_dir | path join 'CMakeCache.txt')"
-print $"  ccache    ($env.CCACHE_DIR)"
-print $"  STOPPING before build and install: phase 1 ends at configure."
+print $"  cache ($build_dir | path join 'CMakeCache.txt')"
+
+# ── build and install ────────────────────────────────────────────────────
+# Link concurrency is governed by LLVM_RAM_PER_LINK_JOB, set at configure:
+# LLVM sizes its own job pool from the memory actually available, so --parallel
+# here is the COMPILE width and links throttle themselves underneath it.
+print $"── build ──"
+cmake --build $build_dir --parallel $jobs
+
+# No --prefix. CMAKE_INSTALL_PREFIX was fixed at configure time, and acpp
+# baked it into the SPIR-V translator's own install prefix there; redirecting
+# now would move everything except the translator.
+print $"── install ──"
+cmake --install $build_dir
+
+print $"── installed ──"
+print $"  prefix ($prefix)  ((du $prefix | get 0.physical))"
+for e in (ls $prefix | sort-by name) {
+  print $"    ($e.name | path basename | fill -a l -w 16) ((du $e.name | get 0.physical))"
+}
+let cache_stats = (do -i { ^ccache --show-stats --verbose } | complete)
+if $cache_stats.exit_code == 0 {
+  print $"── ccache ──"
+  $cache_stats.stdout | lines | where {|l| ($l =~ '(?i)hit|miss|size')} | first 8 | each {|l| print $"  ($l | str trim)" }
+}

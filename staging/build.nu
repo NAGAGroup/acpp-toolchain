@@ -180,9 +180,12 @@ if not ($conda_sysroot | path exists) {
   error make {msg: $"conda sysroot not found at ($conda_sysroot)"}
 }
 
-# --gcc-install-dir names the installation outright. Its sibling
-# --gcc-toolchain searches by triple AND takes the largest version it finds,
-# so it has two ways to pick something we did not mean.
+# --gcc-toolchain searches ${dir}/lib/gcc/${triple}/${version} and takes the
+# largest version; --gcc-triple pins which triple it searches for, which is
+# the half that would otherwise depend on the target. The alternative,
+# --gcc-install-dir, names the versioned directory outright. This resolves the
+# same installation either way, and the resolved path is still derived here so
+# the pair can be checked against it.
 let gcc_candidates = (glob ($build_prefix | path join "lib" "gcc" $conda_triple "*"))
 if ($gcc_candidates | length) != 1 {
   error make {msg: $"expected exactly one gcc installation under ($build_prefix)/lib/gcc/($conda_triple), found ($gcc_candidates | length): ($gcc_candidates | str join ', ')"}
@@ -357,7 +360,7 @@ print $"── clang cfg ──"
 for d in [[driver, flags]; ["clang", ($env.CFLAGS? | default "")] ["clang++", ($env.CXXFLAGS? | default "")]] {
   let path = ($cfg_dir | path join $"($d.driver).cfg")
   [
-    $"--sysroot=($conda_sysroot) --gcc-install-dir=($gcc_install_dir)"
+    $"--sysroot=($conda_sysroot) --gcc-toolchain=($build_prefix) --gcc-triple=($conda_triple)"
     $d.flags
     $link_tail
   ] | str join "\n" | save -f $path

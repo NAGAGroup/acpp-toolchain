@@ -1,0 +1,165 @@
+# packaging.yaml — slice the staging tarball into the published packages.
+#
+# This is the CHEAP half. It compiles nothing: every output carves files out of
+# the fixed release asset that `llvm.yaml` produced, so a mistake here costs a
+# packaging run and can never cost an LLVM build. Everything except the smoke
+# gate runs on free runners.
+#
+# ONE workflow for all three lanes, selected by input rather than by having
+# three files. That keeps a single trusted-publisher entry on prefix.dev, and
+# the lane is already a variant the recipe reads.
+#
+# Order is deliberate: build to a LOCAL channel, prove it on real hardware,
+# then publish. The publish job rebuilds rather than uploading the tested
+# bytes, which is fine - there is no compilation, and reproducible builds mean
+# the same inputs give the same package.
+
+name: packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "Which lane to build"
+        required: true
+        type: choice
+        default: naga_fork
+        options:
+          - release
+          - nightly
+          - naga_fork
+      version:
+        description: "Package version. Release lanes use acpp's release tag; dated lanes use YY.MM.DD.rc<N> (nightly) or YY.MM.DD.a<N> (fork)"
+        required: true
+        default: "25.10.0"
+      channel:
+        description: "prefix.dev channel to publish to"
+        required: true
+        default: naga-labs-staging
+      publish:
+        description: "Publish to the channel after the smoke gate passes"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── build ─────────────────────────────────────────────────────────────────
+  # Free runner. Downloads one 330 MB release asset, unpacks it once, and
+  # carves fifteen packages out of it.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # run-install: false - the packaging workspace declares no environments.
+      # All we need is the pixi binary; `pixi publish` builds its own.
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+
+      - name: Build to a local channel
+        working-directory: packaging
+        run: |
+          pixi publish --to ../local-channel \
+            --variant "acpp_lane=${{ inputs.lane }}" \
+            --variant "acpp_version=${{ inputs.version }}"
+
+      # What was actually produced, by name and size, in the run summary. A
+      # package that carved nothing is a few kB and shows up here rather than
+      # as a puzzling install failure later.
+      - name: Report the channel
+        run: |
+          {
+            echo "### packages built"
+            echo ""
+            echo "| package | size |"
+            echo "|---|---|"
+            find local-channel -name '*.conda' -printf '| `%f` | %s bytes |\n' | sort
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel
+          path: local-channel
+          retention-days: 7
+
+  # ── smoke gate ────────────────────────────────────────────────────────────
+  # The only job on metered hardware. Installs through a REAL SOLVE against the
+  # local channel, so run_exports, run_constraints and repodata are exercised
+  # rather than just the file lists.
+  #
+  # OMP and CUDA only. ROCm has no hardware here and never will on this runner,
+  # and Level Zero and OpenCL have no runner at all - those three ship
+  # compile-only, which is the same posture the previous lanes settled on.
+  smoke:
+    needs: build
+    runs-on: Linux-x64-GPU
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel
+          path: local-channel
+
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+
+      - name: Backends and devices the runtime can see
+        working-directory: packaging/tests/smoke
+        run: pixi run info
+
+      - name: SYCL smoke on the OpenMP backend
+        working-directory: packaging/tests/smoke
+        run: pixi run omp
+
+      - name: SYCL smoke on the CUDA backend (PTX JIT on real hardware)
+        working-directory: packaging/tests/smoke
+        run: pixi run cuda
+
+  # ── publish ───────────────────────────────────────────────────────────────
+  # Free runner, OIDC trusted publishing, no stored API key.
+  #
+  # No --skip-existing flag: pixi skips already-present packages BY DEFAULT
+  # (--no-skip-existing is the opt-out). That is what we want - the lane
+  # selectors and acpp-llvm-version are unchanged between builds, so
+  # re-uploading them should be a no-op rather than a 409.
+  publish:
+    needs: smoke
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+
+      - name: Publish to the channel
+        working-directory: packaging
+        run: |
+          pixi publish --to "https://prefix.dev/${{ inputs.channel }}" \
+            --variant "acpp_lane=${{ inputs.lane }}" \
+            --variant "acpp_version=${{ inputs.version }}"
+
+      - name: Record what was published
+        run: |
+          {
+            echo "### published"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| channel | \`${{ inputs.channel }}\` |"
+            echo "| lane | \`${{ inputs.lane }}\` |"
+            echo "| version | \`${{ inputs.version }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

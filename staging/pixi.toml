@@ -17,7 +17,17 @@ name = "acpp-stage"
 channels = ["conda-forge"]
 
 # linux-64 alone, deliberately. The other platforms follow one at a time.
-platforms = ["linux-64"]
+#
+# An inline table rather than the bare string "linux-64": a bare entry means
+# "this subdir with pixi's DEFAULT virtual packages", and that default is
+# __glibc = 2.28. Which is where the 2.28 in our published __glibc constraint
+# came from - not from c_stdlib_version in variants.yaml, which does not move
+# it. Stating glibc here is what actually sets the floor.
+#
+# 2.34 is where glibc merged libpthread into libc, and it is the floor recent
+# Level Zero needs. The Level Zero conda packages do not declare it, so nothing
+# in a solve will corroborate this; we set it because it is true.
+platforms = [{ platform = "linux-64", glibc = "2.34" }]
 
 preview = ["pixi-build"]
 

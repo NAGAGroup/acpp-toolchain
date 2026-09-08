@@ -295,6 +295,11 @@ outputs:
         # cannot run without it. 120 MiB, and not reducible.
         - lib/libLLVM.so*
         - lib/libLLVM-*.so
+        # The clang driver links this, so it cannot live with the clang TOOLS -
+        # `acpp` ships bin/clang++ and depends on acpp-dev -> acpp-compiler-rt,
+        # never on acpp-clang-tools. It belongs beside libLLVM: both are shared
+        # libraries that the driver and the tools link alike.
+        - lib/libclang-cpp.so*
         # The OpenMP runtimes, which we build ourselves. conda-forge's
         # llvm-openmp is run-constrained out rather than depended on: it ships
         # the same libomp.so path.
@@ -482,8 +487,10 @@ outputs:
         - bin/scan-build-py
         - bin/scan-view
         - bin/reduce-chunk-list
+        # libclang.so is the C API, used by tooling that links against it.
+        # libclang-cpp.so is NOT here: the clang driver itself links it, so it
+        # belongs with libLLVM in acpp-compiler-rt rather than with the tools.
         - lib/libclang.so*
-        - lib/libclang-cpp.so*
         - lib/libscanbuild/**
         - lib/libear/**
         - libexec/**

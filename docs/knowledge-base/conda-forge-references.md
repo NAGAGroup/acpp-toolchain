@@ -33,7 +33,7 @@ packages install the compilers themselves.
 | [ctng-compilers](https://github.com/conda-forge/ctng-compilers-feedstock) | Linux implementation: GCC |
 | [clang-compiler-activation](https://github.com/conda-forge/clang-compiler-activation-feedstock/) | macOS activation: Clang |
 | [clang-win-activation](https://github.com/conda-forge/clang-win-activation-feedstock/) | Windows activation: Clang and clang-cl |
-| [cuda-nvcc](https://github.com/conda-forge/cuda-nvcc-feedstock) | CUDA compiler and activation |
+| [cuda-nvcc](https://github.com/conda-forge/cuda-nvcc-feedstock) | CUDA compiler and activation — see its [activate.sh](https://github.com/conda-forge/cuda-nvcc-feedstock/blob/main/recipe/activate.sh) |
 
 ## LLVM component feedstocks
 

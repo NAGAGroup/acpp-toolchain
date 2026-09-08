@@ -102,24 +102,32 @@ for d in $rocm_keep_dirs {
   let landed = ($targets_dir | path join $d)
   let parent = ($landed | path dirname)
 
-  # `cp -r SRC DST` means two different things depending on DST: if DST is an
-  # existing directory the source lands INSIDE it, and if DST does not exist
-  # then DST BECOMES the source - contents flattened one level up. Naming the
-  # full target path and guaranteeing it is absent makes both cases identical.
-  # cp will not create intermediate parents, so the parent is made first and
-  # asserted, because a silently missing parent is what produces the flattened
-  # shape.
-  mkdir $parent
-  if not ($parent | path exists) {
-    error make {msg: $"could not create the ROCm destination parent: ($parent)"}
-  }
-  rm -rf $landed
-  cp -r $s $landed
+  # `cp -r SRC DST` behaves differently depending on whether DST exists, and on
+  # this runner neither branch produced the directory while also reporting no
+  # error. So the branch is removed entirely: DST is created first, and its
+  # CHILDREN are the copy sources. That is one behaviour, not two.
+  mkdir $landed
+  let children = (glob ($s | path join "*"))
 
-  if not ($landed | path exists) {
-    error make {msg: $"ROCm keep-list directory did not land: ($landed)"}
+  print $"  dir  ($d)"
+  print $"       source ($s)"
+  print $"       source exists: ($s | path exists) · children: ($children | length)"
+  print $"       target ($landed) · exists: ($landed | path exists)"
+
+  if not ($s | path exists) {
+    error make {msg: $"ROCm source directory is missing: ($s)"}
   }
-  print $"  dir  ($d | fill -a l -w 22) ((du $landed | get 0.physical))  -> ($landed)"
+  if ($children | is-empty) {
+    error make {msg: $"ROCm source directory is empty: ($s)"}
+  }
+
+  cp -r ...$children $landed
+
+  let got = (ls $landed | length)
+  print $"       copied ($got) entries, ((du $landed | get 0.physical))"
+  if $got == 0 {
+    error make {msg: $"ROCm copy produced nothing in ($landed) from ($children | length) sources"}
+  }
 }
 let libdir = ($targets_dir | path join "lib")
 mkdir $libdir

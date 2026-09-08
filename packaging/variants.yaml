@@ -63,28 +63,20 @@ acpp_version:
 # information - they exist to turn a build-string match into a name a user can
 # type, the way conda-forge's clang-no-conda-cfg does. All three are always
 # built; the two that are not this lane publish nothing anyone installs.
-acpp_lane_selector_version:
+acpp_lane_version:
   - "1.0"
 
-# ---- bounds staging has no reason to carry ---------------------------------
-# The run range for the CUDA runtime package is
-# >=cuda_compiler_version,<cuda_version_max. staging pins one CUDA and needs no
-# upper bound; a published package does.
-cuda_version_max:
+# The CUDA upper bound. acpp links a specifically versioned .so, so it cannot
+# float across a major - which is why a maximum is needed at all, and why
+# pin_compatible is not enough here.
+#
+# BOTH cuda-cudart and cuda-version carry this bound. Constraining cuda-version
+# alone would not hold: it is a packaging-side mutex, and cuda-cudart can be
+# installed without it.
+cuda_max_version:
   - "13"
 
-# staging leaves OpenCL unpinned on purpose - opencl-headers is header-only and
-# date-versioned, and an ICD loader's whole job is a stable ABI. A published
-# package still needs a floor, and this is the version the tree was built and
-# linked against.
-ocl_icd:
-  - "2.3.4"
-
-# The same value as staging's `level-zero-devel`, under a name a template can
-# actually reference: hyphens are subtraction in Jinja, so `${{ level-zero-devel }}`
-# is a rendering error rather than a lookup. staging can use the hyphenated name
-# because it never interpolates it - the key matches a bare requirement and
-# rattler applies it by name. Here we need the VALUE, so it needs a second
-# spelling. Keep the two in step.
-level_zero_min:
-  - "1.29"
+# ocl_icd and level_zero_min are deliberately absent: `ocl-icd` and
+# `level-zero-devel` both publish run exports, so a BARE host dependency
+# produces the correct run bound, and `level-zero-devel` also picks up its
+# version from the key of that name in staging's file.

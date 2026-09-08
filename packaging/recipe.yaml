@@ -23,10 +23,34 @@ context:
   # version whenever both lanes are dated, and only the build string separates
   # them.
   exact: ${{ acpp_version }} ${{ acpp_lane }}_*
+# NB: the build string is NOT defined here. It needs `hash` and `build_number`,
+# which are per-output build-time values; context is evaluated once, globally,
+# before any of them exist.
+  stage_url: https://github.com/NAGAGroup/acpp-toolchain/releases/download/${{ stage_tag }}/${{ stage_file }}
+  stage_hash: ${{ stage_sha256 }}
+  acpp_lane_version: ${{ acpp_lane_version }}
+  # Anything that sets a VERSION or a build string is read through context;
+  # package specs and exports can reference variants directly.
+  llvm_major: ${{ llvm_major }}
 
 recipe:
   name: acpp-packaging
   version: ${{ version }}
+
+build:
+  variant:
+    use_keys:
+      - cuda_compiler_version
+      - cuda_max_version
+      - c_stdlib
+      - c_compiler
+      - cxx_compiler
+
+
+
+
+
+
 
 outputs:
   - staging:
@@ -35,8 +59,44 @@ outputs:
       # The fixed artifact. The tag never moves now that packaging pins it; a
       # new staging build means a new sha256 and filename in variants.yaml,
       # together.
-      - url: https://github.com/NAGAGroup/acpp-toolchain/releases/download/${{ stage_tag }}/${{ stage_file }}
-        sha256: ${{ stage_sha256 }}
+      - url: ${{ stage_url }}
+        sha256: ${{ stage_hash }}
+    requirements:
+      # This output compiles NOTHING - it unpacks a tarball. Everything here is
+      # present for its RUN EXPORTS: those propagate from a staging output's
+      # build and host dependencies to every inheriting package output, so each
+      # package gets libgcc, libstdcxx, libzlib, zstd, libxml2, ncurses,
+      # libedit, numactl and python_abi at conda-forge's own bounds without a
+      # single output restating them.
+      #
+      # Lifted from staging/recipe.yaml so the two cannot disagree about what
+      # the tree was built against - MINUS the CUDA and Level Zero entries,
+      # which belong to their own backend packages rather than to everything.
+      build:
+        - ${{ compiler('c') }}
+        - ${{ compiler('cxx') }}
+        - ${{ stdlib('c') }}
+        # Bounded below 4. conda-forge pins cmake nowhere in its global config,
+        # so an unbounded requirement takes whatever is newest - which was 4.4.
+        - cmake >=3.28,<4
+        - ninja
+        - nushell
+        - python
+        - ccache
+        # lldb's python bindings are generated with swig
+        - swig
+        # acpp's cmake clones the SPIR-V translator and the Khronos headers
+        - git
+
+      host:
+        - python
+        - zlib
+        - zstd
+        - libxml2-devel
+        - ncurses
+        - libedit
+        - numactl
+
     build:
       script:
         interpreter: nu
@@ -56,6 +116,17 @@ outputs:
           print "-- what the outputs will carve from --"
           ls $env.PREFIX | each {|e| print $"  ($e.name | path basename)" }
 
+  # An EMPTY staging output for the noarch packages. They cannot inherit the
+  # real one - it carries ${{ compiler('c') }}, which resolves to a nonexistent
+  # gcc_noarch on a noarch target - but they still need to inherit something.
+  - staging:
+      name: acpp-noarch-base
+    build:
+      script:
+        interpreter: nu
+        content: |
+          print "noarch base: nothing to unpack"
+
   # ── the mutexes ───────────────────────────────────────────────────────────
   #
   # Two axes need expressing that no version pin can carry.
@@ -74,25 +145,24 @@ outputs:
   - package:
       name: acpp-llvm-version
       version: ${{ llvm_major }}
+    inherit: acpp-noarch-base
     build:
       noarch: generic
       number: 0
       files: []
-      variant:
-        # Consumed in `version:` rather than in a requirement, so rattler does
-        # not discover it as a variant key on its own. Declaring it is what
-        # makes one output per major instead of one arbitrary output.
-        use_keys:
-          - llvm_major
     requirements:
       run_exports:
-        # WEAK, following the python_abi idiom: it fires for packages that take
-        # this as a HOST dependency - every one of ours does - and does not
-        # leak out of environments that merely contain it. Defaults expand a
-        # one-segment version into >=21,<22.0a0, the whole major and nothing
-        # else.
-        weak:
-          - ${{ pin_subpackage('acpp-llvm-version') }}
+        # STRONG, of ITSELF. Only acpp-compiler-rt names this package; every
+        # other output reaches it through compiler-rt, and a strong export is
+        # what carries it that far.
+        #
+        # BARE name, not pin_subpackage: a self-pin cannot render, because the
+        # subpackage does not exist yet while another output is being built.
+        # The exact pin lives in run_constraints instead.
+        strong:
+          - acpp-llvm-version
+      run_constraints:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
     tests:
       - package_contents:
           strict: true
@@ -104,13 +174,18 @@ outputs:
 
   - package:
       name: acpp-release-lane
-      version: ${{ acpp_lane_selector_version }}
+      version: ${{ acpp_lane_version }}
+    inherit: acpp-noarch-base
     build:
       noarch: generic
       number: 0
       files: []
     requirements:
+      run_exports:
+        strong:
+          - acpp-release-lane
       run_constraints:
+        - ${{ pin_subpackage('acpp-release-lane', exact=True) }}
         - acpp-nightly-lane <0a0
         - acpp-naga-fork-lane <0a0
     tests:
@@ -122,13 +197,18 @@ outputs:
 
   - package:
       name: acpp-nightly-lane
-      version: ${{ acpp_lane_selector_version }}
+      version: ${{ acpp_lane_version }}
+    inherit: acpp-noarch-base
     build:
       noarch: generic
       number: 0
       files: []
     requirements:
+      run_exports:
+        strong:
+          - acpp-nightly-lane
       run_constraints:
+        - ${{ pin_subpackage('acpp-nightly-lane', exact=True) }}
         - acpp-release-lane <0a0
         - acpp-naga-fork-lane <0a0
     tests:
@@ -140,13 +220,18 @@ outputs:
 
   - package:
       name: acpp-naga-fork-lane
-      version: ${{ acpp_lane_selector_version }}
+      version: ${{ acpp_lane_version }}
+    inherit: acpp-noarch-base
     build:
       noarch: generic
       number: 0
       files: []
     requirements:
+      run_exports:
+        strong:
+          - acpp-naga-fork-lane
       run_constraints:
+        - ${{ pin_subpackage('acpp-naga-fork-lane', exact=True) }}
         - acpp-release-lane <0a0
         - acpp-nightly-lane <0a0
     tests:
@@ -170,6 +255,7 @@ outputs:
   - package:
       name: acpp-compiler-rt
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -198,18 +284,16 @@ outputs:
         - bin/lld
         - bin/ld.lld
     requirements:
-      host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
-        - libgcc >=${{ c_compiler_version }}
-        - libstdcxx >=${{ c_compiler_version }}
-        - libzlib
-        - zstd
-        - libxml2
-        - ncurses
-        - libedit
-        - numactl
+        # libzlib, zstd, libxml2, ncurses, libedit, numactl, libgcc, libstdcxx
+        # and python are NOT listed: they arrive as run exports from the staging
+        # output's host dependencies, at conda-forge's own bounds.
+        #
+        # The mutex and the lane selector are named ONLY here. Hard equality,
+        # not pin_subpackage: an exact pin creates no build-ordering edge, so
+        # the subpackage is not built yet when this output renders.
+        - acpp-llvm-version ==${{ llvm_major }}
+        - ${{ lane_package }} ==${{ acpp_lane_version }}
       run_exports:
         # WEAK, of itself. This is a host dependency in every path that reaches
         # it, and weak is what turns "in host" into "in run". Strong would fire
@@ -234,6 +318,7 @@ outputs:
   - package:
       name: acpp-dev
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -251,9 +336,7 @@ outputs:
         - lib/clang/*/include/**
     requirements:
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
         # Our headers include libstdc++'s and our archives were compiled against
         # them, so consuming either needs those headers present. The two are
@@ -283,6 +366,7 @@ outputs:
   - package:
       name: acpp
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -304,13 +388,12 @@ outputs:
         - lib/libRemarks.so*
     requirements:
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
+        # bin/acpp is a Python script, so python is a real dependency the
+        # staging artifact's own metadata does not list - rattler only sees ELF
+        # linkage. It arrives here as a run export from the staging output's
+        # host python rather than being restated.
         - ${{ pin_subpackage('acpp-dev', exact=True) }}
-        # bin/acpp is a Python script. The staging artifact's metadata does not
-        # list this, because rattler only sees ELF linkage.
-        - python
       run_constraints:
         - clang <0a0
         - clangxx <0a0
@@ -330,6 +413,7 @@ outputs:
   - package:
       name: acpp-clang-tools
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -382,11 +466,8 @@ outputs:
         - share/clang-doc/**
     requirements:
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
-        - python
       run_constraints:
         - clang-tools <0a0
         - clang-format <0a0
@@ -401,6 +482,7 @@ outputs:
   - package:
       name: acpp-llvm-tools
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -442,12 +524,11 @@ outputs:
         - share/man/**
     requirements:
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
+        # python and python_abi arrive as run exports from the staging output's
+        # host python, which is also the interpreter lldb's bindings were
+        # compiled against - so they cannot disagree.
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
-        - python
-        - python_abi ${{ python }}.* *_cp${{ python | replace(".", "") }}
       run_constraints:
         - llvm-tools <0a0
         - lld <0a0
@@ -466,6 +547,7 @@ outputs:
   - package:
       name: acpp-runtime-rocm
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -478,9 +560,7 @@ outputs:
         - targets/**
     requirements:
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
     about:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
@@ -490,6 +570,7 @@ outputs:
   - package:
       name: acpp-runtime-cuda
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -498,13 +579,20 @@ outputs:
         - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
         - lib/hipSYCL/bitcode/libkernel-sscp-ptx-*.bc
     requirements:
+      # We recreate the build/host environment this backend was compiled
+      # against, even though nothing is compiled here, so that the runtime
+      # bounds come from run exports instead of hand-written specs.
+      #
+      # acpp links a specifically versioned .so, so both the runtime and the
+      # packaging mutex need an upper bound - cuda-cudart can be installed
+      # without cuda-version, so bounding cuda-version alone would not hold.
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+        - cuda-version=${{ cuda_compiler_version }}
+        - cuda-cudart-dev
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
-        - cuda-version >=${{ cuda_compiler_version }},<${{ cuda_version_max }}
-        - cuda-cudart
+        - cuda-cudart <${{ cuda_max_version }}
+        - cuda-version <${{ cuda_max_version }}
     about:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
@@ -513,18 +601,19 @@ outputs:
   - package:
       name: acpp-runtime-level-zero
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
       files:
         - lib/hipSYCL/librt-backend-ze.so
     requirements:
+      # level-zero-devel carries `weak: level-zero >=…,<2.0a0`, so an
+      # unconstrained host dependency produces the run bound for us.
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+        - level-zero-devel
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
-        - level-zero >=${{ level_zero_min }}
     about:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
@@ -533,6 +622,7 @@ outputs:
   - package:
       name: acpp-runtime-ocl
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -542,12 +632,12 @@ outputs:
         - lib/hipSYCL/bitcode/libkernel-sscp-spirv-*.bc
         - lib/hipSYCL/ext/llvm-spirv/**
     requirements:
+      # ocl-icd carries `weak: ocl-icd >=2.3.4,<3.0a0` - exactly the bound we
+      # were writing by hand - so host placement produces it for free.
       host:
-        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+        - ocl-icd
       run:
-        - ${{ pin_subpackage(lane_package, exact=True) }}
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
-        - ocl-icd >=${{ ocl_icd }}
     about:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
@@ -556,6 +646,7 @@ outputs:
   - package:
       name: acpp-runtime-ocl-system
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}
@@ -581,6 +672,7 @@ outputs:
   - package:
       name: acpp-toolkit
       version: ${{ version }}
+    inherit: acpp-stage-unpacked
     build:
       number: 0
       string: ${{ lane }}_h${{ hash }}_${{ build_number }}

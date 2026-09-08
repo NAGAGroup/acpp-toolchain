@@ -55,18 +55,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # run-install: false - the packaging workspace declares no environments.
-      # All we need is the pixi binary; `pixi publish` builds its own.
+      # We drive rattler-build DIRECTLY rather than through `pixi publish`.
+      #
+      # pixi cannot build this recipe: a staging output's requirements never
+      # reach it - staging is absent from the backend's outputs response - so
+      # pixi resolves nothing for them, and the backend then resolves that
+      # environment against the local output directory alone. conda-forge is
+      # passed in the build request and never consulted, so the compilers the
+      # staging output needs have no candidates. pixi is still used to FETCH
+      # rattler-build, which is what `pixi exec` is for.
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
 
+      # rattler-build has no --variant flag; variant values come from files, and
+      # later -m files override earlier ones. So the lane and version chosen for
+      # this run are written to a file that is passed last.
+      - name: Pin the lane and version for this run
+        run: |
+          cat > /tmp/run-variants.yaml <<EOF
+          acpp_lane:
+            - "${{ inputs.lane }}"
+          acpp_version:
+            - "${{ inputs.version }}"
+          EOF
+          cat /tmp/run-variants.yaml
+
       - name: Build to a local channel
         working-directory: packaging
         run: |
-          pixi publish --to ../local-channel \
-            --variant "acpp_lane=${{ inputs.lane }}" \
-            --variant "acpp_version=${{ inputs.version }}"
+          pixi exec --spec "rattler-build==0.76.0" -- rattler-build build \
+            --recipe . \
+            -c conda-forge \
+            -m ../staging/variants.yaml \
+            -m ./variants.yaml \
+            -m /tmp/run-variants.yaml \
+            --output-dir ../local-channel \
+            --experimental
 
       # What was actually produced, by name and size, in the run summary. A
       # package that carved nothing is a few kB and shows up here rather than
@@ -145,12 +170,19 @@ jobs:
         with:
           run-install: false
 
+      # Uploads the artifacts the smoke gate approved, rather than rebuilding
+      # them. rattler-build skips packages already present at the target, so the
+      # unchanged lane selectors and mutex are a no-op rather than a 409.
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel
+          path: local-channel
+
       - name: Publish to the channel
-        working-directory: packaging
         run: |
-          pixi publish --to "https://prefix.dev/${{ inputs.channel }}" \
-            --variant "acpp_lane=${{ inputs.lane }}" \
-            --variant "acpp_version=${{ inputs.version }}"
+          pixi exec --spec "rattler-build==0.76.0" -- rattler-build upload prefix \
+            -c "${{ inputs.channel }}" \
+            $(find local-channel -name '*.conda' -print)
 
       - name: Record what was published
         run: |

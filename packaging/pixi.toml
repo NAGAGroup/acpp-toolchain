@@ -33,17 +33,36 @@ requires-pixi = ">=0.78"
 # the overlay. Everything version-shaped is already pinned in staging's file;
 # ours adds only the artifact reference, the lane, and the two bounds a
 # published package needs that an unpublished one does not.
-build-variants-files = [
-  "../staging/variants.yaml",
-  "./variants.yaml",
-]
+build-variants-files = ["../staging/variants.yaml", "./variants.yaml"]
 
 [package]
 name = "acpp-packaging"
 version = "0.0.0"
 publish = true
 
+
 [package.build]
-# Unpinned on purpose, matching staging: a pinned backend rots, and breakage on
-# a backend update is CI's job to catch rather than something to defer.
-backend = { name = "pixi-build-rattler-build", version = "*" }
+# NOT the build path we use. `pixi publish` cannot build this recipe: a staging
+# output's requirements never reach pixi, so pixi resolves nothing for them and
+# the backend falls back to resolving that environment against the local output
+# directory alone - conda-forge is passed in the request and never consulted.
+# CI drives rattler-build directly instead. This block stays so the workspace
+# remains a valid pixi package.
+#
+# The backend is unpinned on purpose: a pinned backend rots, and breakage on a
+# backend update is CI's job to catch. channels lives inside the backend table
+# because the shipped backend deprecates the top-level [package.build] form.
+backend = { name = "pixi-build-rattler-build", version = "*", channels = [
+  "https://prefix.dev/pixi-build-backends",
+  "conda-forge",
+] }
+
+[package.build.config]
+# REQUIRED for a multi-output recipe. The backend's own documentation:
+# "Enables experimental features in rattler-build. This is required for certain
+# advanced features like the `cache:` functionality for multi-output recipes."
+#
+# staging/ never needed it because it is a single output. Without it here the
+# recipe still parses and all fifteen outputs still render, so the failure
+# arrives later and looks like something else entirely.
+experimental = true

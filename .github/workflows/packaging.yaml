@@ -91,7 +91,8 @@ jobs:
             -m ./variants.yaml \
             -m /tmp/run-variants.yaml \
             --output-dir ../local-channel \
-            --experimental
+            --experimental \
+            --error-unused-staging-files
 
       # What was actually produced, by name and size, in the run summary. A
       # package that carved nothing is a few kB and shows up here rather than

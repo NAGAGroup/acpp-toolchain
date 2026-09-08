@@ -108,7 +108,13 @@ outputs:
           # info/ is DROPPED on purpose: it describes acpp-stage, a package
           # nobody installs, and shipping it inside another package would put
           # a second and contradictory set of metadata in the prefix.
-          let staged = (ls . | where {|e| ($e.name | path basename) != "info"})
+          #
+          # rattler-build's own scripts are dropped too. They are written into
+          # the work directory around this script, so an unfiltered copy puts
+          # the builder's scaffolding inside the package - and once unclaimed
+          # staging files are an error, they fail the build.
+          let drop = ["info" "build_env.sh" "conda_build.log" "conda_build.sh" "conda_build_script.nu"]
+          let staged = (ls . | where {|e| ($e.name | path basename) not-in $drop})
           print $"unpacking ($staged | length) top-level entries into the prefix"
           for e in $staged {
             cp -rP $e.name $env.PREFIX
@@ -131,6 +137,27 @@ outputs:
           # rather than a number that could drift from the tree they describe.
           let base = ($env.PREFIX | path join "etc" "conda" "activate.d" "10-acpp.sh")
           open --raw $base | str replace --all "LLVM_MAJOR" "${{ llvm_major }}" | save -f $base
+
+          # Clang's own configuration files, named for the DEFAULT TARGET
+          # TRIPLE our build sets via LLVM_HOST_TRIPLE. That name is what makes
+          # a plain `clang++` invocation find them with no symlink and no
+          # environment variable - <CFGDIR> inside them expands to this
+          # directory, so every path follows the prefix on its own.
+          let cfg = ($env.RECIPE_DIR | path join "cfg")
+          for f in (ls $cfg | get name) {
+            cp $f ($env.PREFIX | path join "bin")
+          }
+
+          # librt-backend-omp.so records a bare DT_NEEDED of libomp.so, but
+          # LLVM's per-target runtime layout installs it under lib/<triple>/,
+          # which the dynamic loader does not search. A relative symlink puts it
+          # where the loader looks without moving the real file.
+          #
+          # This collides with conda-forge's llvm-openmp, which owns lib/libomp.so
+          # - harmless only because we run-constrain that package out. The
+          # durable fix is an rpath of $ORIGIN/../<triple> on the backend itself,
+          # which belongs in the fork rather than here.
+          ^ln -sf "x86_64-conda-linux-gnu/libomp.so" ($env.PREFIX | path join "lib" "libomp.so")
 
           print "-- activation --"
           ls ($env.PREFIX | path join "etc" "conda" "activate.d") | each {|e| print $"  ($e.name | path basename)" }
@@ -290,6 +317,8 @@ outputs:
         - lib/hipSYCL/librt-backend-omp.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+        # The SSCP JIT tool for this backend, beside the library it drives.
+        - bin/hipSYCL/llvm-to-backend/llvm-to-host-tool
         - lib/hipSYCL/bitcode/libkernel-sscp-host-*.bc
         # llvm-to-backend and llvm-to-host both link it directly, so the JIT
         # cannot run without it. 120 MiB, and not reducible.
@@ -304,6 +333,9 @@ outputs:
         # llvm-openmp is run-constrained out rather than depended on: it ships
         # the same libomp.so path.
         - lib/x86_64-conda-linux-gnu/lib*.so*
+        # The loader-visible name for the OpenMP runtime above; see the staging
+        # script for why the real file cannot simply live here.
+        - lib/libomp.so
         # Sanitizer runtimes an instrumented binary LOADS. Their static
         # counterparts are link-time and live in acpp-dev.
         - lib/clang/*/lib/*/*.so*
@@ -355,6 +387,10 @@ outputs:
       files:
         - include/**
         - lib/cmake/**
+        # The per-target and header-package cmake files, which sit outside
+        # lib/cmake and would otherwise be dropped.
+        - lib/x86_64-conda-linux-gnu/cmake/**
+        - share/cmake/**
         - lib/*.a
         # Link-time halves of the sanitizer runtimes, plus the CRT objects and
         # symbol lists that belong beside them.
@@ -403,6 +439,11 @@ outputs:
       files:
         - etc/conda/activate.d/10-acpp.sh
         - etc/conda/deactivate.d/10-acpp.sh
+        # Clang's config files, found by name from the default target triple, so
+        # our clang++ is correctly configured with no activation at all.
+        - bin/x86_64-conda-linux-gnu-clang.cfg
+        - bin/x86_64-conda-linux-gnu-clang++.cfg
+        - bin/x86_64-conda-linux-gnu-clang-cpp.cfg
         - bin/acpp
         - bin/acpp-*
         - bin/syclcc
@@ -590,6 +631,7 @@ outputs:
         - etc/conda/deactivate.d/20-acpp-rocm.sh
         - lib/hipSYCL/librt-backend-hip.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
+        - bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool
         - lib/hipSYCL/bitcode/libkernel-sscp-amdgpu-*.bc
         # The ROCm subset, selected by destination in the staging build from
         # acpp's own HIP deployment manifest: 146 MB out of 8.9 GB unpacked.
@@ -617,6 +659,7 @@ outputs:
         - etc/conda/deactivate.d/20-acpp-cuda.sh
         - lib/hipSYCL/librt-backend-cuda.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+        - bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool
         - lib/hipSYCL/bitcode/libkernel-sscp-ptx-*.bc
     requirements:
       # We recreate the build/host environment this backend was compiled
@@ -669,6 +712,7 @@ outputs:
       files:
         - lib/hipSYCL/librt-backend-ocl.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+        - bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool
         - lib/hipSYCL/bitcode/libkernel-sscp-spirv-*.bc
         - lib/hipSYCL/ext/llvm-spirv/**
     requirements:

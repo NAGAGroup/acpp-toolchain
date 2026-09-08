@@ -93,6 +93,13 @@ let rocm_keep_libs = [
   "libhiprtc-builtins.so*"
 ]
 
+# Nothing in our build EXECUTES these. hip-config.cmake passes them through
+# set_and_check, which fails the configure outright when a path is absent, so
+# they are here to satisfy a validation rather than to be used. Together they
+# are 1.3 MB; bin/ as a whole is 338 MB. The .exe pair the config also checks
+# is inside an if(WIN32).
+let rocm_keep_files = ["bin/hipcc" "bin/hipconfig"]
+
 print $"── ROCm ──"
 print $"  from ($rocm_root)  ((du $rocm_root | get 0.physical))"
 print $"  into ($targets_dir)"
@@ -129,6 +136,20 @@ for d in $rocm_keep_dirs {
     error make {msg: $"ROCm copy produced nothing in ($landed) from ($children | length) sources"}
   }
 }
+for f in $rocm_keep_files {
+  let s = ($rocm_root | path join $f)
+  let landed = ($targets_dir | path join $f)
+  if not ($s | path exists) {
+    error make {msg: $"ROCm keep-list file is missing from the distribution: ($s)"}
+  }
+  mkdir ($landed | path dirname)
+  cp $s $landed
+  if not ($landed | path exists) {
+    error make {msg: $"ROCm keep-list file did not land: ($landed)"}
+  }
+  print $"  file ($f | fill -a l -w 22) ((ls $landed | get 0.size))"
+}
+
 let libdir = ($targets_dir | path join "lib")
 mkdir $libdir
 for pat in $rocm_keep_libs {

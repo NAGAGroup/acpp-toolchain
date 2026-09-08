@@ -469,6 +469,12 @@ outputs:
         # linkage. It arrives here as a run export from the staging output's
         # host python rather than being restated.
         - ${{ pin_subpackage('acpp-dev', exact=True) }}
+        # This package ships the clang cfg files, and they carry --sysroot. The
+        # base clang and clangxx feedstocks depend on the sysroot for the same
+        # reason. Nothing supplies it transitively - libgcc-devel_linux-64
+        # depends only on __unix - so without this, compiling anything fails on
+        # a missing features.h.
+        - sysroot_${{ target_platform }}
       run_constraints:
         - clang <0a0
         - clangxx <0a0

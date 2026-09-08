@@ -4,6 +4,8 @@
 # persistent source + cmake build cache (build.nu owns this)
 # pixi
 # rattler-build / pixi publish outputs
+# downloaded release assets, kept for auditing the published artifact
+.artifacts/
 .build-cache/
 .cache/
 .ccache/

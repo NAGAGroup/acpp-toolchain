@@ -1,0 +1,90 @@
+# variants.yaml — the pinning file for the packaging workspace.
+#
+# LAYERED ON TOP OF ../staging/variants.yaml, which pixi.toml lists first.
+# Files are processed in order, so anything here overrides the base and
+# everything not repeated here is inherited: llvm_major and llvm_version (the
+# LLVM mutex's version and the scope of our conda-forge constraints), acpp_rev
+# (provenance of the tree we slice), cuda_compiler_version, level-zero-devel,
+# zlib, zstd, libxml2-devel, numactl, python, and c_compiler_version — which is
+# where `libgcc >=14` and `libstdcxx >=14` come from.
+#
+# A version bump therefore stays a one-line edit in ONE file, and this workspace
+# cannot drift from the tree it is slicing.
+#
+# linux-64 only. Other platforms add selectors to these keys, not new files.
+
+# ---- the fixed artifact every recipe slices --------------------------------
+# staging/ publishes this to a GitHub release. The tag never moves once
+# packaging pins it; a new staging build means a new sha here and nowhere else.
+#
+# The filename carries staging's build hash, so it moves with the sha. Keeping
+# them adjacent is deliberate: one without the other is a silent mismatch, and
+# rattler reports it as a hash failure after the download rather than as the
+# stale-filename error it actually is.
+stage_tag:
+  - "staging-linux-64"
+stage_file:
+  - "acpp-stage-1.0-py314h52fffd3_0.tar.bz2"
+stage_sha256:
+  - "02b3eaa4ebcbd11426f3858497bccba7134d02afdb6a099e28b7a6f415f89fd8"
+
+# ---- lane -------------------------------------------------------------------
+# Which lane this build belongs to. Selects the build string and which lane
+# selector package the outputs pin. The workflow overrides both of these:
+#
+#   pixi publish --variant "acpp_lane=naga_fork" --variant "acpp_version=26.09.08.a0"
+#
+# release  the acpp release tag, stable once published
+# nightly  acpp's develop branch, at most once a day
+# naga     our fork, iterated on freely
+#
+# nightly and naga both carry dated versions, and PEP-440 ordering puts a
+# below rc, so nightly outranks the fork on the same date and a bare
+# `pixi add acpp` lands on nightly. That is deliberate: the last acpp release
+# is nearly a year old, and nothing about it is more robust at runtime than
+# any other commit. A user who wants a specific lane installs its selector.
+acpp_lane:
+  - "release"
+
+# The version our packages carry. For the release lane this is acpp's own
+# release tag, which is a specific thing and not a date. The dated lanes
+# override it:
+#
+#   nightly  YY.MM.DD.rc<N>
+#   naga     YY.MM.DD.a<N>
+#
+# <N> is bumped BY HAND, as an escape hatch for a second build in one day
+# rather than as a rule. Nightly runs at most daily, and fork iteration only
+# cares about the final result of a session.
+acpp_version:
+  - "25.10.0"
+
+# The lane selector packages are flat at 1.0 forever. They carry no version
+# information - they exist to turn a build-string match into a name a user can
+# type, the way conda-forge's clang-no-conda-cfg does. All three are always
+# built; the two that are not this lane publish nothing anyone installs.
+acpp_lane_selector_version:
+  - "1.0"
+
+# ---- bounds staging has no reason to carry ---------------------------------
+# The run range for the CUDA runtime package is
+# >=cuda_compiler_version,<cuda_version_max. staging pins one CUDA and needs no
+# upper bound; a published package does.
+cuda_version_max:
+  - "13"
+
+# staging leaves OpenCL unpinned on purpose - opencl-headers is header-only and
+# date-versioned, and an ICD loader's whole job is a stable ABI. A published
+# package still needs a floor, and this is the version the tree was built and
+# linked against.
+ocl_icd:
+  - "2.3.4"
+
+# The same value as staging's `level-zero-devel`, under a name a template can
+# actually reference: hyphens are subtraction in Jinja, so `${{ level-zero-devel }}`
+# is a rendering error rather than a lookup. staging can use the hyphenated name
+# because it never interpolates it - the key matches a bare requirement and
+# rattler applies it by name. Here we need the VALUE, so it needs a second
+# spelling. Keep the two in step.
+level_zero_min:
+  - "1.29"

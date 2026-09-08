@@ -1,0 +1,607 @@
+# recipe.yaml — every published package, sliced from the staging tarball.
+#
+# Versions and choices live in variants.yaml (and, beneath it,
+# ../staging/variants.yaml); this file is the mechanism and should not need
+# editing to move a version or a lane.
+#
+# NOTHING HERE COMPILES. The cache block downloads one fixed release asset and
+# unpacks it; every output selects files out of that tree with globs. A mistake
+# in this file costs a packaging run and can never cost an LLVM rebuild.
+#
+# The split, and why it is not conda-forge's forty-package one: that is an
+# unbearable maintenance burden for a one-person team. The point here is
+# splitting, not trimming - a large HPC toolchain is normal, and installing
+# more beats missing a shared library and failing at run time.
+
+context:
+  version: ${{ acpp_version }}
+  # The lane, in its two spellings: a build string, and a package name.
+  lane: ${{ acpp_lane }}
+  lane_package: acpp-${{ acpp_lane | replace("_", "-") }}-lane
+  # Our own packages are slices of ONE build, so they pin each other exactly.
+  # Nothing looser is ever correct: two slices from different builds share a
+  # version whenever both lanes are dated, and only the build string separates
+  # them.
+  exact: ${{ acpp_version }} ${{ acpp_lane }}_*
+
+recipe:
+  name: acpp-packaging
+  version: ${{ version }}
+
+outputs:
+  - staging:
+      name: acpp-stage-unpacked
+    source:
+      # The fixed artifact. The tag never moves now that packaging pins it; a
+      # new staging build means a new sha256 and filename in variants.yaml,
+      # together.
+      - url: https://github.com/NAGAGroup/acpp-toolchain/releases/download/${{ stage_tag }}/${{ stage_file }}
+        sha256: ${{ stage_sha256 }}
+    build:
+      script:
+        interpreter: nu
+        content: |
+          # The asset is a conda package, so rattler has already unpacked it
+          # and the tree is the work directory. Everything except conda's own
+          # metadata becomes the prefix the outputs carve from.
+          #
+          # info/ is DROPPED on purpose: it describes acpp-stage, a package
+          # nobody installs, and shipping it inside another package would put
+          # a second and contradictory set of metadata in the prefix.
+          let staged = (ls . | where {|e| ($e.name | path basename) != "info"})
+          print $"unpacking ($staged | length) top-level entries into the prefix"
+          for e in $staged {
+            cp -rP $e.name $env.PREFIX
+          }
+          print "-- what the outputs will carve from --"
+          ls $env.PREFIX | each {|e| print $"  ($e.name | path basename)" }
+
+  # ── the mutexes ───────────────────────────────────────────────────────────
+  #
+  # Two axes need expressing that no version pin can carry.
+  #
+  # acpp-llvm-version: our packages have the SAME acpp version whichever LLVM
+  # they were built against, so a version pin cannot tell them apart. Two cases
+  # make it necessary: a build matrix of one acpp release against several LLVMs,
+  # and a patch bump that adds a newer LLVM while keeping the old one. In both,
+  # a user asking for `acpp 26.10.*` would otherwise be free to mix.
+  #
+  # The lane selectors: three packages, statically named, each constraining the
+  # other two so no environment can hold more than one lane. They ship no files
+  # - they exist to turn a build-string match into a name a user can type, which
+  # is exactly what conda-forge's clang-no-conda-cfg does for its cfg variant.
+
+  - package:
+      name: acpp-llvm-version
+      version: ${{ llvm_major }}
+    build:
+      noarch: generic
+      number: 0
+      files: []
+      variant:
+        # Consumed in `version:` rather than in a requirement, so rattler does
+        # not discover it as a variant key on its own. Declaring it is what
+        # makes one output per major instead of one arbitrary output.
+        use_keys:
+          - llvm_major
+    requirements:
+      run_exports:
+        # WEAK, following the python_abi idiom: it fires for packages that take
+        # this as a HOST dependency - every one of ours does - and does not
+        # leak out of environments that merely contain it. Defaults expand a
+        # one-segment version into >=21,<22.0a0, the whole major and nothing
+        # else.
+        weak:
+          - ${{ pin_subpackage('acpp-llvm-version') }}
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: BSD-2-Clause
+      summary: Selects the LLVM major the AdaptiveCpp toolchain was built against
+
+  - package:
+      name: acpp-release-lane
+      version: ${{ acpp_lane_selector_version }}
+    build:
+      noarch: generic
+      number: 0
+      files: []
+    requirements:
+      run_constraints:
+        - acpp-nightly-lane <0a0
+        - acpp-naga-fork-lane <0a0
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      summary: Selects the release lane - AdaptiveCpp at a published release tag
+
+  - package:
+      name: acpp-nightly-lane
+      version: ${{ acpp_lane_selector_version }}
+    build:
+      noarch: generic
+      number: 0
+      files: []
+    requirements:
+      run_constraints:
+        - acpp-release-lane <0a0
+        - acpp-naga-fork-lane <0a0
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      summary: Selects the nightly lane - AdaptiveCpp develop, built at most daily
+
+  - package:
+      name: acpp-naga-fork-lane
+      version: ${{ acpp_lane_selector_version }}
+    build:
+      noarch: generic
+      number: 0
+      files: []
+    requirements:
+      run_constraints:
+        - acpp-release-lane <0a0
+        - acpp-nightly-lane <0a0
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      summary: Selects the NAGA fork lane - NAGAGroup/AdaptiveCpp
+
+  # ── the runtime ───────────────────────────────────────────────────────────
+  #
+  # THE package any environment carries. OpenMP is baked in unconditionally so
+  # every install has one working backend regardless of hardware; the other
+  # backends are their own packages so their dependencies are not forced on
+  # everyone, and acpp loads backends fail-soft.
+  #
+  # It holds three EXECUTABLES - llc, opt, ld.lld - because acpp JITs at run
+  # time and shells out to them. "acpp holds the executables" describes what
+  # that package contains, not a prohibition elsewhere.
+
+  - package:
+      name: acpp-compiler-rt
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - lib/libacpp-rt.so*
+        - lib/libacpp-common.so*
+        - lib/hipSYCL/librt-backend-omp.so
+        - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
+        - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
+        - lib/hipSYCL/bitcode/libkernel-sscp-host-*.bc
+        # llvm-to-backend and llvm-to-host both link it directly, so the JIT
+        # cannot run without it. 120 MiB, and not reducible.
+        - lib/libLLVM.so*
+        - lib/libLLVM-*.so
+        # The OpenMP runtimes, which we build ourselves. conda-forge's
+        # llvm-openmp is run-constrained out rather than depended on: it ships
+        # the same libomp.so path.
+        - lib/x86_64-conda-linux-gnu/lib*.so*
+        # Sanitizer runtimes an instrumented binary LOADS. Their static
+        # counterparts are link-time and live in acpp-dev.
+        - lib/clang/*/lib/*/*.so*
+        - lib/clang/*/share/*
+        - lib/clang/*/bin/*
+        - bin/llc
+        - bin/opt
+        - bin/lld
+        - bin/ld.lld
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - libgcc >=${{ c_compiler_version }}
+        - libstdcxx >=${{ c_compiler_version }}
+        - libzlib
+        - zstd
+        - libxml2
+        - ncurses
+        - libedit
+        - numactl
+      run_exports:
+        # WEAK, of itself. This is a host dependency in every path that reaches
+        # it, and weak is what turns "in host" into "in run". Strong would fire
+        # only from a build environment, and nothing puts a runtime there.
+        weak:
+          - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+      run_constraints:
+        - llvm-openmp <0a0
+        - compiler-rt <0a0
+        - llvm <0a0
+        - libllvm${{ llvm_major }} <0a0
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp runtime - everything a binary built with this toolchain needs
+
+  # ── development files ─────────────────────────────────────────────────────
+  #
+  # Static archives, every header, every cmake config. ~900 MiB, and that is
+  # intended: this is the package that makes the toolchain complete.
+
+  - package:
+      name: acpp-dev
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - include/**
+        - lib/cmake/**
+        - lib/*.a
+        # Link-time halves of the sanitizer runtimes, plus the CRT objects and
+        # symbol lists that belong beside them.
+        - lib/clang/*/lib/*/*.a
+        - lib/clang/*/lib/*/*.o
+        - lib/clang/*/lib/*/*.syms
+        # The clang resource headers - intrinsics, stddef.h, the OpenMP and
+        # sanitizer headers - which every compile with this toolchain needs.
+        - lib/clang/*/include/**
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        # Our headers include libstdc++'s and our archives were compiled against
+        # them, so consuming either needs those headers present. The two are
+        # independent packages - libstdcxx-devel declares no dependencies at
+        # all, so it does not pull libgcc-devel - and both are named.
+        - libstdcxx-devel_${{ target_platform }}
+        - libgcc-devel_${{ target_platform }}
+      run_exports:
+        weak:
+          - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+      run_constraints:
+        - llvmdev <0a0
+        - clangdev <0a0
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp development files - headers, static libraries, cmake configuration
+
+  # ── the compiler ──────────────────────────────────────────────────────────
+  #
+  # Executables and acpp's own configuration, and NO cfg files. This is the
+  # "I do not care about sysroots or packaging" case: `pixi global install acpp`
+  # gives a working SYCL compiler that builds against whatever system it is on,
+  # with prefix libraries taking priority and the system a real fallback. The
+  # sysroot-isolating case is the activation package, which ships the cfg files.
+
+  - package:
+      name: acpp
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - bin/acpp
+        - bin/acpp-*
+        - bin/syclcc
+        - bin/syclcc-clang
+        - bin/clang
+        - bin/clang++
+        - bin/clang-[0-9]*
+        - bin/clang-cl
+        - bin/clang-cpp
+        # acpp's core configuration and its deployment manifests, read by the
+        # driver at run time.
+        - etc/AdaptiveCpp/**
+        # Linker-side rather than JIT-side, so they sit with the driver.
+        - lib/libLTO.so*
+        - lib/libRemarks.so*
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-dev', exact=True) }}
+        # bin/acpp is a Python script. The staging artifact's metadata does not
+        # list this, because rattler only sees ELF linkage.
+        - python
+      run_constraints:
+        - clang <0a0
+        - clangxx <0a0
+        - clang-${{ llvm_major }} <0a0
+        - clang-no-conda-cfg <0a0
+    tests:
+      - script:
+          - acpp --version
+          - clang++ --version
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp SYCL compiler
+
+  # ── tools ─────────────────────────────────────────────────────────────────
+
+  - package:
+      name: acpp-clang-tools
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - bin/clang-apply-replacements
+        - bin/clang-change-namespace
+        - bin/clang-check
+        - bin/clang-doc
+        - bin/clang-extdef-mapping
+        - bin/clang-format
+        - bin/clang-include-cleaner
+        - bin/clang-include-fixer
+        - bin/clang-installapi
+        - bin/clang-linker-wrapper
+        - bin/clang-move
+        - bin/clang-nvlink-wrapper
+        - bin/clang-offload-bundler
+        - bin/clang-offload-packager
+        - bin/clang-query
+        - bin/clang-refactor
+        - bin/clang-reorder-fields
+        - bin/clang-repl
+        - bin/clang-scan-deps
+        - bin/clang-sycl-linker
+        - bin/clang-tblgen
+        - bin/clang-tidy
+        - bin/clangd
+        - bin/c-index-test
+        - bin/diagtool
+        - bin/find-all-symbols
+        - bin/git-clang-format
+        - bin/hmaptool
+        - bin/modularize
+        - bin/pp-trace
+        - bin/run-clang-tidy
+        - bin/analyze-build
+        - bin/intercept-build
+        - bin/scan-build
+        - bin/scan-build-py
+        - bin/scan-view
+        - bin/reduce-chunk-list
+        - lib/libclang.so*
+        - lib/libclang-cpp.so*
+        - lib/libscanbuild/**
+        - lib/libear/**
+        - libexec/**
+        - share/clang/**
+        - share/scan-build/**
+        - share/scan-view/**
+        - share/clang-doc/**
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - python
+      run_constraints:
+        - clang-tools <0a0
+        - clang-format <0a0
+        - clang-scan-deps <0a0
+        - libclang <0a0
+        - libclang-cpp <0a0
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: clang tooling built alongside the AdaptiveCpp toolchain
+
+  - package:
+      name: acpp-llvm-tools
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - bin/llvm-*
+        - bin/lli
+        - bin/lli-child-target
+        - bin/bugpoint
+        - bin/dsymutil
+        - bin/sancov
+        - bin/sanstats
+        - bin/verify-uselistorder
+        - bin/amdgpu-arch
+        - bin/nvptx-arch
+        - bin/offload-arch
+        - bin/lld-link
+        - bin/ld64.lld
+        - bin/wasm-ld
+        - bin/lldb
+        - bin/lldb-*
+        # Test utilities, installed because LLVM_INSTALL_UTILS is on - which is
+        # itself on because the install-tree LLVMConfig.cmake only recomputes
+        # its lit path inside `if(LLVM_INSTALL_UTILS AND LLVM_BUILD_UTILS)`,
+        # and with that false a build path shipped inside an installed cmake
+        # package.
+        - bin/FileCheck
+        - bin/not
+        - bin/count
+        - bin/split-file
+        - bin/yaml-bench
+        - bin/obj2yaml
+        - bin/yaml2obj
+        - bin/UnicodeNameMappingGenerator
+        - lib/liblldb.so*
+        - lib/liblldbIntelFeatures.so*
+        - lib/python*/**
+        - share/gdb/**
+        - share/opt-viewer/**
+        - share/man/**
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - python
+        - python_abi ${{ python }}.* *_cp${{ python | replace(".", "") }}
+      run_constraints:
+        - llvm-tools <0a0
+        - lld <0a0
+        - lldb <0a0
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: LLVM tools and lldb built alongside the AdaptiveCpp toolchain
+
+  # ── backends ──────────────────────────────────────────────────────────────
+  #
+  # Each carries its own backend library, its JIT target and that target's
+  # bitcode - the same carve acpp's own deployment manifests use. ROCm is the
+  # only one that repackages files; the rest are metapackages over conda-forge.
+
+  - package:
+      name: acpp-runtime-rocm
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - lib/hipSYCL/librt-backend-hip.so
+        - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
+        - lib/hipSYCL/bitcode/libkernel-sscp-amdgpu-*.bc
+        # The ROCm subset, selected by destination in the staging build from
+        # acpp's own HIP deployment manifest: 146 MB out of 8.9 GB unpacked.
+        - targets/**
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp ROCm backend and the ROCm runtime it needs
+
+  - package:
+      name: acpp-runtime-cuda
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - lib/hipSYCL/librt-backend-cuda.so
+        - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+        - lib/hipSYCL/bitcode/libkernel-sscp-ptx-*.bc
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - cuda-version >=${{ cuda_compiler_version }},<${{ cuda_version_max }}
+        - cuda-cudart
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp CUDA backend
+
+  - package:
+      name: acpp-runtime-level-zero
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - lib/hipSYCL/librt-backend-ze.so
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - level-zero >=${{ level_zero_min }}
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp Level Zero backend
+
+  - package:
+      name: acpp-runtime-ocl
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        - lib/hipSYCL/librt-backend-ocl.so
+        - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+        - lib/hipSYCL/bitcode/libkernel-sscp-spirv-*.bc
+        - lib/hipSYCL/ext/llvm-spirv/**
+    requirements:
+      host:
+        - ${{ pin_subpackage('acpp-llvm-version', exact=True) }}
+      run:
+        - ${{ pin_subpackage(lane_package, exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - ocl-icd >=${{ ocl_icd }}
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp OpenCL backend
+
+  - package:
+      name: acpp-runtime-ocl-system
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files: []
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp-runtime-ocl', exact=True) }}
+        # Works through a post-link script, which pixi runs only when the
+        # project opts in. That is a user-facing note, not something a
+        # constraint can express.
+        - ocl-icd-system
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp OpenCL backend using the system ICD loader
+
+  # ── the meta package ──────────────────────────────────────────────────────
+
+  - package:
+      name: acpp-toolkit
+      version: ${{ version }}
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files: []
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp', exact=True) }}
+        - ${{ pin_subpackage('acpp-dev', exact=True) }}
+        - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
+        - ${{ pin_subpackage('acpp-clang-tools', exact=True) }}
+        - ${{ pin_subpackage('acpp-llvm-tools', exact=True) }}
+    tests:
+      - package_contents:
+          strict: true
+          files: []
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: The complete AdaptiveCpp toolchain, without the optional backends
+
+about:
+  homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+  license: Apache-2.0 WITH LLVM-exception
+  summary: AdaptiveCpp SYCL toolchain, sliced from one monolithic build

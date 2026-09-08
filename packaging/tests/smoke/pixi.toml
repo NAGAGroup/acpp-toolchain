@@ -1,0 +1,44 @@
+# Smoke workspace — installs the published toolchain THROUGH A REAL SOLVE
+# against the local channel the build job produced.
+#
+# That is the point of doing it this way rather than poking at files inside the
+# packages: a solve exercises the run_exports, the run_constraints and the
+# channel's repodata, so a package that carves nothing, carves someone else's
+# file, or declares a dependency that cannot be satisfied fails HERE rather
+# than on the real channel.
+#
+# The channel is a relative path. CI downloads the build artifact to
+# <repo>/local-channel, which is three levels up from this manifest
+# (smoke -> tests -> packaging -> repo root), and the same command works
+# locally after `pixi publish --to ../local-channel` from packaging/.
+
+[workspace]
+name = "acpp-smoke"
+channels = ["../../../local-channel", "conda-forge"]
+platforms = [{ platform = "linux-64", glibc = "2.34", cuda = "12.9" }]
+
+# Deliberately short. `acpp` alone should be enough to compile: its run_exports
+# supply acpp-dev and, through that, acpp-compiler-rt - so this manifest is
+# itself a live test that a consumer needs no runtime text of its own. The CUDA
+# backend is named because it is optional by design.
+[dependencies]
+acpp = "*"
+acpp-runtime-cuda = "*"
+
+[tasks.info]
+cmd = "acpp-info -l"
+description = "List the backends and devices the runtime can see"
+
+[tasks.build]
+cmd = "acpp -O2 --acpp-targets=generic ../hello.cpp -o ./smoke"
+description = "Compile the SYCL smoke binary (generic SSCP: one binary, JIT per device)"
+
+[tasks.omp]
+cmd = "ACPP_VISIBILITY_MASK=omp ./smoke"
+depends-on = ["build"]
+description = "Run on the OpenMP backend - always available, so this must pass anywhere"
+
+[tasks.cuda]
+cmd = "ACPP_VISIBILITY_MASK=cuda ./smoke"
+depends-on = ["build"]
+description = "Run on the CUDA backend, JITing PTX on real hardware"

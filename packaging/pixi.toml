@@ -1,0 +1,49 @@
+# The packaging workspace: many packages, no compilation.
+#
+# Every output slices files out of the FIXED tarball that staging/ published to
+# a GitHub release. Nothing here builds anything, which is the point: a
+# packaging mistake costs a packaging run and can never cost an LLVM rebuild,
+# and these jobs run on free runners rather than the large one.
+#
+# staging/ is a separate workspace with its own manifest. The only thing shared
+# between them is variants.yaml, which this file layers on top of.
+
+[workspace]
+name = "acpp-packaging"
+
+# conda-forge only, exactly like staging. Our own channel is deliberately NOT
+# listed: every package here is an output of this one recipe, so the exact pins
+# between them resolve through pin_subpackage inside the build rather than
+# through a channel. Listing our channel would only add a dependency on it
+# already containing what we are about to publish.
+channels = ["conda-forge"]
+
+# linux-64 alone, deliberately, and an inline table rather than the bare string
+# for the same reason as staging: a bare entry means pixi's DEFAULT virtual
+# packages, and that default is __glibc = 2.28. These packages carve a tree
+# that was BUILT against 2.34, so the floor has to be stated here or every
+# output would advertise a floor lower than the binaries actually require.
+platforms = [{ platform = "linux-64", glibc = "2.34", cuda = "12.9" }]
+
+preview = ["pixi-build"]
+
+requires-pixi = ">=0.78"
+
+# Processed in the listed order, so the staging file is the base and ours is
+# the overlay. Everything version-shaped is already pinned in staging's file;
+# ours adds only the artifact reference, the lane, and the two bounds a
+# published package needs that an unpublished one does not.
+build-variants-files = [
+  "../staging/variants.yaml",
+  "./variants.yaml",
+]
+
+[package]
+name = "acpp-packaging"
+version = "0.0.0"
+publish = true
+
+[package.build]
+# Unpinned on purpose, matching staging: a pinned backend rots, and breakage on
+# a backend update is CI's job to catch rather than something to defer.
+backend = { name = "pixi-build-rattler-build", version = "*" }

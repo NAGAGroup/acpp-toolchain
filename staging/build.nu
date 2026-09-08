@@ -162,11 +162,67 @@ for pat in $rocm_keep_libs {
 }
 print $"  installed ((du $targets_dir | get 0.physical)), ((ls $libdir | length)) libraries"
 
+# ── the conda toolchain, resolved from the build environment ─────────────
+# Derived rather than written down: a literal here is a literal that goes
+# stale the first time conda moves a version.
+let conda_triple = ($env.HOST? | default "")
+if $conda_triple == "" {
+  error make {msg: "HOST is not set; cannot determine the conda target triple"}
+}
+
+let declared_sysroot = ($env.CONDA_BUILD_SYSROOT? | default "")
+let conda_sysroot = (if ($declared_sysroot != "") and ($declared_sysroot | path exists) {
+  $declared_sysroot
+} else {
+  ($build_prefix | path join $conda_triple "sysroot")
+})
+if not ($conda_sysroot | path exists) {
+  error make {msg: $"conda sysroot not found at ($conda_sysroot)"}
+}
+
+# --gcc-install-dir names the installation outright. Its sibling
+# --gcc-toolchain searches by triple AND takes the largest version it finds,
+# so it has two ways to pick something we did not mean.
+let gcc_candidates = (glob ($build_prefix | path join "lib" "gcc" $conda_triple "*"))
+if ($gcc_candidates | length) != 1 {
+  error make {msg: $"expected exactly one gcc installation under ($build_prefix)/lib/gcc/($conda_triple), found ($gcc_candidates | length): ($gcc_candidates | str join ', ')"}
+}
+let gcc_install_dir = ($gcc_candidates | first)
+
+print $"── conda toolchain ──"
+print $"  triple      ($conda_triple)"
+print $"  sysroot     ($conda_sysroot)"
+print $"  gcc install ($gcc_install_dir)"
+
 # ── configure ────────────────────────────────────────────────────────────
 # CMAKE_ARGS comes from the conda-forge activations and carries the sysroot,
 # find-root and CUDA settings. It is a space separated string and must be
 # splatted, never passed as one argument.
 let conda_args = ($env.CMAKE_ARGS? | default "" | split row -r '\s+' | where {|a| $a != ""})
+
+# The SPIR-V translator is configured by its own cmake invocation, which
+# inherits none of this - that is how it found the distribution's LLVM instead
+# of ours. It gets the same arguments, with two changes:
+#
+#   * CMAKE_INSTALL_PREFIX is dropped. acpp installs the translator into
+#     lib/hipSYCL/ext/llvm-spirv and says so through an initial cache file,
+#     which a command line -D would override - scattering an LLVM-SPIRV
+#     installation across the toolchain root.
+#   * The build tree joins CMAKE_FIND_ROOT_PATH, because the LLVM it links
+#     against lives there rather than under the prefix or the sysroot, and the
+#     find-root modes are ONLY.
+#
+# Values that are themselves lists switch to | for the trip through
+# ExternalProject_Add, which claims the semicolon for its own argument
+# splitting; the fork declares LIST_SEPARATOR | to turn them back.
+let spirv_args = ($conda_args
+  | where {|a| not ($a | str starts-with "-DCMAKE_INSTALL_PREFIX=")}
+  | each {|a| if ($a | str starts-with "-DCMAKE_FIND_ROOT_PATH=") { $"($a);($build_dir)" } else { $a }}
+  | each {|a| $a | str replace -a ";" "|"}
+  | str join ";")
+print $"── spirv sub-build ──"
+print $"  ($spirv_args | split row ';' | length) arguments forwarded"
+$spirv_args | split row ";" | each {|a| print $"    ($a | str substring 0..150)" }
 
 let args = [
   -S ($src | path join "llvm-project" "llvm")
@@ -176,6 +232,15 @@ let args = [
   $"-DCMAKE_INSTALL_PREFIX=($prefix)"
   # conda keeps libraries in plain lib, never lib64
   -DCMAKE_INSTALL_LIBDIR=lib
+
+  # The triple the built compiler defaults to. Without this LLVM resolves
+  # x86_64-unknown-linux-gnu, and clang's own GCC search then looks for
+  # lib/gcc/x86_64-unknown-linux-gnu/<version> and misses conda's, which lives
+  # under lib/gcc/x86_64-conda-linux-gnu/<version>. Setting it is what makes
+  # the installed compiler find its toolchain with no flags at all - the same
+  # reason conda-forge's own clang cfg files carry no --gcc-* option.
+  # LLVM_HOST_TRIPLE implicitly sets LLVM_DEFAULT_TARGET_TRIPLE.
+  $"-DLLVM_HOST_TRIPLE=($conda_triple)"
 
   # The shape of the toolchain, from variants.yaml.
   $"-DLLVM_ENABLE_PROJECTS=($env.LLVM_PROJECTS)"
@@ -246,6 +311,9 @@ let args = [
   # Leave the build machine's paths out of the installed configuration.
   -DACPP_CONFIG_FILE_OMIT_ENVIRONMENT_PATHS=ON
 
+  # Everything the translator's own cmake needs, since it inherits nothing.
+  $"-DACPP_SPIRV_CMAKE_ARGS=($spirv_args)"
+
   -DCMAKE_C_COMPILER_LAUNCHER=ccache
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -263,10 +331,65 @@ cmake ...$args ...$conda_args
 print $"── configured ──"
 print $"  cache ($build_dir | path join 'CMakeCache.txt')"
 
+# ── clang configuration files ────────────────────────────────────────────
+# BUILD-ONLY. These are never installed: the shipped compiler's config files
+# belong to the activation packages and match upstream's. These exist so that
+# everything compiled with the just-built clang during this build - the
+# compiler-rt runtimes above all - uses the SAME options as everything else
+# in the toolchain. A distribution whose own pieces were compiled with
+# different options is binary-incompatible with itself.
+#
+# Clang searches the directory its executable lives in, and falls back from
+# <triple>-<driver>.cfg to <driver>.cfg, so a plain name beside the binary is
+# found. Paths are absolute because this file never leaves the build tree;
+# upstream's use <CFGDIR> because theirs ships.
+#
+# The link line's options are each prefixed with `$`. That is a real feature
+# and it is not in the user manual - Driver.cpp:1247 sorts config options into
+# a head list and a tail list, and "the tail list is used only when linking",
+# with the `$` stripped. Without it every compile-only invocation would carry
+# linker flags it cannot use. It is per OPTION, not per line, which is why
+# LDFLAGS is split before being marked.
+let cfg_dir = ($build_dir | path join "bin")
+mkdir $cfg_dir
+let link_tail = ($env.LDFLAGS? | default "" | split row -r '\s+' | where {|t| $t != ""} | each {|t| ('$' + $t)} | str join " ")
+print $"── clang cfg ──"
+for d in [[driver, flags]; ["clang", ($env.CFLAGS? | default "")] ["clang++", ($env.CXXFLAGS? | default "")]] {
+  let path = ($cfg_dir | path join $"($d.driver).cfg")
+  [
+    $"--sysroot=($conda_sysroot) --gcc-install-dir=($gcc_install_dir)"
+    $d.flags
+    $link_tail
+  ] | str join "\n" | save -f $path
+  print $"  ($path)"
+  open --raw $path | lines | each {|l| print $"    ($l | str substring 0..150)" }
+}
+
 # ── build and install ────────────────────────────────────────────────────
 # Link concurrency is governed by LLVM_RAM_PER_LINK_JOB, set at configure:
 # LLVM sizes its own job pool from the memory actually available, so --parallel
 # here is the COMPILE width and links throttle themselves underneath it.
+# clang is built first so the configuration files can be PROVEN before the
+# runtimes are compiled with them. acpp's own documentation warns that clang
+# silently ignores a gcc path it does not accept, so "did the cfg take" is a
+# question that must be answered by asking clang, not by reading the file we
+# just wrote. `-v /dev/null` is expected to fail at the link step; its stderr
+# is the answer.
+print $"── build: clang first, to prove the configuration ──"
+cmake --build $build_dir --parallel $jobs --target clang
+
+# `clang`, not `clang++`: the ++ name is a symlink created by a separate
+# target, so it need not exist yet. Both read their own cfg and both print the
+# line we are checking.
+let probe = (do -i { ^($cfg_dir | path join "clang") -v /dev/null } | complete)
+let selected = ($probe.stderr | lines | where {|l| $l =~ 'Selected GCC installation'} | first | default "")
+print $"  ($selected | str trim)"
+if not ($selected | str contains $gcc_install_dir) {
+  print "  ── clang -v, in full ──"
+  $probe.stderr | lines | first 25 | each {|l| print $"    ($l | str substring 0..170)" }
+  error make {msg: $"clang did not select the conda gcc installation. Wanted ($gcc_install_dir), got: ($selected | str trim)"}
+}
+
 print $"── build ──"
 cmake --build $build_dir --parallel $jobs
 

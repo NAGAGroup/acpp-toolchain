@@ -61,13 +61,25 @@ let rocm_root = (
     $rocm_src
   }
 )
+# TheRock ships ROCm's own clang/LLVM toolchain under llvm/. We are building
+# an LLVM, and acpp uses ours; what the ROCm backend needs from this tree is
+# the HIP and HSA runtimes, amd_comgr, and the device bitcode under amdgcn/.
+# Nothing reaches for ROCm's compiler, so it does not go into the tarball.
+let rocm_skip = ["llvm"]
+
 print $"── ROCm ──"
 print $"  from ($rocm_root)"
 print $"  into ($targets_dir)"
-print $"  top level: ((ls $rocm_root | get name | path basename | sort | str join ', '))"
+let entries_all = (ls $rocm_root)
+for e in $entries_all {
+  let n = ($e.name | path basename)
+  let mark = (if ($n in $rocm_skip) { "SKIP" } else { "    " })
+  print $"  ($mark) ($n | fill -a l -w 12) ((du $e.name | get 0.physical))"
+}
 mkdir $targets_dir
-cp -r ...(glob ($rocm_root | path join "*")) $targets_dir
-print $"  installed: ((ls $targets_dir | length)) entries"
+let to_copy = ($entries_all | where {|e| not (($e.name | path basename) in $rocm_skip)} | get name)
+cp -r ...$to_copy $targets_dir
+print $"  installed ((ls $targets_dir | length)) entries, ((du $targets_dir | get 0.physical))"
 
 # ── configure ────────────────────────────────────────────────────────────
 # CMAKE_ARGS comes from the conda-forge activations and carries the sysroot,

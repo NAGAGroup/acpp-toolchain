@@ -12,10 +12,20 @@
 
 # During a conda BUILD the compiler is a build-platform tool and lives in the
 # build prefix, while the headers it must match belong to the host prefix.
-# Outside a build the two collapse to a single prefix.
+#
+# CONDA_BUILD is always 1 inside the build machinery, and the TEST phase runs
+# through that same machinery - but a test has only a run environment, so
+# BUILD_PREFIX is unset there and both resolve to the host prefix. Without that
+# inner check ${BUILD_PREFIX}/bin/clang++ collapses to /bin/clang++ and picks up
+# the system compiler, which succeeds while being entirely wrong.
 if [ "${CONDA_BUILD:-0}" = "1" ]; then
-  _acpp_cxx="${BUILD_PREFIX}/bin/clang++"
-  _acpp_inc="${PREFIX}/lib/clang/LLVM_MAJOR/include"
+  if [ -n "${BUILD_PREFIX:-}" ]; then
+    _acpp_cxx="${BUILD_PREFIX}/bin/clang++"
+    _acpp_inc="${PREFIX}/lib/clang/LLVM_MAJOR/include"
+  else
+    _acpp_cxx="${PREFIX}/bin/clang++"
+    _acpp_inc="${PREFIX}/lib/clang/LLVM_MAJOR/include"
+  fi
 else
   _acpp_cxx="${CONDA_PREFIX}/bin/clang++"
   _acpp_inc="${CONDA_PREFIX}/lib/clang/LLVM_MAJOR/include"

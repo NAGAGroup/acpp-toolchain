@@ -457,6 +457,14 @@ for d in [[driver, flags]; ["clang", (sanitise-for-clang $cflags $clang_rejects)
   let path = ($cfg_dir | path join $"($conda_triple)-($d.driver).cfg")
   [
     $"--sysroot=($conda_sysroot) --gcc-toolchain=($build_prefix) --gcc-triple=($conda_triple)"
+    # The DWARF compilation directory, which is this build tree and is nobody's
+    # business but ours. conda's own CFLAGS map $SRC_DIR and $PREFIX but not the
+    # build directory, and LLVM_USE_RELATIVE_PATHS_IN_FILES does not reach
+    # compiler-rt, which assembles its own flag lists rather than inheriting
+    # CMAKE_C_FLAGS - measured: its objects carry a mapped source path beside an
+    # unmapped comp_dir. A config file applies to every invocation of this
+    # compiler whatever cmake hands it, which is the only place that holds.
+    $"-ffile-prefix-map=($build_dir)=."
     $d.flags
     $link_tail
   ] | str join "\n" | save -f $path

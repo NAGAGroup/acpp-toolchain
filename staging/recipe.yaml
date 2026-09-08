@@ -81,7 +81,7 @@ requirements:
     # need at a path that survives into the package - the device bitcode,
     # whose location acpp bakes into llvm-to-ptx - and the version marker
     # that pins it to the same series as the compiler.
-    - cuda-version ${{ cuda_compiler_version }}
+    - cuda-version ${{ cuda_compiler_version }}.*
     - cuda-nvvm-tools
     - python
     - zlib

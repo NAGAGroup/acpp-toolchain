@@ -48,7 +48,7 @@ build:
       LLVM_TARGETS: ${{ llvm_targets }}
       # Passed to acpp's cmake so the SPIR-V translator is fetched at a commit
       # instead of tracking a branch.
-      LLVMSPIRV_REV: ${{ llvmspirv_rev }}
+      LLVMSPIRV_COMMIT: ${{ llvmspirv_commit }}
       # CCACHE_DIR and CCACHE_BASEDIR are set inside build.nu instead:
       # RECIPE_DIR is a build-time environment variable, and BASEDIR is the
       # work directory, which is named differently on every run.

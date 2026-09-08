@@ -47,11 +47,60 @@ etc          7 files      0.0 MiB
 is `lib/` itself: 1.05 GB across 229 loose files, where every LLVM, clang and
 tooling boundary lives, separable only by filename.
 
+## The package split — PROPOSED, not ratified
+
+Close but not signed off. Moves to `DESIGN.md` when it is. Order of work is
+**slices first, then dependency specs, then activation packages.**
+
+Deliberately NOT conda-forge's 40-plus package split: that is an unbearable
+maintenance burden for a one-person team, on a toolchain that may never see
+wide use. Installing more than strictly necessary beats missing a shared
+library and breaking at runtime.
+
+| package | holds |
+|---|---|
+| `acpp` | executables of the core toolchain only — the acpp CLI tools, the clang drivers, lld. 17 files, 8.5 MiB. |
+| `acpp-compiler-rt` | THE runtime. Everything a binary built with this toolchain needs to run. |
+| `acpp-dev` | static libs, headers, cmake config — everything else needed to make a complete toolchain. ~900 MiB, and that is intended. |
+| `acpp-clang-tools` | clangd, clang-tidy, clang-format, the scan-build family, and their private libs. |
+| `acpp-llvm-tools` | the `llvm-*` family, opt, llc, lli, bugpoint, **and lldb** with `liblldb.so`. |
+| `acpp-runtime-{cuda,rocm}` | `targets/x86_64-linux`, already sliced by the staging manifest. |
+
+Dependency direction: `acpp` → `acpp-dev` → `acpp-compiler-rt`.
+
+### What the runtime actually needs — measured, not assumed
+
+From acpp's own `etc/AdaptiveCpp/deploy/acpp-deployment-manifest-core.json`
+and the ELF `DT_NEEDED` entries in the artifact:
+
+- `libacpp-rt`, `libacpp-common`, and `lib/hipSYCL/**` — backends,
+  `llvm-to-backend`, and the SSCP bitcode.
+- **`libLLVM.so.21.1` (120 MiB)** — `libllvm-to-backend.so` and
+  `libllvm-to-host.so` both link it directly.
+- `libomp.so`, `libnuma` — `librt-backend-omp.so` links both.
+- **Three EXECUTABLES: `llc`, `opt`, `ld.lld`.** acpp JITs at runtime, so it
+  shells out to them. A run-only environment needs them, which cuts across
+  "`acpp` holds the executables" and is unresolved.
+
+So the runtime floor is ~200 MiB and cannot be trimmed without breaking the
+JIT.
+
+Not runtime, confirmed by the same manifest: `libclang.so`, `libclang-cpp.so`,
+`liblldb.so` — each belongs with the tools that use it.
+
+### Still unassigned
+
+`share/` (editor integrations, scan-view assets) · `libexec/` (scan-build
+shims) · `lib/libscanbuild` + `lib/libear` (Python modules scan-build imports)
+· `lib/python3.14/` (lldb bindings) · `etc/AdaptiveCpp/*.json` (acpp's config,
+read by the driver at runtime) · `lib/cmake/OpenSYCL/` (the pre-rename
+compatibility alias upstream still installs).
+
 ## Next
 
-1. Design `packaging/` — the carve boundaries, starting from the artifact's own
-   `info/paths.json`.
-2. Decide how each output declares its own `__glibc`; the platform-table
+1. Ratify the split above, then dependency specs, then activation packages.
+2. Fix the build-machine leaks in acpp's generated manifests (see below).
+3. Decide how each output declares its own `__glibc`; the platform-table
    mechanism is understood for `staging/` but untested for a slicer.
 
 ## Open

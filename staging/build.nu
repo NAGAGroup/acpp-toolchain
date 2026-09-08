@@ -61,43 +61,70 @@ let rocm_root = (
     $rocm_src
   }
 )
-# TheRock's distribution is 11.7 GB of the whole ROCm stack. We take a KEEP
-# LIST rather than a skip list, because we know exactly what is wanted and
-# guessing at exclusions leaves the rest to chance.
+# TheRock's distribution is the whole ROCm stack, and it contains TWO install
+# prefixes: its own at the root, and a complete LLVM at lib/llvm - AMD's clang
+# toolchain, which acpp's doc/install-rocm.md explicitly recommends against
+# building against. The root's `amdgcn` and `llvm` entries are symlinks down
+# into that nested prefix; everything else at the root is ROCm's own.
 #
-# The libraries are the ones acpp's own hip deployment manifest names -
-# amdhip64, hsa-runtime64, amd_comgr, hiprtc - so the list comes from acpp
-# rather than from us. Everything else is an ML and math stack acpp never
-# calls: MIOpen, hipDNN, hipTensor, rocSPARSE, rocShmem, Tensile's kernels,
-# rocprofiler, ROCm's own clang (twice, at llvm/ and lib/llvm), and 2.4 GB of
-# static archives that could not be a runtime dependency of anything.
+# So we do not mirror either prefix. We name what is needed, take it from
+# wherever it happens to live, and put it where it belongs under ONE prefix.
+# The source column is an implementation detail of AMD's layout; the
+# destination column is the contract with everything that will look for it.
 #
-# It is also what keeps the package buildable: rattler must relocate every
-# binary it packages, and patchelf fails outright on many of those files.
+# What is deliberately absent: the ML and math stack acpp never calls (MIOpen,
+# hipDNN, hipTensor, rocSPARSE, rocShmem, Tensile's kernels), AMD's LLVM, and
+# 2.4 GB of static archives. That is also what keeps the package buildable -
+# rattler relocates every binary it packages, and patchelf fails outright on
+# many of those files.
+let rocm_keep_dirs = [
+  [dest, src];
+
+  # "Make sure to also install HIP (runtime libraries and headers)."
+  ["include", "include"]
+
+  # find_package(HIP) is not optional: when it misses, acpp falls back to
+  # looking for hipcc AND reassigns ROCM_PATH to /opt/rocm, so a missing config
+  # does not merely disable the backend, it moves every later lookup off our
+  # prefix. hip-config-amd.cmake then find_dependency()s the other three.
+  ["lib/cmake/hip", "lib/cmake/hip"]
+  ["lib/cmake/hip-lang", "lib/cmake/hip-lang"]
+  ["lib/cmake/amd_comgr", "lib/cmake/amd_comgr"]
+  ["lib/cmake/hsa-runtime64", "lib/cmake/hsa-runtime64"]
+
+  # The REAL config, not the root's shim - the shim includes a path inside
+  # lib/llvm, which we do not ship. Placed here, its own three-level walk up
+  # from lib/cmake/AMDDeviceLibs resolves to targets/x86_64-linux, so it finds
+  # the bitcode below at exactly the path acpp's own hint uses.
+  ["lib/cmake/AMDDeviceLibs", "lib/llvm/lib/cmake/AMDDeviceLibs"]
+
+  # ROCM_DEVICE_LIBS_PATH. One copy, taken from where it actually lives; the
+  # root's amdgcn is only a symlink to this.
+  ["amdgcn/bitcode", "lib/llvm/amdgcn/bitcode"]
+]
+
+# The first five are the libraries acpp's OWN hip deployment manifest names
+# (CMakeLists.txt, ACPP_HIP_DEPLOYMENT_MANIFEST). Its sixth, hsakmt, does not
+# exist in this distribution at all - newer ROCm folded it into
+# libhsa-runtime64 - so acpp will write HSAKMT_LIBRARY-NOTFOUND into the
+# manifest it generates. That is a defect to fix for users of --acpp-deploy,
+# not something this build can supply.
 #
-# If the ROCm backend later turns out to need one more library, this is a
-# one-line addition - and the moment to make it is when we can test on AMD
-# hardware, not now.
-# amdgcn is the device bitcode; include is the HIP headers; lib/cmake is HIP's
-# CMake package, and it is NOT optional even though nothing installs from it.
-# acpp does find_package(HIP ... HINTS ${ROCM_PATH} ${ROCM_PATH}/lib/cmake),
-# and when that misses it falls back to hipcc AND reassigns ROCM_PATH to
-# /opt/rocm - so a missing CMake package does not merely disable the ROCm
-# backend, it moves every later lookup off our prefix. 1.5 MB.
-let rocm_keep_dirs = ["amdgcn" "include" "lib/cmake"]
+# hiprtc-builtins is NOT in that manifest; it is here because hiprtc loads it
+# at JIT time. That one is our judgement, not upstream's.
 let rocm_keep_libs = [
   "libamdhip64.so*"
   "libamd_comgr.so*"
   "libhsa-runtime64.so*"
   "libhiprtc.so*"
+  "librocprofiler-register.so*"
   "libhiprtc-builtins.so*"
 ]
 
-# Nothing in our build EXECUTES these. hip-config.cmake passes them through
-# set_and_check, which fails the configure outright when a path is absent, so
-# they are here to satisfy a validation rather than to be used. Together they
-# are 1.3 MB; bin/ as a whole is 338 MB. The .exe pair the config also checks
-# is inside an if(WIN32).
+# hip-config.cmake set_and_checks both of these, which fails the configure
+# outright if either is absent - and it EXECUTES hipconfig to decide the HIP
+# platform unless told. We tell it (-DHIP_PLATFORM=amd), but the files still
+# have to exist. 1.3 MB against the 338 MB of shipping bin/ wholesale.
 let rocm_keep_files = ["bin/hipcc" "bin/hipconfig"]
 
 print $"── ROCm ──"
@@ -105,33 +132,30 @@ print $"  from ($rocm_root)  ((du $rocm_root | get 0.physical))"
 print $"  into ($targets_dir)"
 mkdir $targets_dir
 for d in $rocm_keep_dirs {
-  let s = ($rocm_root | path join $d)
-  let landed = ($targets_dir | path join $d)
-  let parent = ($landed | path dirname)
+  let s = ($rocm_root | path join $d.src)
+  let landed = ($targets_dir | path join $d.dest)
+
+  if not ($s | path exists) {
+    error make {msg: $"ROCm source directory is missing: ($s)"}
+  }
 
   # `cp -r SRC DST` behaves differently depending on whether DST exists, and on
   # this runner neither branch produced the directory while also reporting no
   # error. So the branch is removed entirely: DST is created first, and its
   # CHILDREN are the copy sources. That is one behaviour, not two.
+  #
+  # -P keeps symlinks as symlinks. Without it the .so -> .so.N -> .so.N.N.N
+  # chains become three identical files, and the layout stops being the one
+  # every consumer's SONAME lookup expects.
   mkdir $landed
   let children = (glob ($s | path join "*"))
-
-  print $"  dir  ($d)"
-  print $"       source ($s)"
-  print $"       source exists: ($s | path exists) · children: ($children | length)"
-  print $"       target ($landed) · exists: ($landed | path exists)"
-
-  if not ($s | path exists) {
-    error make {msg: $"ROCm source directory is missing: ($s)"}
-  }
   if ($children | is-empty) {
     error make {msg: $"ROCm source directory is empty: ($s)"}
   }
-
-  cp -r ...$children $landed
+  cp -r -P ...$children $landed
 
   let got = (ls $landed | length)
-  print $"       copied ($got) entries, ((du $landed | get 0.physical))"
+  print $"  dir  ($d.dest | fill -a l -w 26) <- ($d.src | fill -a l -w 32) ($got) entries, ((du $landed | get 0.physical))"
   if $got == 0 {
     error make {msg: $"ROCm copy produced nothing in ($landed) from ($children | length) sources"}
   }
@@ -157,8 +181,9 @@ for pat in $rocm_keep_libs {
   if ($matched | is-empty) {
     error make {msg: $"ROCm keep-list pattern matched nothing: ($pat). The distribution's layout changed."}
   }
-  cp ...$matched $libdir
-  print $"  libs ($pat | fill -a l -w 22) ($matched | length) files"
+  cp -P ...$matched $libdir
+  let links = ($matched | where {|f| (ls -l $f | get 0.type) == "symlink"} | length)
+  print $"  libs ($pat | fill -a l -w 28) ($matched | length) files \(($links) symlinks\)"
 }
 print $"  installed ((du $targets_dir | get 0.physical)), ((ls $libdir | length)) libraries"
 

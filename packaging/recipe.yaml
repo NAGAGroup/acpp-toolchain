@@ -159,6 +159,31 @@ outputs:
           # which belongs in the fork rather than here.
           ^ln -sf "x86_64-conda-linux-gnu/libomp.so" ($env.PREFIX | path join "lib" "libomp.so")
 
+          # The triplet drivers. Relative symlinks to the unversioned ones, the
+          # form conda-forge's LINUX activation uses. Their only job is to make
+          # clang pick up bin/<triple>-<driver>.cfg by the name it was invoked
+          # under - the cfg files themselves ship in the base package.
+          let bin = ($env.PREFIX | path join "bin")
+          for d in ["clang" "clang++" "clang-cpp"] {
+            ^ln -sf $d ($bin | path join $"x86_64-conda-linux-gnu-($d)")
+          }
+
+          # The PTX JIT resolves libdevice by checking its own redistributable
+          # directory FIRST and only then the path baked in at build time, which
+          # names the machine that built the staging tarball. Putting the file
+          # where the first branch looks means the baked path is never consulted.
+          #
+          # This uses the mechanism upstream built for exactly this case rather
+          # than working around it - getDeviceLibPath() in LLVMToPtx.cpp checks
+          # the redist path by design. The baked string is still in the artifact
+          # and is deleted by the relocatable overhaul, not by this.
+          #
+          # The link dangles until cuda-nvvm-tools is installed beside us, which
+          # acpp-runtime-cuda requires.
+          let ptx = ($env.PREFIX | path join "lib" "hipSYCL" "ext" "bitcode" "ptx")
+          mkdir $ptx
+          ^ln -sf "../../../../../nvvm/libdevice/libdevice.10.bc" ($ptx | path join "libdevice.10.bc")
+
           print "-- activation --"
           ls ($env.PREFIX | path join "etc" "conda" "activate.d") | each {|e| print $"  ($e.name | path basename)" }
           ls ($env.PREFIX | path join "etc" "conda" "deactivate.d") | each {|e| print $"  ($e.name | path basename)" }
@@ -668,6 +693,8 @@ outputs:
         - lib/hipSYCL/librt-backend-cuda.so
         - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
         - bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool
+        # The relative link that makes the JIT's redist branch win; see staging.
+        - lib/hipSYCL/ext/bitcode/ptx/libdevice.10.bc
         - lib/hipSYCL/bitcode/libkernel-sscp-ptx-*.bc
     requirements:
       # We recreate the build/host environment this backend was compiled
@@ -684,6 +711,10 @@ outputs:
         - ${{ pin_subpackage('acpp-compiler-rt', exact=True) }}
         - cuda-cudart <${{ cuda_max_version }}
         - cuda-version <${{ cuda_max_version }}
+        # Provides nvvm/libdevice/libdevice.10.bc, the target of the relative
+        # link we ship. Without it that link dangles and the PTX JIT falls back
+        # to the build machine's path, which is today's CUDA smoke failure.
+        - cuda-nvvm-tools
     about:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
@@ -784,6 +815,56 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: The complete AdaptiveCpp toolchain, without the optional backends
+
+  # ── the compiler activation package ───────────────────────────────────────
+  #
+  # This IS a conda-forge compiler activation package, consumed as
+  # `[cxx_compiler] - "acpp"`. It follows ctng-compiler-activation, which is the
+  # LINUX activation for both GCC and Clang; clang-compiler-activation is macOS
+  # and its flags do not apply here.
+  #
+  # Upstream splits this four ways - clang_impl/clangxx_impl own the symlinks,
+  # clang/clangxx own the scripts - to serve cross-compilation and a boundary
+  # between the clang feedstock and the activation feedstock. We have neither:
+  # linux-64 only, and we ship the compiler ourselves. So it is one output.
+  - package:
+      name: acpp_linux-64
+      version: ${{ version }}
+    inherit: acpp-stage-unpacked
+    build:
+      number: 0
+      string: ${{ lane }}_h${{ hash }}_${{ build_number }}
+      files:
+        # The triplet drivers, so clang finds bin/<triple>-<driver>.cfg by the
+        # name it was invoked under. The cfg files ship in the base package.
+        - bin/x86_64-conda-linux-gnu-clang
+        - bin/x86_64-conda-linux-gnu-clang++
+        - bin/x86_64-conda-linux-gnu-clang-cpp
+        # 50-, so it sources after the base 10- and can override ACPP_CPU_CXX
+        # with the base's value already saved for deactivation to restore.
+        - etc/conda/activate.d/50-acpp-compiler.sh
+        - etc/conda/deactivate.d/50-acpp-compiler.sh
+    requirements:
+      run:
+        - ${{ pin_subpackage('acpp', exact=True) }}
+        # Named by upstream for "activation of binutils env vars"; it also
+        # supplies the triplet ar, ranlib, ld and strip that CMAKE_ARGS points
+        # at, through binutils_impl_linux-64.
+        - binutils_${{ target_platform }}
+    tests:
+      - script:
+          # The activation must actually produce a working compiler, so this
+          # compiles, links and RUNS rather than asking for a version string.
+          - ${CXX} --version
+          - test "$(basename "$ACPP_CPU_CXX")" = "x86_64-conda-linux-gnu-clang++"
+          - echo 'int main(){return 0;}' > t.cpp
+          - ${CXX} ${CXXFLAGS} -c t.cpp -o t.o
+          - ${CXX} ${LDFLAGS} t.o -o t
+          - ./t
+    about:
+      homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
+      license: Apache-2.0 WITH LLVM-exception
+      summary: AdaptiveCpp as a conda compiler, for [cxx_compiler] - "acpp"
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

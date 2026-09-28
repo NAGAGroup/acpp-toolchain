@@ -1,0 +1,109 @@
+# acpp-suite: AdaptiveCpp's OWN test suite (tests/) as the gate workspace,
+# built and run against the toolchain THROUGH A REAL SOLVE against the
+# indexed local channel the build job produced — same design as the
+# gpu-smoke workspace it replaces, so run_exports / run_constraints and the
+# channel's repodata get exercised too, not just the files inside packages.
+#
+# The local channel is a relative path: CI downloads the build artifact to
+# <repo>/local-channel, which is three levels up from this manifest. Works
+# identically locally after `pixi run -e dev build`.
+[workspace]
+name = "acpp-suite"
+channels = ["../../../local-channel", "https://prefix.dev/jackm97/naga-labs-staging"]
+# ONE line: CI rewrites it per job to a single platform, as it does today.
+platforms = ["linux-64", "linux-aarch64", "win-64", "win-arm64", "osx-arm64"]
+
+# ── environments ──────────────────────────────────────────────────────────
+# `default` (run+build) is the normal case: one box compiles the tests AND
+# runs them. `run` alone exists for the win-64 GPU box, which has NO Visual
+# Studio at all — its binaries come pre-built from the VS2026 builder job,
+# and this box only needs the runtime + naga-acpp to execute them.
+[environments]
+default = ["run", "build"]
+run = ["run"]
+
+# ── run: what EXECUTING the tests needs ─────────────────────────────────
+[feature.run.dependencies]
+naga-acpp = "*"
+nushell = "*"
+
+[feature.run.target.linux-64.dependencies]
+naga-acpp-runtime-cuda = "*"
+naga-acpp-runtime-ocl = "*"
+naga-acpp-runtime-level-zero = "*"
+naga-acpp-runtime-rocm = "*"
+naga-acpp-compiler-rt = "*"
+# PoCL: a CPU OpenCL driver the ICD loader finds, so the OpenCL backend has
+# a device to run on without a GPU vendor's runtime.
+pocl = "*"
+libboost = "*"
+tbb = "*"
+
+[feature.run.target.linux-aarch64.dependencies]
+naga-acpp-runtime-cuda = "*"
+naga-acpp-runtime-ocl = "*"
+naga-acpp-compiler-rt = "*"
+pocl = "*"
+libboost = "*"
+tbb = "*"
+
+[feature.run.target.win-64.dependencies]
+naga-acpp-runtime-cuda = "*"
+naga-acpp-runtime-ocl = "*"
+naga-acpp-runtime-level-zero = "*"
+naga-acpp-runtime-rocm = "*"
+naga-acpp-compiler-rt = "*"
+pocl = "*"
+libboost = "*"
+
+[feature.run.target.win-arm64.dependencies]
+naga-acpp-runtime-ocl = "*"
+
+[feature.run.target.osx-arm64.dependencies]
+pocl = "*"
+libboost = "*"
+tbb = "*"
+
+# ── build: what COMPILING the tests needs ───────────────────────────────
+[feature.build.dependencies]
+cmake = "*"
+ninja = "*"
+
+# naga-acpp-llvm-dev is DELIBERATELY absent everywhere: tests/compiler/'s
+# lit-based check-cbs/check-sscp/... targets are the only thing in this
+# tree that touches LLVM_DIR/FileCheck, and this suite never builds or runs
+# those `check-*` custom targets (only sycl_tests/rt_tests/pstl_tests/
+# pcuda_tests) — see the hand-off report for the full trace. suite.nu still
+# passes -DLLVM_DIR when it happens to be on the prefix, at no cost.
+[feature.build.target.linux-64.dependencies]
+naga-acpp-clangxx_linux-64 = "*"
+libboost-devel = "*"
+tbb-devel = "*"
+
+[feature.build.target.linux-aarch64.dependencies]
+naga-acpp-clangxx_linux-aarch64 = "*"
+libboost-devel = "*"
+tbb-devel = "*"
+
+[feature.build.target.win-64.dependencies]
+naga-acpp-clangxx_win-64 = "*"
+libboost-devel = "*"
+
+[feature.build.target.win-arm64.dependencies]
+naga-acpp-clangxx_win-arm64 = "*"
+# No libboost-devel: conda-forge ships no Boost for win-arm64 at all.
+# `nu suite.nu boost` builds Boost.Test from source instead (see suite.nu).
+
+[feature.build.target.osx-arm64.dependencies]
+naga-acpp-clangxx_osx-arm64 = "*"
+libboost-devel = "*"
+tbb-devel = "*"
+
+# ── tasks (same relative depth as gpu-smoke) ────────────────────────────
+[tasks.acpp-info]
+cmd = "acpp-info -l"
+description = "List backends/devices the runtime can see"
+
+[tasks.sanitizer-smoke]
+cmd = "nu ../sanitizer-smoke.nu"
+description = "Prove the shipped compiler-rt runtimes link, run clean, and actually fire"

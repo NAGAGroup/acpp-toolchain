@@ -61,6 +61,8 @@ outputs:
           # include, so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1;
           # applies to 20.1.8 and 21.1.8 alike)
           - shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
+          # libc++ in Xcode 26 no longer brings malloc/free in transitively (upstream #173002)
+          - shared/patches/0011-programstack-include-cstdlib.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

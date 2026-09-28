@@ -1,0 +1,26 @@
+Backport of llvm/llvm-project PR #173002 (fix for issue #154714).
+
+ProgramStack.cpp calls malloc/free in the LLVM_HAS_SPLIT_STACKS branch of
+runOnNewStack without including <cstdlib>; the declarations only ever
+arrived transitively through other LLVM and libc++ headers. The Xcode 26
+toolchain's libc++ no longer includes <cstdlib> transitively, so the file
+stops compiling on macOS:
+
+    error: use of undeclared identifier 'malloc'
+    error: use of undeclared identifier 'free'
+
+Applies to LLVM 21.1.8; upstream fixed it on main via #173002.
+
+--- a/llvm/lib/Support/ProgramStack.cpp
++++ b/llvm/lib/Support/ProgramStack.cpp
+@@ -18,9 +18,10 @@
+ # include <intrin.h>  // for _AddressOfReturnAddress
+ #endif
+ 
+ #ifndef LLVM_HAS_SPLIT_STACKS
+ # include "llvm/Support/thread.h"
+ #endif
++#include <cstdlib> // malloc/free in runOnNewStack (upstream llvm/llvm-project#173002)
+ 
+ using namespace llvm;
+ 

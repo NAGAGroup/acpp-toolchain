@@ -15,8 +15,8 @@ context:
   llvm_major_next: "22"
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
-  # An explicit fork SHA; the branch default is for local builds only.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="naga/retarget-context") }}
+  # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="32aa1547cff06271bc78bc4218641acb53854b08") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -338,10 +338,8 @@ outputs:
             - numactl
             - libstdcxx >=13
       run_exports:
-        # EXPORT FLIP (phase-3 ruling [A]): a semver RANGE, not an exact pin.
-        # upper_bound 'x.x' renders ">=25.10.0,<25.11.0a0". Exact pins are
-        # nightly-only — a date-versioned lane carries no range semantics, so
-        # gen-nightly rewrites this line back to exact=True for that lane.
+        # Exact: the version is a date, so it carries no range semantics, and
+        # AdaptiveCpp has no stable runtime ABI across commits.
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
         # Re-exported EXPLICITLY. run_exports acquired from a host dependency
         # do NOT transit to our own consumers, so without this line a package
@@ -452,13 +450,13 @@ outputs:
               # audit rather than a hardcoded name here.
               - if: osx
                 then:
-                  - etc/AdaptiveCpp/acpp-core.json
+                  - etc/AdaptiveCpp/acpp-toolchain.json
               - if: linux
                 then:
                   - lib/hipSYCL/librt-backend-omp.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
-                  - etc/AdaptiveCpp/acpp-core.json
+                  - etc/AdaptiveCpp/acpp-toolchain.json
               # GPU backends are x86-only; the aarch64 lane is OMP-only
               - if: target_platform == "linux-64"
                 then:
@@ -483,7 +481,7 @@ outputs:
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
                   - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
-                  - Library/etc/AdaptiveCpp/acpp-core.json
+                  - Library/etc/AdaptiveCpp/acpp-toolchain.json
             not_exists:
               - if: linux
                 then:

@@ -10,7 +10,7 @@ cxx_compiler: [clangxx]
 c_compiler_version: ["23"]
 cxx_compiler_version: ["23"]
 c_stdlib: [macosx_deployment_target]
-c_stdlib_version: ["11.0"]
+c_stdlib_version: ["26.0"]
 
 # ---- ABI-sensitive libraries ----------------------------------------------
 zlib: ["1.3"]

@@ -1,0 +1,216 @@
+# build — the one workflow: builds NAGAGroup/AdaptiveCpp (our fork) as the
+# naga-acpp-* conda toolchain and, when asked, publishes to naga-labs-staging.
+#
+# Manual only, with an explicit fork commit: we publish when we have landed
+# something, and the published set names the commit it shipped. Each platform
+# is its own build -> gate -> publish chain, so one platform failing never
+# blocks another; `platforms` selects which chains run (a green platform is
+# not rebuilt). linux-64 is the first chain; the others join as they are
+# brought up.
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      fork_sha:
+        description: "Fork commit or branch to build (NAGAGroup/AdaptiveCpp)"
+        default: "naga/develop"
+        required: true
+      platforms:
+        description: "Space-separated platforms to build"
+        default: "linux-64"
+        required: true
+      publish:
+        description: "Publish to naga-labs-staging after the gates pass"
+        type: boolean
+        default: false
+      build_number:
+        description: "Build number (bump to re-publish the same date+SHA with fresh filenames)"
+        default: "0"
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      date: ${{ steps.resolve.outputs.date }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      # rattler-build's staging key ignores sources, patches and the build
+      # script; staging_inputs folds them in. Stale means a silently reused build.
+      - name: staging_inputs hash is current
+        run: pixi run -e dev check-staging-hash
+      # Invisible to --render-only; would fail at build time on the big runner.
+      - name: pins are resolvable
+        run: pixi run -e dev check-pins
+      - name: Resolve the requested fork commit
+        id: resolve
+        run: |
+          # Accept a branch name or a short SHA and record the full one, so the
+          # published set always names an immutable commit.
+          SHA=$(git ls-remote https://github.com/NAGAGroup/AdaptiveCpp "${{ inputs.fork_sha }}" | head -1 | cut -f1)
+          if [ -z "$SHA" ]; then SHA="${{ inputs.fork_sha }}"; fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+          echo "::notice title=naga-acpp build::NAGAGroup/AdaptiveCpp@$SHA for: ${{ inputs.platforms }}"
+
+  # ── linux-64 ──────────────────────────────────────────────────────────────
+  build-linux-64:
+    needs: prepare
+    if: contains(format(' {0} ', inputs.platforms), ' linux-64 ')
+    runs-on: Linux-x64-64
+    timeout-minutes: 300
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
+      ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 20G
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disk
+        run: df -h / "$GITHUB_WORKSPACE"
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      # Falls back to the archived naga lane's ccache: same LLVM 21.1.8, so a
+      # cold build still hits on LLVM objects.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-64-${{ github.run_id }}
+          restore-keys: |
+            ccache-linux-64-
+            ccache-naga-
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-linux-64-${{ github.run_id }}
+          restore-keys: rattler-linux-64-
+      # The staging cache (the full LLVM+acpp build) lives under the rattler
+      # OUTPUT dir. Keyed on the fork commit too: the staging key does not
+      # include the source.
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: output/build_cache
+          key: staging-linux-64-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+          restore-keys: staging-linux-64-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-
+      - name: Build -> indexed local channel
+        run: pixi run -e dev build
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd output/build_cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
+          du -sh . || true
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/build_cache
+          key: staging-linux-64-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-64-${{ github.run_id }}
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-linux-64-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-linux-64
+          path: local-channel/
+          retention-days: 14
+
+  # The gate BLOCKS publishing: it is the only check that the toolchain can
+  # compile and run a SYCL program at all. Installs through a real solve
+  # against the built channel.
+  gate-linux-64:
+    needs: [prepare, build-linux-64]
+    runs-on: Linux-x64-GPU
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-linux-64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      - run: nvidia-smi
+      # pixi solves every platform in the manifest; this artifact channel only
+      # carries linux-64.
+      - name: Pin the smoke manifest to linux-64
+        working-directory: shared/tests/gpu-smoke
+        run: sed -i 's/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
+      # Install separately from running, with a generous bound: a hung binary
+      # and a slow cold download are otherwise indistinguishable.
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
+      - name: Visible backends
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on the CPU (OpenMP) backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on the CUDA backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+      # PoCL is a CPU OpenCL driver; if it cannot take our SPIR-V the runtime
+      # skips it with a warning. Informational until it has proven itself.
+      - name: SYCL smoke on OpenCL (PoCL)
+        continue-on-error: true
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-ocl
+      - name: Sanitizer smoke (naga-acpp-compiler-rt)
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run sanitizer-smoke
+
+  publish-linux-64:
+    needs: [prepare, build-linux-64, gate-linux-64]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-linux-64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "Gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to naga-labs-staging
+        run: pixi run -e dev publish-channel

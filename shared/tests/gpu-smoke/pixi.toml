@@ -5,25 +5,26 @@
 #
 # The local channel is a relative path: CI downloads the build artifact to
 # <repo>/local-channel, which is three levels up from this manifest. Works
-# identically locally after `pixi run build-release`.
+# identically locally after `pixi run -e dev build`.
 [workspace]
 name = "acpp-gpu-smoke"
 channels = [
   "../../../local-channel",
-  "https://prefix.dev/jackm97/naga-labs",
+  "https://prefix.dev/jackm97/naga-labs-staging",
 ]
 platforms = ["linux-64", "win-64"]
 
-# One-package install path: acpp-runtime-cuda pulls the lane runtime with it.
+# One-package install path: naga-acpp-runtime-cuda pulls the runtime with it.
 #
-# NB nothing here names acpp-runtime or a lane: acpp's run_exports supply the
-# runtime range AND the acpp-llvm mutex, so this manifest is itself a live test
-# that a consumer needs no lane text of its own.
+# NB nothing here names naga-acpp-runtime or the mutex: naga-acpp's
+# run_exports supply the runtime pin AND the naga-acpp-llvm range, so this
+# manifest is itself a live test that a consumer needs no text of its own.
 [dependencies]
-acpp = "*"
-acpp-runtime-cuda = "*"
+naga-acpp = "*"
+naga-acpp-runtime-cuda = "*"
+naga-acpp-runtime-ocl = "*"
 # The sanitizer runtimes, so the smoke can prove they link and fire.
-acpp-compiler-rt = "*"
+naga-acpp-compiler-rt = "*"
 nushell = "*"
 
 [tasks.build-smoke]
@@ -39,6 +40,16 @@ description = "Run the smoke binary on the CPU/OpenMP backend"
 cmd = "ACPP_VISIBILITY_MASK=cuda ./smoke"
 depends-on = ["build-smoke"]
 description = "Run the smoke binary on the CUDA backend (PTX JIT on real hardware)"
+
+[tasks.smoke-ocl]
+cmd = "ACPP_VISIBILITY_MASK=ocl ./smoke"
+depends-on = ["build-smoke"]
+description = "Run the smoke binary on OpenCL (PoCL, the CPU OpenCL driver)"
+
+# PoCL: a CPU OpenCL driver the ICD loader finds, so the OpenCL backend has a
+# device to run on without a GPU vendor's runtime.
+[target.linux-64.dependencies]
+pocl = "*"
 
 [tasks.acpp-info]
 cmd = "acpp-info -l"
@@ -64,6 +75,9 @@ cmd = "ACPP_VISIBILITY_MASK=omp ./smoke.exe"
 
 [target.win-64.tasks.smoke-cuda]
 cmd = "ACPP_VISIBILITY_MASK=cuda ./smoke.exe"
+
+[target.win-64.tasks.smoke-ocl]
+cmd = "ACPP_VISIBILITY_MASK=ocl ./smoke.exe"
 
 [target.win-64.tasks.acpp-info]
 cmd = "acpp-info -l"

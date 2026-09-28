@@ -1781,15 +1781,23 @@ outputs:
         - target_platform != "win-64"
       script:
         interpreter: nu
-        content: nu shared/activation/render-install-win.nu clang ${{ llvm_major }}
+        content: nu shared/activation/render-install-win.nu clang ${{ llvm_major }} ${{ target_platform }}
     requirements:
       build:
         - nushell
       run:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          # conda-forge parity (vc/vc14_runtime/ucrt-feedstock): vc14_runtime
+          # floor is the newest version confirmed published on BOTH win-64
+          # and win-arm64 repodata (naga-acpp-toolchain hand-off report).
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
       run_constraints:
         - clang_win-64 <0.0a0
         - clang-cl_win-64 <0.0a0
@@ -1799,8 +1807,14 @@ outputs:
       - package_contents:
           files:
             exists:
-              - etc/conda/activate.d/vs2022_y-naga-acpp-clang_win-64.bat
-              - etc/conda/activate.d/vs2022_y-naga-acpp-clang_win-64.ps1
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang_win-64.bat
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang_win-64.ps1
+      - script:
+          # Mirrors the feedstock's own run_test_clang.bat (%CC%/test.c) —
+          # naga-acpp-clang_* only sets CC, not CXX.
+          - echo int main(){return 0;} > t.c
+          - "%CC% t.c -o t.exe"
+          - t.exe
 
   - package:
       name: naga-acpp-clangxx_win-64
@@ -1820,7 +1834,7 @@ outputs:
         - target_platform != "win-64"
       script:
         interpreter: nu
-        content: nu shared/activation/render-install-win.nu clangxx ${{ llvm_major }}
+        content: nu shared/activation/render-install-win.nu clangxx ${{ llvm_major }} ${{ target_platform }}
     requirements:
       build:
         - nushell
@@ -1828,9 +1842,14 @@ outputs:
         # clangxx activation reuses CPPFLAGS_USED that the clang script sets,
         # which is why the filenames force _z- to sort after _y-.
         - ${{ pin_subpackage('naga-acpp-clang_win-64', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
       run_constraints:
         - clangxx_win-64 <0.0a0
         - acpp-clangxx_win-64 <0.0a0
@@ -1839,14 +1858,19 @@ outputs:
       - package_contents:
           files:
             exists:
-              - etc/conda/activate.d/vs2022_z-naga-acpp-clangxx_win-64.bat
-              - etc/conda/activate.d/vs2022_z-naga-acpp-clangxx_win-64.ps1
+              - etc/conda/activate.d/vs2026_z-naga-acpp-clangxx_win-64.bat
+              - etc/conda/activate.d/vs2026_z-naga-acpp-clangxx_win-64.ps1
+      - script:
+          # Mirrors the feedstock's own run_test_clangxx.bat (%CXX%/test.cpp).
+          - echo int main(){return 0;} > t.cpp
+          - "%CXX% t.cpp -o t.exe"
+          - t.exe
 
   # clang-cl driver: the MSVC-CLI-compatible front end most existing Windows
   # build systems expect. Upstream ships clang-cl_win-64 as an ALTERNATIVE to
   # clang_win-64 (they intentionally conflict), so ours conflicts with our own
   # clang/clangxx activation pair for the same reason: both would install a
-  # vs2022_y-* script and fight over CC/CXX.
+  # vs2026_y-* script and fight over CC/CXX.
   - package:
       name: naga-acpp-clang-cl_win-64
       version: ${{ version }}
@@ -1865,15 +1889,20 @@ outputs:
         - target_platform != "win-64"
       script:
         interpreter: nu
-        content: nu shared/activation/render-install-win.nu clang-cl ${{ llvm_major }}
+        content: nu shared/activation/render-install-win.nu clang-cl ${{ llvm_major }} ${{ target_platform }}
     requirements:
       build:
         - nushell
       run:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
       run_constraints:
         - clang-cl_win-64 <0.0a0
         - clang_win-64 <0.0a0
@@ -1885,8 +1914,179 @@ outputs:
       - package_contents:
           files:
             exists:
-              - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.bat
-              - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.ps1
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang-cl_win-64.bat
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang-cl_win-64.ps1
+      - script:
+          # clang-cl sets BOTH CC and CXX to clang-cl.exe; task specifies
+          # %CXX% with the MSVC-style /Fe: output flag for this driver.
+          - echo int main(){return 0;} > t.cpp
+          - "%CXX% t.cpp /Fe:t.exe"
+          - t.exe
+
+  # ── win-arm64 compiler activation (same clang-win-activation port) ───────
+  # render-install-win.nu is arch-aware: CHOST=aarch64-pc-windows-msvc,
+  # FINAL_C{,XX}FLAGS/FINAL_CL_FLAGS drop -march=nocona -mtune=haswell (the
+  # feedstock's own conda_build_config.yaml carries the identical flag SET
+  # for `[win and arm64]`, minus march/mtune — quoted in the hand-off
+  # report), and clang_rt.builtins-x86_64.lib becomes
+  # clang_rt.builtins-aarch64.lib. The vendored templates are win-64-named
+  # only (no arm64-specific variant exists at our pinned ref) but are
+  # otherwise arch-neutral, so win-arm64 renders from the SAME source files.
+  - package:
+      name: naga-acpp-clang_win-arm64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-arm64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang ${{ llvm_major }} ${{ target_platform }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        - clang_win-arm64 <0.0a0
+        - clang-cl_win-arm64 <0.0a0
+        - acpp-clang_win-arm64 <0.0a0
+        - acpp-clang-nightly_win-arm64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang_win-arm64.bat
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang_win-arm64.ps1
+      - script:
+          # Mirrors the feedstock's own run_test_clang.bat (%CC%/test.c) —
+          # naga-acpp-clang_* only sets CC, not CXX.
+          - echo int main(){return 0;} > t.c
+          - "%CC% t.c -o t.exe"
+          - t.exe
+
+  - package:
+      name: naga-acpp-clangxx_win-arm64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-arm64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clangxx ${{ llvm_major }} ${{ target_platform }}
+    requirements:
+      build:
+        - nushell
+      run:
+        # clangxx activation reuses CPPFLAGS_USED that the clang script sets,
+        # which is why the filenames force _z- to sort after _y-.
+        - ${{ pin_subpackage('naga-acpp-clang_win-arm64', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        - clangxx_win-arm64 <0.0a0
+        - acpp-clangxx_win-arm64 <0.0a0
+        - acpp-clangxx-nightly_win-arm64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2026_z-naga-acpp-clangxx_win-arm64.bat
+              - etc/conda/activate.d/vs2026_z-naga-acpp-clangxx_win-arm64.ps1
+      - script:
+          # Mirrors the feedstock's own run_test_clangxx.bat (%CXX%/test.cpp).
+          - echo int main(){return 0;} > t.cpp
+          - "%CXX% t.cpp -o t.exe"
+          - t.exe
+
+  # clang-cl driver: the MSVC-CLI-compatible front end most existing Windows
+  # build systems expect. Conflicts with our own clang/clangxx activation
+  # pair for the same reason as win-64: both would install a vs2026_y-*
+  # script and fight over CC/CXX.
+  - package:
+      name: naga-acpp-clang-cl_win-arm64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "win-arm64"
+      script:
+        interpreter: nu
+        content: nu shared/activation/render-install-win.nu clang-cl ${{ llvm_major }} ${{ target_platform }}
+    requirements:
+      build:
+        - nushell
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - vs2026_${{ target_platform }}
+        - vswhere
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - vc >=14.3
+          - vc14_runtime >=14.44.35208
+          - ucrt >=10.0.20348.0
+      run_constraints:
+        - clang-cl_win-arm64 <0.0a0
+        - clang_win-arm64 <0.0a0
+        - naga-acpp-clang_win-arm64 <0.0a0
+        - naga-acpp-clangxx_win-arm64 <0.0a0
+        - acpp-clang-cl_win-arm64 <0.0a0
+        - acpp-clang-cl-nightly_win-arm64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang-cl_win-arm64.bat
+              - etc/conda/activate.d/vs2026_y-naga-acpp-clang-cl_win-arm64.ps1
+      - script:
+          # clang-cl sets BOTH CC and CXX to clang-cl.exe; task specifies
+          # %CXX% with the MSVC-style /Fe: output flag for this driver.
+          - echo int main(){return 0;} > t.cpp
+          - "%CXX% t.cpp /Fe:t.exe"
+          - t.exe
 
   # ── osx-arm64 compiler activation (clang-compiler-activation port) ───────
   # Different lineage from ctng: Apple's own linker/ar/etc. come from

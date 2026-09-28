@@ -2,10 +2,12 @@
 # render-install.sh — render + install the acpp compiler activation scripts
 # from the VENDORED conda-forge ctng-compiler-activation templates.
 #
-# Faithful port of the linux-64-native slice of the feedstock's
-# build_scripts.sh + install-clang{,++}.sh at the pinned ref recorded in
-# vendor/ctng-compiler-activation/PINNED_REF. Everything is byte-identical to
-# canonical rendering EXCEPT sections marked "ACPP DELTA". Design v3 §D2.
+# Faithful port of the linux-64 AND linux-aarch64 native slices of the
+# feedstock's build_scripts.sh + install-clang{,++}.sh at the pinned ref
+# recorded in vendor/ctng-compiler-activation/PINNED_REF (dispatched on
+# $target_platform, which rattler-build exports for every build script).
+# Everything is byte-identical to canonical rendering EXCEPT sections marked
+# "ACPP DELTA". Design v3 §D2.
 #
 # Usage: bash render-install.sh {clang|clangxx}
 # Expects: $PREFIX, $PKG_NAME (rattler-build env), vendored templates beside
@@ -21,25 +23,52 @@ cp "${vendor}"/activate-gcc.sh "${vendor}"/activate-g++.sh \
    "${vendor}"/deactivate-gcc.sh "${vendor}"/deactivate-g++.sh "${work}/"
 cd "${work}"
 
-# ---- canonical values: linux-64 native (build_scripts.sh) -------------------
-CHOST=x86_64-conda-linux-gnu
-CBUILD=x86_64-conda-linux-gnu
+# ---- canonical values: native per $target_platform (build_scripts.sh) ------
+# rattler-build exports target_platform for every build script. Two linux
+# arches are activated from this recipe; values below are the FINAL_* flags
+# ctng-compiler-activation's build_scripts.sh computes for each
+# cross_target_platform (vendor/ctng-compiler-activation/build_scripts.sh),
+# quoted verbatim in the acpp-toolchain hand-off report.
+case "${target_platform}" in
+  linux-64)
+    CHOST=x86_64-conda-linux-gnu
+    CBUILD=x86_64-conda-linux-gnu
+    MACHINE="x86_64"
+    FINAL_CFLAGS="-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe"
+    # -std=c++17 stripped: canonical strips it for toolchain majors >= 11
+    FINAL_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe"
+    FINAL_LDFLAGS="-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined"
+    FINAL_LDFLAGS_LD="-O2 --sort-common --as-needed -z relro -z now --disable-new-dtags --gc-sections --allow-shlib-undefined"
+    FINAL_DEBUG_CFLAGS="-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -ffunction-sections -pipe"
+    FINAL_DEBUG_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -ffunction-sections -pipe"
+    ;;
+  linux-aarch64)
+    CHOST=aarch64-conda-linux-gnu
+    CBUILD=aarch64-conda-linux-gnu
+    MACHINE="aarch64"
+    # No -disable-new-dtags/-gc-sections in LDFLAGS on this arch — the
+    # feedstock's own FINAL_LDFLAGS_linux_aarch64 simply omits them; not a
+    # port error, verified against build_scripts.sh line by line.
+    FINAL_CFLAGS="-ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O3 -pipe"
+    FINAL_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O3 -pipe"
+    FINAL_LDFLAGS="-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--allow-shlib-undefined"
+    FINAL_LDFLAGS_LD="-O2 --sort-common --as-needed -z relro -z now --allow-shlib-undefined"
+    FINAL_DEBUG_CFLAGS="-ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -pipe"
+    FINAL_DEBUG_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -pipe"
+    ;;
+  *)
+    echo "render-install.sh: unsupported target_platform '${target_platform}' (this recipe activates linux-64 and linux-aarch64 only)"
+    exit 1
+    ;;
+esac
 
 FINAL_CPPFLAGS="-DNDEBUG -D_FORTIFY_SOURCE=2 -O2"
 FINAL_DEBUG_CPPFLAGS="-D_DEBUG -D_FORTIFY_SOURCE=2 -Og"
-FINAL_CFLAGS="-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe"
-# -std=c++17 stripped: canonical strips it for toolchain majors >= 11
-FINAL_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-strong -fno-plt -O2 -ffunction-sections -pipe"
-FINAL_LDFLAGS="-Wl,-O2 -Wl,--sort-common -Wl,--as-needed -Wl,-z,relro -Wl,-z,now -Wl,--disable-new-dtags -Wl,--gc-sections -Wl,--allow-shlib-undefined"
-FINAL_LDFLAGS_LD="-O2 --sort-common --as-needed -z relro -z now --disable-new-dtags --gc-sections --allow-shlib-undefined"
-FINAL_DEBUG_CFLAGS="-march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -ffunction-sections -pipe"
-FINAL_DEBUG_CXXFLAGS="-fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fPIC -fstack-protector-all -fno-plt -Og -g -Wall -Wextra -fvar-tracking-assignments -ffunction-sections -pipe"
 
 CONDA_BUILD_CROSS_COMPILATION=""   # native
 CMAKE_SYSTEM_NAME="Linux"
 MESON_SYSTEM="linux"
-MACHINE="x86_64"
-MESON_FAMILY="x86_64"
+MESON_FAMILY="${MACHINE}"
 uname_kernel_release=0
 IS_WIN=0
 EXE_EXT=""
@@ -102,7 +131,6 @@ CLANGXX_EXTRA=" \
 # is found through the canonical CMAKE_PREFIX_PATH — no AdaptiveCpp_DIR needed.
 CLANGXX_EXTRA="${CLANGXX_EXTRA} \
 \"ACPP_TARGETS,\${ACPP_TARGETS:-generic}\" \
-\"ACPP_COMPILER_DIR,\${CONDA_PREFIX}\" \
 \"ACPP_CLANG,\${CONDA_PREFIX}/bin/${CHOST}-clang++\" \
 \"ACPP_CPU_CXX,\${CONDA_PREFIX}/bin/${CHOST}-clang++\" \
 "

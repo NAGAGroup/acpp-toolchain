@@ -137,6 +137,12 @@ def darwin-args [src: string, prefix: string] {
     "-DWITH_METAL_BACKEND=ON"
     $"-DMETAL_INCLUDE_DIR=($src)/metal-cpp"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
+    # conda-forge's osx-arm64 CHOST. Setting this explicitly (rather than
+    # letting LLVM infer its host triple) is what makes the clang cfg file
+    # written by install-cfg.nu (<triple>-clang.cfg) match clang's own
+    # default target, so a bare `clang` invocation finds it with no symlink.
+    "-DLLVM_HOST_TRIPLE=arm64-apple-darwin20.0.0"
+    "-DLLVM_DEFAULT_TARGET_TRIPLE=arm64-apple-darwin20.0.0"
     "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
     "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
     "-DCOMPILER_RT_BUILD_PROFILE=OFF"
@@ -630,6 +636,16 @@ def main [] {
         print $"rocm deploy: include/($d)"
       }
     }
+  }
+
+  # Clang config files (<triple>-clang{,++,-cpp}.cfg in bin/): bare clang
+  # then finds --sysroot/-isystem/-L/-rpath with no activation script. Not on
+  # Windows — clang-cl has no default-target cfg lookup, and the win compiler
+  # activation story is a separate hand-off.
+  if not (is-windows) {
+    let cfg_triple = (if (is-darwin) { "arm64-apple-darwin20.0.0" } else { linux-triple })
+    let has_sysroot = (if (is-darwin) { "false" } else { "true" })
+    ^nu ($src | path join "shared" "activation" "install-cfg.nu") $cfg_triple $has_sysroot
   }
 
   if (which ccache | is-not-empty) { ^ccache --show-stats }

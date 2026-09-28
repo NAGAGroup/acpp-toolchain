@@ -1,0 +1,24 @@
+# Vendored from conda-forge/clang-compiler-activation-feedstock
+
+Fetched via `http get` from raw.githubusercontent.com at the pinned ref
+(github.com/conda-forge/clang-compiler-activation-feedstock), not a
+checked-out branch. Files kept: the activate/deactivate script pair,
+build.sh (computes the FINAL_* flags and does the @VAR@ substitution),
+install-clang.sh/install-clangxx.sh (canonical install step), the license,
+and the variant config + meta.yaml for reference (values quoted into
+render-install-osx.sh, not re-parsed at build time).
+
+This lineage differs from ctng-compiler-activation (Linux): CHOST/CBUILD are
+Apple triples (arm64-apple-darwin20.0.0 for osx-arm64 native), activation
+runs through a single _tc_activation(act_nature, tc_prefix, ...) call per
+script rather than ctng's shared helper + @C_EXTRA@/@CXX_EXTRA@ indirection,
+and there is no separate binutils package — Apple's linker/ar/etc. come from
+cctools_osx-arm64 + ld64_osx-arm64 (see the naga-acpp-clang_osx-arm64 run
+deps in recipe.yaml).
+
+render-install-osx.sh renders ONLY the osx-arm64 native slice (this
+toolchain's only mac lane); build.sh's linux/osx-64/cross branches are not
+ported. The ACPP delta (ACPP_TARGETS/ACPP_CLANG/ACPP_CPU_CXX on the clangxx
+side) is applied as a second _tc_activation call appended after the
+canonical one, not a template edit — the vendored files here stay faithful
+copies.

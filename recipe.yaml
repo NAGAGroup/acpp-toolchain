@@ -561,6 +561,9 @@ outputs:
               - bin/llvm-strings
               - bin/llvm-symbolizer
               - bin/llvm-cxxfilt
+              - bin/*-clang.cfg
+              - bin/*-clang++.cfg
+              - bin/*-clang-cpp.cfg
               - include/AdaptiveCpp/**
               - lib/clang/**
               - lib/cmake/AdaptiveCpp/**
@@ -600,7 +603,12 @@ outputs:
               # NB no x86_64-conda-linux-gnu-clang* here: triple-prefixed
               # driver names are ACTIVATION-package files (conda-forge's
               # clangxx ships clang++; clangxx_linux-64 ships the triplet),
-              # created by render-install.sh in the activation outputs.
+              # created by render-install.sh in the activation outputs. The
+              # cfg files below ARE ours: triple-NAMED but no activation
+              # logic, just <CFGDIR>-relative flags (install-cfg.nu).
+              - bin/*-clang.cfg
+              - bin/*-clang++.cfg
+              - bin/*-clang-cpp.cfg
               - include/AdaptiveCpp/**
               - lib/clang/**
               - lib/cmake/AdaptiveCpp/**
@@ -671,8 +679,18 @@ outputs:
           then:
             - libgcc-devel_linux-64 >=13
             - libstdcxx-devel_linux-64 >=13
+            # The clang cfg files (install-cfg.nu) carry --sysroot=; a
+            # consumer needs the sysroot package installed for that flag to
+            # resolve to real headers/libs.
+            - sysroot_${{ target_platform }} >=2.28
         # clang needs the libc++ headers on macOS; the conda env is where it
         # looks (<prefix>/include/c++/v1). Unpinned: it follows libcxx.
+        #
+        # KEPT even though naga-acpp-clangxx_osx-arm64 also carries it: that
+        # activation package is OPTIONAL, and the clang cfg files
+        # (install-cfg.nu) already make bare clang++ work with NO activation
+        # at all — dropping this would break bare clang++ for anyone who
+        # doesn't also install the activation package.
         - if: osx
           then: libcxx-devel
       run_exports:
@@ -773,6 +791,22 @@ outputs:
                   - Library/include/AdaptiveCpp/hipSYCL/sycl/sycl.hpp
                   - Library/lib/cmake/AdaptiveCpp/adaptivecpp-config-version.cmake
                   - Library/lib/clang/${{ llvm_major }}/include/omp.h
+              # Clang cfg files (install-cfg.nu): triple-named, per platform.
+              - if: target_platform == "linux-64"
+                then:
+                  - bin/x86_64-conda-linux-gnu-clang.cfg
+                  - bin/x86_64-conda-linux-gnu-clang++.cfg
+                  - bin/x86_64-conda-linux-gnu-clang-cpp.cfg
+              - if: target_platform == "linux-aarch64"
+                then:
+                  - bin/aarch64-conda-linux-gnu-clang.cfg
+                  - bin/aarch64-conda-linux-gnu-clang++.cfg
+                  - bin/aarch64-conda-linux-gnu-clang-cpp.cfg
+              - if: osx
+                then:
+                  - bin/arm64-apple-darwin20.0.0-clang.cfg
+                  - bin/arm64-apple-darwin20.0.0-clang++.cfg
+                  - bin/arm64-apple-darwin20.0.0-clang-cpp.cfg
             not_exists:
               - if: linux
                 then:
@@ -936,6 +970,11 @@ outputs:
         exclude:
           - if: linux
             then:
+              # naga-acpp ships these (bin/*-clang*.cfg) — llvm-dev's bin/**
+              # glob would otherwise swallow them.
+              - bin/*-clang.cfg
+              - bin/*-clang++.cfg
+              - bin/*-clang-cpp.cfg
               # claimed by acpp
               - bin/acpp*
               - bin/clang
@@ -1519,6 +1558,11 @@ outputs:
             after="${CC:-__UNSET__}"
             test "${before}" = "${after}" || (echo "CC not restored: ${before} != ${after}" && exit 1)
             echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run, not just env-var presence.
+          - echo 'int main(void){return 0;}' > t.c
+          - ${CC} ${CFLAGS} ${LDFLAGS} t.c -o t
+          - ./t
 
   - package:
       name: naga-acpp-clangxx_linux-64
@@ -1573,6 +1617,148 @@ outputs:
             after="${CXX:-__UNSET__}"
             test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
             echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run. clang++ itself dynamically
+          # links libLLVM.so/libclang-cpp.so, which ship in naga-acpp-runtime
+          # (not naga-acpp) — pulled in transitively via naga-acpp-clang's own
+          # exact pin on naga-acpp -> naga-acpp-runtime, but named explicitly
+          # here too since this is the step that actually RUNS clang++.
+          - echo 'int main(){return 0;}' > t.cpp
+          - ${CXX} ${CXXFLAGS} ${LDFLAGS} t.cpp -o t
+          - ./t
+        requirements:
+          run:
+            - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+
+  # ── linux-aarch64 compiler activation (ctng port, generalised) ───────────
+  - package:
+      name: naga-acpp-clang_linux-aarch64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "linux-aarch64"
+      script:
+        content: bash shared/activation/render-install.sh clang
+    requirements:
+      build:
+        - sed
+        - shellcheck
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - sysroot_linux-aarch64 >=2.28
+        # POINT REPAIR: see naga-acpp-clang_linux-64 — same binutils need.
+        - binutils_linux-aarch64
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        # DELIBERATELY BLANKET, not a same-major window — see the note on
+        # naga-acpp-clang_linux-64; the reasoning is identical here.
+        - clang_linux-aarch64 <0.0a0
+        - acpp-clang_linux-aarch64 <0.0a0
+        - acpp-clang-nightly_linux-aarch64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clang_linux-aarch64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clang_linux-aarch64.sh
+              - bin/aarch64-conda-linux-gnu-clang
+              - bin/aarch64-conda-linux-gnu-clang-cpp
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CC:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clang_linux-aarch64.sh"
+            test -n "${CC}" || (echo "CC not set" && exit 1)
+            echo "${CC}" | grep -q "aarch64-conda-linux-gnu" || (echo "CC not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clang_linux-aarch64.sh"
+            after="${CC:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CC not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run, not just env-var presence.
+          - echo 'int main(void){return 0;}' > t.c
+          - ${CC} ${CFLAGS} ${LDFLAGS} t.c -o t
+          - ./t
+
+  - package:
+      name: naga-acpp-clangxx_linux-aarch64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "linux-aarch64"
+      script:
+        content: bash shared/activation/render-install.sh clangxx
+    requirements:
+      build:
+        - sed
+        - shellcheck
+      run:
+        - ${{ pin_subpackage('naga-acpp-clang_linux-aarch64', exact=True) }}
+      run_exports:
+        strong:
+          - __glibc >=2.28
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clangxx_linux-aarch64 <0.0a0
+        - acpp-clangxx_linux-aarch64 <0.0a0
+        - acpp-clangxx-nightly_linux-aarch64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clangxx_linux-aarch64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_linux-aarch64.sh
+              - bin/aarch64-conda-linux-gnu-clang++
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CXX:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clangxx_linux-aarch64.sh"
+            test -n "${CXX}" || (echo "CXX not set" && exit 1)
+            echo "${CXX}" | grep -q "aarch64-conda-linux-gnu" || (echo "CXX not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_linux-aarch64.sh"
+            after="${CXX:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run; naga-acpp-runtime named
+          # explicitly since this is the step that actually RUNS clang++
+          # (see the note on naga-acpp-clangxx_linux-64).
+          - echo 'int main(){return 0;}' > t.cpp
+          - ${CXX} ${CXXFLAGS} ${LDFLAGS} t.cpp -o t
+          - ./t
+        requirements:
+          run:
+            - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
 
   # ── Windows compiler activation (design v3 §D2) ───────────────────────────
   # Ported from conda-forge clang-win-activation (a different lineage from the
@@ -1701,6 +1887,137 @@ outputs:
             exists:
               - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.bat
               - etc/conda/activate.d/vs2022_y-naga-acpp-clang-cl_win-64.ps1
+
+  # ── osx-arm64 compiler activation (clang-compiler-activation port) ───────
+  # Different lineage from ctng: Apple's own linker/ar/etc. come from
+  # cctools_osx-arm64 + ld64_osx-arm64 (no binutils_osx-arm64 exists), and
+  # the SDK comes from sdkroot_env_osx-arm64 (SDKROOT), not a sysroot
+  # package. Repodata-checked (naga-acpp-toolchain hand-off report): the
+  # llvm21-tagged ld64_osx-arm64 build depends on libllvm21
+  # >=21.1.8,<21.2.0a0 and soft-constrains clang 21.1.* — both line up with
+  # this recipe's own LLVM 21.1.8 exactly, and neither package HARD-depends
+  # on the `clang` package, so there is no forced conflict with naga-acpp's
+  # own `clang <21|>=22` run_constraints.
+  - package:
+      name: naga-acpp-clang_osx-arm64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "osx-arm64"
+      script:
+        content: bash shared/activation/render-install-osx.sh clang
+    requirements:
+      build:
+        - sed
+      run:
+        - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        - cctools_osx-arm64
+        - ld64_osx-arm64
+        - sdkroot_env_osx-arm64
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      run_constraints:
+        - clang_osx-arm64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clang_osx-arm64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clang_osx-arm64.sh
+              - bin/arm64-apple-darwin20.0.0-clang
+              - bin/arm64-apple-darwin20.0.0-clang-cpp
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CC:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clang_osx-arm64.sh"
+            test -n "${CC}" || (echo "CC not set" && exit 1)
+            echo "${CC}" | grep -q "arm64-apple-darwin" || (echo "CC not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clang_osx-arm64.sh"
+            after="${CC:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CC not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run, not just env-var presence.
+          - echo 'int main(void){return 0;}' > t.c
+          - ${CC} ${CFLAGS} ${LDFLAGS} t.c -o t
+          - ./t
+
+  - package:
+      name: naga-acpp-clangxx_osx-arm64
+      version: ${{ version }}
+    source:
+      # Thin source: license texts + activation/render scripts only. The big
+      # trees live on the staging output (see note above outputs:).
+      - path: shared
+        target_directory: shared
+    build:
+      # Trial dispatches bump this via the build_number workflow input so
+      # re-published artifacts get fresh filenames instead of 409ing.
+      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      skip:
+        - target_platform != "osx-arm64"
+      script:
+        content: bash shared/activation/render-install-osx.sh clangxx
+    requirements:
+      build:
+        - sed
+      run:
+        - ${{ pin_subpackage('naga-acpp-clang_osx-arm64', exact=True) }}
+        - libcxx-devel
+      run_exports:
+        strong:
+          - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+          - libcxx >=19
+      run_constraints:
+        - clangxx_osx-arm64 <0.0a0
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - etc/conda/activate.d/activate-naga-acpp-clangxx_osx-arm64.sh
+              - etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_osx-arm64.sh
+              - bin/arm64-apple-darwin20.0.0-clang++
+      - script:
+          - |
+            # The test env already sources our activate.d script, so assert a
+            # true ROUND TRIP (value returns to whatever it was) rather than
+            # assuming a pristine env where deactivate leaves it unset.
+            export CONDA_PREFIX="${PREFIX}"
+            before="${CXX:-__UNSET__}"
+            source "${PREFIX}/etc/conda/activate.d/activate-naga-acpp-clangxx_osx-arm64.sh"
+            test -n "${CXX}" || (echo "CXX not set" && exit 1)
+            echo "${CXX}" | grep -q "arm64-apple-darwin" || (echo "CXX not triple-prefixed" && exit 1)
+            source "${PREFIX}/etc/conda/deactivate.d/deactivate-naga-acpp-clangxx_osx-arm64.sh"
+            after="${CXX:-__UNSET__}"
+            test "${before}" = "${after}" || (echo "CXX not restored: ${before} != ${after}" && exit 1)
+            echo "activation round-trip OK"
+      - script:
+          # Proves a real compile + link + run; naga-acpp-runtime named
+          # explicitly since this is the step that actually RUNS clang++
+          # (see the note on naga-acpp-clangxx_linux-64).
+          - echo 'int main(){return 0;}' > t.cpp
+          - ${CXX} ${CXXFLAGS} ${LDFLAGS} t.cpp -o t
+          - ./t
+        requirements:
+          run:
+            - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
 
   # ── Backend metapackages (precise runtime deps, design §5) ────────────────
   # One-package install path: `naga-acpp-runtime-cuda` PULLS IN the lane runtime,

@@ -37,6 +37,9 @@ def main [] {
   } else {
     (if $arm { "linux-aarch64" } else { "linux-64" })
   })
+  # A mis-detected platform builds the wrong subdir silently (run 36419155587:
+  # an x64 dev env on the arm64 runner built win-64). Say what we build.
+  print $"build-lane: host platform ($plat) \(os=($nu.os-info.name) arch=($nu.os-info.arch)\)"
   let variants = ([shared variants $"($plat).yaml"] | path join)
 
   # CI points this at fast storage; local builds default to ./output.
@@ -74,6 +77,9 @@ def main [] {
   }
   if ((glob "local-channel/**/*.conda" | length) == 0) {
     error make {msg: $"local-channel is EMPTY after the copy — nothing under ($outdir) matched ($SUBDIRS | str join ', ')"}
+  }
+  if not (("local-channel" | path join $plat) | path exists) {
+    error make {msg: $"local-channel has no ($plat) subdir: this build did not produce the host platform's packages"}
   }
 
   # The mutex ships WITH the toolchain: consumers need it in the same channel.

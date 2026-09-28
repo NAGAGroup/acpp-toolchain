@@ -16,7 +16,7 @@ context:
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="5962a7f87a63f61b95381dade59842798cee36b9") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="f8cf4da5f34643d90a5e5cd0441e041b5042c83d") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -66,9 +66,7 @@ outputs:
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
-        # No patches: the fork branch is cut from the base these patches were
-        # written against and carries all of them as commits (0001-0003 from
-        # its cut point, 0008 as its own commit).
+        # No patches: fixes to AdaptiveCpp land in the fork itself.
       - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
         sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
         target_directory: OpenCL-Headers

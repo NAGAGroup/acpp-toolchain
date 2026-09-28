@@ -472,6 +472,11 @@ jobs:
       - name: Visible backends
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
+      - name: SYCL smoke on the CPU (OpenMP) backend
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
       - name: Diagnose a crash (backtrace, linkage, crash report)
         if: failure()
         working-directory: shared/tests/gpu-smoke
@@ -487,15 +492,14 @@ jobs:
           DYLD_PRINT_LIBRARIES=1 pixi run acpp-info 2>&1 | grep -Ei 'omp|abort|error' || true
           echo "--- lldb backtrace ---"
           pixi run -- lldb --batch -o run -k "bt all" -k quit -- "$P/bin/acpp-info" -l 2>&1 | tail -150 || true
+          echo "--- smoke with debug output ---"
+          ACPP_VISIBILITY_MASK=omp ACPP_DEBUG_LEVEL=3 pixi run -- ./smoke 2>&1 | tail -120 || true
+          echo "--- lldb backtrace of the smoke ---"
+          ACPP_VISIBILITY_MASK=omp pixi run -- lldb --batch -o run -k "bt all" -k quit -- ./smoke 2>&1 | tail -200 || true
           echo "--- crash reports ---"
           ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -5 || true
-          f=$(ls -t ~/Library/Logs/DiagnosticReports/acpp-info* 2>/dev/null | head -1)
+          f=$(ls -t ~/Library/Logs/DiagnosticReports/{acpp-info,smoke}* 2>/dev/null | head -1)
           [ -n "$f" ] && head -c 20000 "$f" || true
-      - name: SYCL smoke on the CPU (OpenMP) backend
-        if: ${{ !cancelled() }}
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
 
   publish-osx-arm64:
     needs: [prepare, build-osx-arm64, gate-osx-arm64]

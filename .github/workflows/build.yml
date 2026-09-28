@@ -865,6 +865,10 @@ jobs:
         timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
+      - name: Compile smoke binary
+        timeout-minutes: 30
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run build-smoke
       - name: SYCL smoke on the CPU (OpenMP) backend
         if: ${{ !cancelled() }}
         timeout-minutes: 20

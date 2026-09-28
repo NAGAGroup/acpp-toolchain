@@ -635,7 +635,7 @@ jobs:
     timeout-minutes: 60
     defaults:
       run:
-        shell: pwsh # bash on this image is the WSL stub
+        shell: powershell # Windows PowerShell: this image has no pwsh, and bash is the WSL stub
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

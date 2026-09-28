@@ -16,7 +16,7 @@ context:
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="37f65935829c8b7036988182f8906bf2de631ece") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="5962a7f87a63f61b95381dade59842798cee36b9") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting

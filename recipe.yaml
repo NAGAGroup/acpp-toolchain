@@ -82,6 +82,19 @@ outputs:
         then:
           - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
             target_directory: rocm-dist
+      # ROCm, win-64: TheRock's windows multi-arch tarball, same role as the
+      # linux one (discovery input; the runtime subset is copied into the
+      # prefix by build-stage.nu).
+      - if: target_platform == "win-64"
+        then:
+          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-multiarch-10.0.0.tar.gz
+            target_directory: rocm-dist
+      # Metal, osx: metal-cpp headers (Apache-2.0), build-only.
+      - if: osx
+        then:
+          - git: https://github.com/apple/metal-cpp.git
+            rev: 27c4382b7151d55a51692cdcb27aaa98752240de
+            target_directory: metal-cpp
       - path: shared
         target_directory: shared
     requirements:
@@ -171,42 +184,34 @@ outputs:
         - naga-acpp-llvm ==${{ llvm_major }}
         - zlib
         - zstd
-        # GPU backend build deps are X86-PLATFORM inputs: the aarch64 lane is
-        # OMP-only by design, so everything CUDA/L0/OCL-shaped gates on the
-        # two x86 platforms rather than on `linux`.
-        - if: target_platform == "linux-64" or target_platform == "win-64"
+        # CUDA: every platform conda-forge ships it for (not osx, not win-arm64).
+        - if: target_platform in ["linux-64", "linux-aarch64", "win-64"]
           then:
-            # The single CUDA pin, hard against the variant key (conda-forge
-            # pinning-feedstock convention): cuda-version is what every other
-            # cuda-* package constrains itself against, so pinning it once
-            # aligns the whole set without a version literal on any of them.
+            # The single CUDA pin (see the variant files).
             - cuda-version ==${{ cuda_compiler_version }}
-            # Headers (cuda_runtime.h) + the unversioned libcudart.so link name.
             - cuda-cudart-dev
-            # libdevice.10.bc: find_path(CUDA_DEVICE_LIBS_PATH) bakes its home,
-            # and acpp's FindCUDA shim requires <root>/nvvm to exist. NOT the
-            # cuda-nvvm metapackage — that drags in libnvvm.so, which nothing
-            # here ever loads.
             - cuda-nvvm-tools
-            # DETECTION ANCHOR ONLY — nvcc is never executed; clang compiles
-            # the CUDA code. FindCUDAToolkit refuses to locate a toolkit
-            # without an nvcc binary (measured: FOUND=FALSE with cudart-dev +
-            # driver-dev + nvvm-tools + crt-dev alone), the same role
-            # cuda-nvcc-impl plays for the legacy FindCUDA module on win.
+            # Detection anchor only: FindCUDAToolkit needs an nvcc binary.
             - cuda-nvcc-tools
-            # Both x86 platforms get Level Zero + OpenCL: level-zero{,-devel}
-            # and opencl-headers all ship for win-64, so the Intel backends
-            # are not linux-only. (Upstream's Windows CI disables OpenCL, but
-            # the docs never say it cannot work — we build it and let CI
-            # adjudicate.)
-            - level-zero-devel
-            - opencl-headers
+        - if: linux
+          then:
+            - cuda-driver-dev
+            - ocl-icd
         - if: target_platform == "linux-64"
           then:
-            - ocl-icd
-            - cuda-driver-dev
             - cuda-crt-dev_linux-64
-        - if: target_platform == "win-64"
+        - if: target_platform == "linux-aarch64"
+          then:
+            - cuda-crt-dev_linux-aarch64
+        # Level Zero: conda-forge ships it for the two x86 platforms only.
+        - if: target_platform in ["linux-64", "win-64"]
+          then:
+            - level-zero-devel
+        # OpenCL headers: everywhere but osx. win loader: khronos.
+        - if: not osx
+          then:
+            - opencl-headers
+        - if: win
           then:
             - khronos-opencl-icd-loader
         # Linux (both arches): lldb needs python+swig; libxml2/numactl are
@@ -451,6 +456,7 @@ outputs:
               # audit rather than a hardcoded name here.
               - if: osx
                 then:
+                  - lib/hipSYCL/*rt-backend-metal*
                   - etc/AdaptiveCpp/acpp-toolchain.json
               - if: linux
                 then:
@@ -458,7 +464,15 @@ outputs:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - etc/AdaptiveCpp/acpp-toolchain.json
-              # GPU backends are x86-only; the aarch64 lane is OMP-only
+              # Level Zero/ROCm are x86-only; CUDA and OpenCL also build on
+              # linux-aarch64.
+              - if: target_platform == "linux-aarch64"
+                then:
+                  - lib/hipSYCL/librt-backend-cuda.so
+                  - lib/hipSYCL/librt-backend-ocl.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
+                  - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
               - if: target_platform == "linux-64"
                 then:
                   - lib/hipSYCL/librt-backend-cuda.so
@@ -472,7 +486,10 @@ outputs:
               - if: target_platform == "win-arm64"
                 then:
                   - Library/bin/hipSYCL/rt-backend-omp.dll
+                  - Library/bin/hipSYCL/rt-backend-ocl.dll
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
+                  - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-toolchain.json
               - if: target_platform == "win-64"
                 then:
@@ -483,10 +500,12 @@ outputs:
                   - Library/bin/hipSYCL/rt-backend-cuda.dll
                   - Library/bin/hipSYCL/rt-backend-ze.dll
                   - Library/bin/hipSYCL/rt-backend-ocl.dll
+                  - Library/bin/hipSYCL/rt-backend-hip.dll
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
-                  - Library/lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
+                  - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-toolchain.json
             not_exists:
               - if: linux
@@ -500,7 +519,6 @@ outputs:
                   # moved to naga-acpp-runtime-cuda, whose install brings libdevice
                   - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
-                  - Library/bin/hipSYCL/rt-backend-hip.dll # AMD off on win
                   - Library/bin/libomp.dll
                   - etc/conda/activate.d/acpp-runtime-activate.sh
   - package:
@@ -954,6 +972,11 @@ outputs:
               - bin/llvm-profgen
               - include/AdaptiveCpp/**
               - lib/cmake/AdaptiveCpp/**
+              # ROCm headers ship with naga-acpp-runtime-rocm (win-64), and
+              # its headers on linux too — exclude both since llvm-dev's
+              # include/** glob would otherwise swallow them.
+              - include/hip/**
+              - include/hsa/**
               # claimed by naga-acpp-tools
               - bin/amdgpu-arch
               - bin/clang-apply-replacements
@@ -1036,6 +1059,11 @@ outputs:
               - Library/bin/llvm-profgen.exe
               - Library/include/AdaptiveCpp/**
               - Library/lib/cmake/AdaptiveCpp/**
+              # ROCm headers ship with naga-acpp-runtime-rocm (win-64) —
+              # exclude them since llvm-dev's Library/include/** glob would
+              # otherwise swallow them.
+              - Library/include/hip/**
+              - Library/include/hsa/**
               - Library/lib/clang/**
               - Library/lib/AdaptiveCpp.lib
               - Library/lib/acpp-frontend.lib
@@ -1100,6 +1128,13 @@ outputs:
               - Library/lib/acpp-common.lib
               - Library/bin/hipSYCL/**
               - Library/lib/hipSYCL/**
+              # ROCm runtime DLLs/import libs belong to naga-acpp-runtime-rocm
+              # (win-64) — llvm-dev's Library/bin/** and Library/lib/**/*.lib
+              # globs would otherwise swallow them.
+              - Library/bin/amdhip64*.dll
+              - Library/bin/amd_comgr*.dll
+              - Library/bin/hiprtc*.dll
+              - Library/lib/amdhip64*.lib
               # unpackaged: libomp comes from conda-forge llvm-openmp
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
@@ -1686,22 +1721,12 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
+      # x86 + aarch64 platforms: mac stays OMP-only, win-arm64 has no CUDA.
       skip:
-        - target_platform == "linux-aarch64"
         - osx
         - target_platform == "win-arm64"
-      # The CUDA bitcode wiring (activation-time libdevice symlink/copy into
-      # acpp's redist path) lives HERE, not in naga-acpp-runtime: base packages
-      # ship no activation, and this is the package whose install guarantees
-      # libdevice exists. On win the copy is the load-bearing mechanism —
-      # binary prefix replacement does not rewrite the baked path there.
-      script:
-        interpreter: nu
-        file: shared/install-runtime-activation.nu
+      # No activation: the runtime finds libdevice through its runtime-relative CUDA root (ACPP_CUDA_ROOT=.).
     requirements:
-      build:
-        - nushell
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
         # Constrained through cuda-version, components bare (conda-forge's
@@ -1722,17 +1747,6 @@ outputs:
         # ceiling, unlike the "<13" we used to assert against a driver.
         - acpp-runtime-cuda <0.0a0
         - acpp-runtime-cuda-nightly <0.0a0
-    tests:
-      - package_contents:
-          files:
-            exists:
-              - if: linux
-                then:
-                  - etc/conda/activate.d/acpp-runtime-activate.sh
-                else:
-                  - etc/conda/activate.d/acpp-runtime-activate.bat
-                  - etc/conda/activate.d/acpp-runtime-activate.ps1
-                  - etc/conda/activate.d/acpp-runtime-activate.sh
     about:
       summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
       license: BSD-3-Clause
@@ -1756,7 +1770,7 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
+      # Level Zero: conda-forge ships it for the two x86 platforms only.
       skip:
         - target_platform == "linux-aarch64"
         - osx
@@ -1792,11 +1806,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # x86 platforms only: the aarch64 and mac lanes are OMP-only.
+      # OpenCL: builds and runs everywhere but osx.
       skip:
-        - target_platform == "linux-aarch64"
         - osx
-        - target_platform == "win-arm64"
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1845,18 +1857,30 @@ outputs:
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
       skip:
-        - target_platform != "linux-64"
+        - target_platform not in ["linux-64", "win-64"]
       files:
         include:
           # The fork's full-mode HIP deploy rows, copied into the prefix by the
           # staging build from the TheRock multi-arch tarball.
-          - lib/libhiprtc*
-          - lib/libamdhip64*
-          - lib/libhsa*
-          - lib/libamd_comgr*
-          - lib/libroc*
-          - lib/llvm/amdgcn/**
-          - lib/rocm_sysdeps/**
+          - if: linux
+            then:
+              - lib/libhiprtc*
+              - lib/libamdhip64*
+              - lib/libhsa*
+              - lib/libamd_comgr*
+              - lib/libroc*
+              - lib/llvm/amdgcn/**
+              - lib/rocm_sysdeps/**
+              - include/hip/**
+              - include/hsa/**
+            else:
+              - Library/bin/amdhip64*.dll
+              - Library/bin/amd_comgr*.dll
+              - Library/bin/hiprtc*.dll
+              - Library/lib/amdhip64*.lib
+              - Library/**/amdgcn/**
+              - Library/include/hip/**
+              - Library/include/hsa/**
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1867,10 +1891,14 @@ outputs:
       - package_contents:
           files:
             exists:
-              - lib/libamdhip64.so*
-              - lib/libhsa-runtime64.so*
-              - lib/libamd_comgr.so*
-              - lib/llvm/amdgcn/bitcode/ockl.bc
+              - if: linux
+                then:
+                  - lib/libamdhip64.so*
+                  - lib/libhsa-runtime64.so*
+                  - lib/libamd_comgr.so*
+                  - lib/llvm/amdgcn/bitcode/ockl.bc
+                else:
+                  - Library/bin/amdhip64*.dll
     about:
       summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
       # Per-component sweep, read from the tarball's own share/doc texts:

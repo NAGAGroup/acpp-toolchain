@@ -1,22 +1,19 @@
 # THE workspace manifest — the ONLY [workspace] in this repository.
 #
-# acpp-toolchain: the AdaptiveCpp SYCL compiler toolchain package suites
-# (release + nightly) for the naga-labs channel on prefix.dev.
-# Design doc: naga-labs/SYCLBUILDKIT-DESIGN.md (v3 delta, 2026-08-07).
+# acpp-toolchain: conda packages of the NAGA AdaptiveCpp fork (naga-acpp-*),
+# built as a complete LLVM toolchain and published to the naga-labs-staging
+# channel on prefix.dev.
 #
-# v3 architecture: ONE multi-output recipe per lane (release/recipe.yaml,
-# nightly/recipe.yaml) with a rattler-build STAGING output that runs the
-# expensive LLVM+AdaptiveCpp build once; every package output carves that
-# build via `files:` globs. `pixi publish --to ./local-channel` produces an
-# INDEXED local channel, which CI ships between jobs as an artifact so the
-# GPU gate installs the toolchain through a real solve. CI runs these same
-# tasks (design §D3).
+# ONE multi-output recipe (recipe.yaml) with a rattler-build STAGING output
+# that runs the expensive LLVM+AdaptiveCpp build once; every package output
+# carves that build via `files:` globs. shared/build-lane.nu drives
+# rattler-build directly (pixi publish cannot resolve staging outputs) and
+# writes an INDEXED local channel, which CI ships between jobs so the runtime
+# gates install through a real solve.
 [workspace]
 name = "acpp-toolchain"
-# The naga-labs channel is layered on top of conda-forge upstream, so it is
-# the ONLY channel we declare anywhere: everything (including our own build
-# dependencies) resolves the way a consumer's environment will, and channel
-# problems surface while iterating instead of after a green build.
+# An overlay channel layering conda-forge server-side: the dev tooling resolves
+# the way a consumer environment would.
 channels = ["https://prefix.dev/jackm97/naga-labs"]
 platforms = ["linux-64", "win-64", "linux-aarch64", "osx-arm64"]
 preview = ["pixi-build"]
@@ -26,47 +23,22 @@ requires-pixi = ">=0.76.1"
 git = { features = ["git"], no-default-feature = true }
 
 # ---- Build variants: deliberately NOT here ---------------------------------
-# There used to be a [workspace.target.linux-64.build-variants] block pinning
-# the compiler and sysroot. It is gone, and nothing replaces it in this file.
-#
 # Every build goes through `rattler-build ... -m shared/variants/<platform>.yaml`
-# (see shared/build-lane.nu), so a pin written here would not be read by any
-# build we actually run — it was a second, silently divergent copy of the real
-# pins. Worse, it only ever covered linux: Windows inherited the default vs2022
-# while the real config selects vs2026, so the one platform where a stale
-# compiler default actually bites was the one this block did not cover.
-#
-# shared/variants/{linux-64,win-64}.yaml are the single source of truth. If
-# this workspace ever moves back to the pixi-build path, the correct wiring is
-# `[workspace] build-variants-files` pointing at those same files — NOT a
-# retyped copy of their contents.
+# (shared/build-lane.nu); those files are the single source of truth. A pin
+# written here would be read by no build we run.
 
-# ---- Build tasks -----------------------------------------------------------
-# `pixi publish --to <dir>` builds the whole lane and writes an INDEXED conda
-# channel (unlike --target-dir, which only copies packages). --path selects
-# one lane; a bare publish would walk the workspace and build both.
-
-
-# ---- Dev environment (recipe/script iteration) -----------------------------
+# ---- Dev environment (recipe/script iteration, and CI) ---------------------
 [environments.dev]
 no-default-feature = true
 dependencies = { nushell = ">=0.106", rattler-build = ">=0.72", rattler-index = "*", git = "*" }
 
-[environments.dev.tasks.gen-nightly]
-cmd = "nu shared/gen-nightly.nu"
-description = "Regenerate nightly/recipe.yaml from release/recipe.yaml"
+[environments.dev.tasks.build]
+cmd = "nu shared/build-lane.nu"
+description = "Build the toolchain for this platform into the indexed local channel"
 
-[environments.dev.tasks.check-nightly]
-cmd = "nu shared/gen-nightly.nu --check"
-description = "Fail if nightly/recipe.yaml is stale w.r.t. the release recipe"
-
-[environments.dev.tasks.gen-naga]
-cmd = "nu shared/gen-naga.nu"
-description = "Regenerate naga/recipe.yaml from nightly/recipe.yaml"
-
-[environments.dev.tasks.check-naga]
-cmd = "nu shared/gen-naga.nu --check"
-description = "Fail if naga/recipe.yaml is stale w.r.t. the nightly recipe"
+[environments.dev.tasks.render]
+cmd = "rattler-build build --recipe recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
+description = "Render-check the recipe (fast; no build)"
 
 [environments.dev.tasks.gen-staging-hash]
 cmd = "nu shared/gen-staging-hash.nu"
@@ -76,83 +48,38 @@ description = "Refresh the staging_inputs hash (patches/build script/sources) in
 cmd = "nu shared/gen-staging-hash.nu --check"
 description = "Fail if a variant config's staging_inputs hash is stale"
 
-[environments.dev.tasks.render-release]
-cmd = "rattler-build build --recipe release/recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
-description = "Render-check the release recipe (fast; no build)"
-
-[environments.dev.tasks.render-nightly]
-cmd = "rattler-build build --recipe nightly/recipe.yaml --experimental --render-only -m shared/variants/linux-64.yaml"
-description = "Render-check the nightly recipe (fast; no build)"
-
-[environments.dev.tasks.audit]
-cmd = "nu shared/tests/audit.nu"
-description = "Solver-level constraint audits against ./local-channel"
-
-[environments.dev.tasks.audit-win]
-# The export round trip is skipped here on purpose: it installs the whole
-# toolchain to build its consumer, and run_exports are platform-independent
-# metadata, so proving the round trip once (on linux) proves it.
-cmd = "nu shared/tests/audit.nu --platform win-64 --skip-round-trip"
-description = "Solver-level constraint audits against ./local-channel (win-64)"
-
-[environments.dev.tasks.acceptance]
-cmd = "nu shared/tests/acceptance.nu"
-description = "Acceptance artifact: fresh workspace, clean cache, single channel — locks, builds, runs, and refuses the wrong lane"
-
 [environments.dev.tasks.check-pins]
 cmd = "nu shared/check-pins.nu"
-description = "Fail if a staging-inheriting output uses pin_compatible (unresolvable at build time, invisible to --render-only)"
+description = "Fail if a staging-inheriting output uses pin_compatible, or the mutex host spec is not an exact major"
 
 [environments.dev.tasks.check-no-collision]
 cmd = "nu shared/check-no-collision.nu"
-description = "C-11 gate: fail if any staged artifact name exists on conda-forge (overlay-first channel would shadow it)"
+description = "Fail if any staged artifact name exists on conda-forge (an overlay channel would shadow it)"
 
 [environments.dev.tasks.check-closure]
 cmd = "nu shared/check-closure.nu"
 description = "Publish gate: every declared output is present, and every staged artifact freshly solves against the channel"
 
+[environments.dev.tasks.audit]
+cmd = "nu shared/tests/audit.nu"
+description = "Solver-level constraint audits against ./local-channel"
+
+[environments.dev.tasks.acceptance]
+cmd = "nu shared/tests/acceptance.nu"
+description = "Acceptance: fresh workspace, clean cache, single channel — locks, builds, runs"
+
 [environments.dev.tasks.index-channel]
 cmd = "rattler-index fs ./local-channel"
-description = "Index local-channel so it is a real channel (subdir repodata), not just a pile of .conda files"
+description = "Index local-channel so it is a real channel (subdir repodata)"
 
 [environments.dev.tasks.publish-channel]
 cmd = "nu shared/publish-channel.nu"
-description = "Upload the built local channel to prefix.dev (OIDC in CI), behind the publish gates"
-# Both gates are depends-on rather than merely separate workflow steps, so
-# they are unbypassable: publishing by hand still runs them.
+description = "Upload the built local channel to naga-labs-staging (OIDC in CI), behind the publish gates"
 depends-on = ["check-no-collision", "check-closure"]
-
-[environments.dev.tasks.record-keeper]
-cmd = "nu shared/record-keeper.nu"
-description = "Keepers: append this month's first green nightly set to nightly/keepers.txt, if the month has none"
-
-[environments.dev.tasks.record-keeper-dry-run]
-cmd = "nu shared/record-keeper.nu --dry-run"
-description = "Show what the keeper recorder would append, without writing it"
-
-[environments.dev.tasks.prune-nightly]
-cmd = "nu shared/prune-nightly.nu"
-description = "Retention: drop nightly build-sets outside the newest-N window, honouring nightly/keepers.txt"
-
-[environments.dev.tasks.prune-nightly-dry-run]
-cmd = "nu shared/prune-nightly.nu --dry-run"
-description = "Show what retention would delete, without deleting it"
 
 [environments.dev.tasks.publish-dry-run]
 cmd = "nu shared/publish-channel.nu --dry-run"
 description = "Run the publish gates and print what would be uploaded, without uploading"
-
-[environments.dev.tasks.build-release]
-cmd = "nu shared/build-lane.nu release"
-description = "Build the release lane into the indexed local channel"
-
-[environments.dev.tasks.build-nightly]
-cmd = "nu shared/build-lane.nu nightly"
-description = "Build the nightly lane into the indexed local channel"
-
-[environments.dev.tasks.build-naga]
-cmd = "nu shared/build-lane.nu naga"
-description = "Build the naga fork lane into the indexed local channel"
 
 [feature.git.dependencies]
 git = "*"

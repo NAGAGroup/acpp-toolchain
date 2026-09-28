@@ -1,17 +1,15 @@
 #!/usr/bin/env nu
-# Build one lane and assemble an INDEXED local conda channel from its outputs.
+# Build the toolchain and assemble an INDEXED local conda channel from it.
 #
-# Why not `pixi publish --to ./local-channel`? The pixi-build-rattler-build
-# backend does not forward the workspace channels into the build environment
-# that rattler-build resolves — the resolve sees only rattler-build's own
-# output directory, so `gcc_linux-64 14.*` (and everything else) is unsolvable.
-# Driving rattler-build directly lets us pass `-c` explicitly, which is also
-# what makes dogfooding the naga-labs channel possible.
+# Why not `pixi publish`? pixi-build-rattler-build resolves a staging output's
+# build environment with NO channels (reproduced 2026-09-27 on pixi 0.81.0 /
+# backend 0.4.6: "No candidates were found for gcc_linux-64"). Driving
+# rattler-build directly lets us pass `-c` explicitly.
 #
-#   nu shared/build-lane.nu release
-#   nu shared/build-lane.nu nightly
+#   nu shared/build-lane.nu
 
-const CHANNEL = "https://prefix.dev/jackm97/naga-labs"
+# Overlay channel: layers conda-forge server-side, and is where we publish.
+const CHANNEL = "https://prefix.dev/jackm97/naga-labs-staging"
 # Package subdirs to lift into the channel — deliberately NOT bld/ or
 # src_cache/, which rattler-build also writes under --output-dir.
 const SUBDIRS = [linux-64 noarch win-64 linux-aarch64 osx-arm64 win-arm64]
@@ -24,14 +22,13 @@ def file-url [p: path] {
   $"file:///($abs | str trim --left --char '/')"
 }
 
-def main [lane: string] {
-  let recipe = ($lane | path join "recipe.yaml")
+def main [] {
+  let recipe = "recipe.yaml"
   if not ($recipe | path exists) { error make {msg: $"no recipe at ($recipe)"} }
 
-  # Variant config is per-platform (linux uses gcc + sysroot; windows uses
-  # clang-cl + vs). Passed explicitly rather than auto-discovered so the wrong
-  # platform's file can never be picked up. Arch-aware: the arm runners build
-  # natively, so the host arch names the platform.
+  # Variant config is per-platform, passed explicitly so the wrong platform's
+  # file can never be picked up. Runners build natively, so the host names
+  # the platform.
   let arm = ($nu.os-info.arch == "aarch64")
   let plat = (if $nu.os-info.name == "windows" {
     (if $arm { "win-arm64" } else { "win-64" })
@@ -42,21 +39,14 @@ def main [lane: string] {
   })
   let variants = ([shared variants $"($plat).yaml"] | path join)
 
-  # CI points this at fast storage (the win runner's D: temp drive is ~6x
-  # faster than C: for the small-file I/O that dominates work-dir/prefix
-  # copies). Local builds default to ./output as before.
+  # CI points this at fast storage; local builds default to ./output.
   let outdir = ($env.ACPP_OUTPUT_DIR? | default "output")
 
   # ── 1. The mutex, FIRST ───────────────────────────────────────────────────
-  # The lane outputs take `acpp-llvm ==<major>` as a host dependency, so the
-  # mutex has to be resolvable before the lane can be built. Building it here
-  # rather than requiring it to be published first means the whole thing
-  # bootstraps from a clean clone on a clean runner, and a brand-new major
-  # never needs a manual "publish the mutex, then build" round trip.
-  #
-  # It goes to its own indexed directory, NOT the lane output dir: the lane dir
-  # accumulates previous artifacts, and pointing a build's channel list at its
-  # own past outputs is how a stale package silently satisfies a fresh solve.
+  # The staging host takes `naga-acpp-llvm ==<major>`, so the mutex must be
+  # resolvable before the toolchain builds. Built here so everything
+  # bootstraps from a clean clone. It goes to its own indexed directory, NOT
+  # the output dir, so a stale past artifact can never satisfy a fresh solve.
   let mutexdir = ($outdir | path join "mutex-channel")
   if ($mutexdir | path exists) { rm -rf $mutexdir }
   (^rattler-build build
@@ -66,9 +56,7 @@ def main [lane: string] {
     --output-dir $mutexdir)
   ^rattler-index fs $mutexdir
 
-  # ── 2. The lane, resolving the mutex it just built ────────────────────────
-  # Mutex channel first: it holds exactly one package name, so under strict
-  # channel priority everything else still falls through to naga-labs.
+  # ── 2. The toolchain, resolving the mutex it just built ───────────────────
   (^rattler-build build
     --recipe $recipe
     --experimental          # staging outputs
@@ -84,25 +72,16 @@ def main [lane: string] {
     let src = ($outdir | path join $sub)
     if ($src | path exists) { cp -r $src ("local-channel" | path join $sub) }
   }
-  # An empty channel here means the platform subdir list above fell behind
-  # the platform set — fail HERE, not at the publish gate three jobs later
-  # (an empty staged set passes every per-artifact gate vacuously; that is
-  # exactly how run 33955587720 reached the uploader with nothing).
   if ((glob "local-channel/**/*.conda" | length) == 0) {
     error make {msg: $"local-channel is EMPTY after the copy — nothing under ($outdir) matched ($SUBDIRS | str join ', ')"}
   }
 
-  # The mutex ships WITH the lane: a consumer resolving acpp-runtime needs
-  # acpp-llvm to exist in the same channel or the solve is unsatisfiable.
-  # Uploads use --skip-existing for this name, so republishing an unchanged
-  # mutex from every lane run is a no-op rather than a 409.
+  # The mutex ships WITH the toolchain: consumers need it in the same channel.
   let mutex_noarch = ($mutexdir | path join "noarch")
   if ($mutex_noarch | path exists) {
     mkdir ("local-channel" | path join "noarch")
-    # `glob`, not `ls`: nushell expands glob patterns only for bare words, so
-    # `ls $pattern` would look for a file literally named "*.conda".
-    # Backslashes are glob ESCAPES in nushell — normalize win paths before
-    # globbing or the parse fails (this killed run 31352823522 at packaging).
+    # `glob`, not `ls`; and backslashes are glob ESCAPES in nushell, so
+    # normalize win paths first.
     for f in (glob ($mutex_noarch | path join "*.conda" | str replace --all '\' '/')) {
       cp $f ("local-channel" | path join "noarch")
     }

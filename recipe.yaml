@@ -1,14 +1,13 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
 #
-# naga lane — builds the NAGA fork of AdaptiveCpp for internal development.
-# GENERATED from nightly/recipe.yaml by shared/gen-naga.nu — DO NOT EDIT BY
-# HAND; edit the release recipe, run `pixi run gen-nightly`, then
-# `pixi run gen-naga`.
+# naga-acpp — the NAGA fork of AdaptiveCpp (NAGAGroup/AdaptiveCpp, naga/develop),
+# built as a complete LLVM toolchain: AdaptiveCpp linked into our own LLVM
+# build (toolchain mode), managed deployment strategy. THE recipe for this
+# repo, edited by hand; there are no other lanes.
 # Version is date-injected (ACPP_NAGA_DATE) and the source is pinned to an
-# explicit fork SHA (ACPP_NAGA_SHA) — the fork is not a moving branch the way
-# develop is, so a publish names the commit it shipped.
-# These packages are DEV builds and are not peers of the release and nightly
-# families; they carry exclusions against both.
+# explicit fork SHA (ACPP_NAGA_SHA), so a publish names the commit it shipped.
+# The exclusions against the old acpp-* and acpp-*-nightly families stay: those
+# packages share our file paths and still exist on the public channel.
 
 context:
   llvm_version: "21.1.8"
@@ -31,7 +30,7 @@ recipe:
   version: ${{ version }}
 
 # NB: no top-level source. The big source trees belong to the STAGING output
-# only; package outputs get just ../shared (50 files). rattler-build copies
+# only; package outputs get just shared (50 files). rattler-build copies
 # every output's sources into a fresh work dir per output — handing all nine
 # outputs the ~150k-file LLVM tree cost ~21 minutes per Windows run.
 # License texts ship from shared/licenses/ (vendored, drift-checked against
@@ -44,7 +43,7 @@ outputs:
     build:
       script:
         interpreter: nu
-        file: ../shared/build-stage.nu
+        file: shared/build-stage.nu
         env:
           # rattler-build builds with a sanitized env, so anything ccache needs
           # must be forwarded explicitly. Empty => ccache defaults.
@@ -61,7 +60,7 @@ outputs:
           # Xcode 26 toolchain: <sys/resource.h> is no longer a transitive
           # include, so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1;
           # applies to 20.1.8 and 21.1.8 alike)
-          - ../shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
+          - shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
@@ -89,7 +88,7 @@ outputs:
           - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
             sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
             target_directory: rocm-dist
-      - path: ../shared
+      - path: shared
         target_directory: shared
     requirements:
       build:
@@ -149,14 +148,14 @@ outputs:
         #
         # THE LANE MUTEX LIVES HERE, on the staging output, not on the package
         # outputs (run 31346371052: "Could not apply pin_compatible. The
-        # following package is not part of the solution: acpp-llvm").
+        # following package is not part of the solution: naga-acpp-llvm").
         #
         # Outputs that `inherit:` this staging build do not get their own host
         # environment solved — the staging one is what exists — so a host dep
         # declared on an inheriting output never enters any solution. Declared
         # here it does, and the mutex's own weak run_export then reaches every
         # inheriting output automatically as
-        #   acpp-llvm >=20,<21.0a0   (RE of [host: acpp-llvm])
+        #   naga-acpp-llvm >=20,<21.0a0   (RE of [host: naga-acpp-llvm])
         # which is the python_abi idiom working exactly as designed, and why
         # none of those outputs names the mutex itself.
         #
@@ -166,10 +165,10 @@ outputs:
         # ejected clang.exe and friends from every win package, run
         # 31241929077.)
         #
-        # Names this lane's own major deliberately: a bare `acpp-llvm` resolves
+        # Names this lane's own major deliberately: a bare `naga-acpp-llvm` resolves
         # to the HIGHEST published major, which would pin the release lane to
         # the nightly lane's range.
-        - acpp-llvm ==${{ llvm_major }}
+        - naga-acpp-llvm ==${{ llvm_major }}
         - zlib
         - zstd
         # GPU backend build deps are X86-PLATFORM inputs: the aarch64 lane is
@@ -233,7 +232,7 @@ outputs:
       name: naga-acpp-runtime
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -356,7 +355,7 @@ outputs:
         # come from the context vars, so a lane bump moves them together. Same
         # carve-out the ratified doctrine already makes for exclusion windows
         # on packages absent from the build env.
-        - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+        - naga-acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
       run_constraints:
         # These two are already major-scoped BY NAME (libllvm20, not libllvm),
         # so a blanket "must not exist" is the same-major window: it forbids
@@ -504,7 +503,7 @@ outputs:
       name: naga-acpp
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -654,7 +653,7 @@ outputs:
         # THE headline export (phase-3 ruling [A]). Anything compiled with this
         # toolchain gets, with zero manifest text on the consumer's side:
         #   naga-acpp-runtime >=25.10.0,<25.11.0a0   (the runtime it links against)
-        #   acpp-llvm    >=20,<21.0a0           (the lane it was built for)
+        #   naga-acpp-llvm    >=20,<21.0a0           (the lane it was built for)
         # The second line is what stops a consumer binary built against the
         # llvm20 toolchain from being installed next to the llvm21 runtime.
         strong:
@@ -662,7 +661,7 @@ outputs:
           # Spelled out, not pin_compatible(): the mutex exists only in the
           # staging solution and pin_compatible cannot resolve it from an
           # inheriting output. Both bounds still come from context vars.
-          - acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+          - naga-acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
       run_constraints:
         # SAME-MAJOR WINDOWS, not blanket exclusions (phase-3 ruling [B]).
         # These names are unversioned on conda-forge, so a bare "<0.0a0" said
@@ -781,7 +780,7 @@ outputs:
       name: naga-acpp-compiler-rt
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -876,7 +875,7 @@ outputs:
       name: naga-acpp-llvm-dev
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -1167,7 +1166,7 @@ outputs:
       name: naga-acpp-tools
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -1341,7 +1340,7 @@ outputs:
       name: naga-acpp-lldb
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:
@@ -1407,7 +1406,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1481,7 +1480,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1538,7 +1537,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1577,7 +1576,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1622,7 +1621,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1668,7 +1667,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1687,7 +1686,7 @@ outputs:
       # binary prefix replacement does not rewrite the baked path there.
       script:
         interpreter: nu
-        file: ../shared/install-runtime-activation.nu
+        file: shared/install-runtime-activation.nu
     requirements:
       build:
         - nushell
@@ -1737,7 +1736,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1772,7 +1771,7 @@ outputs:
     source:
       # Thin source: license texts + activation/render scripts only. The big
       # trees live on the staging output (see note above outputs:).
-      - path: ../shared
+      - path: shared
         target_directory: shared
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -1822,7 +1821,7 @@ outputs:
       name: naga-acpp-runtime-rocm
       version: ${{ version }}
     # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching ../shared
+    # dir restored (shared/ and its licenses included); fetching shared
     # ourselves collides with that restore ("File already exists").
     inherit: llvm-acpp-stage
     build:

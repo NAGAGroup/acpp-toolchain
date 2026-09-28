@@ -2,7 +2,7 @@
 # Upload the built local channel to prefix.dev, with the publish-time gates
 # that cannot be expressed in a recipe.
 #
-#   nu shared/publish-channel.nu [--channel jackm97/naga-labs] [--dry-run]
+#   nu shared/publish-channel.nu [--channel jackm97/naga-labs-staging] [--dry-run]
 #
 # In CI this runs under OIDC trusted publishing, so there is no API key. It is
 # wired behind check-no-collision (the C-11 gate) as a `depends-on`, which makes
@@ -17,8 +17,8 @@
 #     on the channel is not the one this run built — and it must fail loudly
 #     instead of being silently skipped.
 
-const CHANNEL = "jackm97/naga-labs"
-const MUTEX_NAME = "acpp-llvm"
+const CHANNEL = "jackm97/naga-labs-staging"
+const MUTEX_NAME = "naga-acpp-llvm"
 
 def conda-index [pkg: path] {
   let info_glob = "info-*.tar.zst"
@@ -32,13 +32,13 @@ def main [--channel: string = $CHANNEL, --dry-run] {
   }
 
   # Partition by the package NAME recorded in the artifact, never by filename
-  # pattern: "acpp-llvm-dev-25.10.0-...conda" also starts with "acpp-llvm-".
+  # pattern: "acpp-llvm-dev-25.10.0-...conda" also starts with "naga-acpp-llvm-".
   let tagged = ($pkgs | each {|p| {path: $p, idx: (conda-index $p)} })
   let mutex = ($tagged | where {|t| $t.idx.name == $MUTEX_NAME })
   let rest = ($tagged | where {|t| $t.idx.name != $MUTEX_NAME })
 
   # ── GATE: the mutex version must be a BARE MAJOR ─────────────────────────
-  # `acpp-llvm ==20` is the pin we teach consumers to write. The day this
+  # `naga-acpp-llvm ==20` is the pin we teach consumers to write. The day this
   # package ships "20.1.8", that pin matches nothing and every downstream
   # environment that used it breaks — silently, at solve time, in someone
   # else's repo. No solve in our own CI would catch it, so it is asserted here

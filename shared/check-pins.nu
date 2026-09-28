@@ -23,7 +23,7 @@
 # Non-inheriting outputs (the backend metapackages) may use pin_compatible
 # freely, and do — that is where derived floors belong.
 
-const RECIPES = ["release/recipe.yaml" "nightly/recipe.yaml" "naga/recipe.yaml"]
+const RECIPES = ["recipe.yaml"]
 
 def check-recipe [path: string] {
   let lines = (open --raw $path | lines)
@@ -58,7 +58,7 @@ def check-recipe [path: string] {
 
 # The mutex host spec must name THIS lane's own major.
 #
-# A bare `acpp-llvm` resolves to the HIGHEST published major, which would pin
+# A bare `naga-acpp-llvm` resolves to the HIGHEST published major, which would pin
 # the release lane to the nightly lane's range — it builds green, publishes
 # green, and produces a channel where the release toolchain demands the wrong
 # lane. Checked on the RENDERED recipe rather than the source text, because the
@@ -84,18 +84,18 @@ def check-mutex-spec [recipe: string, platform: string] {
     | each {|c| $c.requirements?.host? | default [] }
     | flatten
     | each {|s| if ($s | describe) == "string" { $s } else { "" } }
-    | where {|s| $s | str starts-with "acpp-llvm" }
+    | where {|s| $s | str starts-with "naga-acpp-llvm" }
     | uniq)
 
   if ($specs | is-empty) {
-    return [$"($recipe) [($platform)]: NO acpp-llvm host spec in the rendered recipe — the lane mutex would not be applied at all"]
+    return [$"($recipe) [($platform)]: NO naga-acpp-llvm host spec in the rendered recipe — the lane mutex would not be applied at all"]
   }
-  let bare = ($specs | where {|s| ($s | str trim) == "acpp-llvm" })
+  let bare = ($specs | where {|s| ($s | str trim) == "naga-acpp-llvm" })
   if ($bare | is-not-empty) {
-    return [$"($recipe) [($platform)]: BARE acpp-llvm host spec — resolves to the highest published major, not this lane's"]
+    return [$"($recipe) [($platform)]: BARE naga-acpp-llvm host spec — resolves to the highest published major, not this lane's"]
   }
-  # Must be pinned to an exact bare major, e.g. "acpp-llvm ==21".
-  let ok = ($specs | all {|s| $s =~ '^acpp-llvm ==[0-9]+$' })
+  # Must be pinned to an exact bare major, e.g. "naga-acpp-llvm ==21".
+  let ok = ($specs | all {|s| $s =~ '^naga-acpp-llvm ==[0-9]+$' })
   if not $ok {
     return [$"($recipe) [($platform)]: mutex host spec is not an exact major pin — got ($specs | str join ', ')"]
   }
@@ -110,7 +110,7 @@ def main [] {
   }
   for r in $RECIPES {
     if not ($r | path exists) { continue }
-    for p in ["linux-64" "win-64"] {
+    for p in ["linux-64" "linux-aarch64" "win-64" "osx-arm64"] {
       $bad = ($bad | append (check-mutex-spec $r $p))
     }
   }

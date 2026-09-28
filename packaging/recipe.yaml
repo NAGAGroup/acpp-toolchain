@@ -12,7 +12,6 @@
 # unbearable maintenance burden for a one-person team. The point here is
 # splitting, not trimming - a large HPC toolchain is normal, and installing
 # more beats missing a shared library and failing at run time.
-
 context:
   version: ${{ acpp_version }}
   # The lane, in its two spellings: a build string, and a package name.
@@ -23,20 +22,18 @@ context:
   # version whenever both lanes are dated, and only the build string separates
   # them.
   exact: ${{ acpp_version }} ${{ acpp_lane }}_*
-# NB: the build string is NOT defined here. It needs `hash` and `build_number`,
-# which are per-output build-time values; context is evaluated once, globally,
-# before any of them exist.
+  # NB: the build string is NOT defined here. It needs `hash` and `build_number`,
+  # which are per-output build-time values; context is evaluated once, globally,
+  # before any of them exist.
   stage_url: https://github.com/NAGAGroup/acpp-toolchain/releases/download/${{ stage_tag }}/${{ stage_file }}
   stage_hash: ${{ stage_sha256 }}
   acpp_lane_version: ${{ acpp_lane_version }}
   # Anything that sets a VERSION or a build string is read through context;
   # package specs and exports can reference variants directly.
   llvm_major: ${{ llvm_major }}
-
 recipe:
   name: acpp-packaging
   version: ${{ version }}
-
 build:
   variant:
     use_keys:
@@ -45,13 +42,6 @@ build:
       - c_stdlib
       - c_compiler
       - cxx_compiler
-
-
-
-
-
-
-
 outputs:
   - staging:
       name: acpp-stage-unpacked
@@ -87,7 +77,6 @@ outputs:
         - swig
         # acpp's cmake clones the SPIR-V translator and the Khronos headers
         - git
-
       host:
         - python
         - zlib
@@ -96,7 +85,6 @@ outputs:
         - ncurses
         - libedit
         - numactl
-
     build:
       script:
         interpreter: nu
@@ -190,7 +178,6 @@ outputs:
 
           print "-- what the outputs will carve from --"
           ls $env.PREFIX | each {|e| print $"  ($e.name | path basename)" }
-
   # An EMPTY staging output for the noarch packages. They cannot inherit the
   # real one - it carries ${{ compiler('c') }}, which resolves to a nonexistent
   # gcc_noarch on a noarch target - but they still need to inherit something.
@@ -203,7 +190,6 @@ outputs:
       script:
         content: |
           echo "noarch base: nothing to unpack"
-
   # ── the mutexes ───────────────────────────────────────────────────────────
   #
   # Two axes need expressing that no version pin can carry.
@@ -218,7 +204,6 @@ outputs:
   # other two so no environment can hold more than one lane. They ship no files
   # - they exist to turn a build-string match into a name a user can type, which
   # is exactly what conda-forge's clang-no-conda-cfg does for its cfg variant.
-
   - package:
       name: acpp-llvm-version
       version: ${{ llvm_major }}
@@ -248,7 +233,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: BSD-2-Clause
       summary: Selects the LLVM major the AdaptiveCpp toolchain was built against
-
   - package:
       name: acpp-release-lane
       version: ${{ acpp_lane_version }}
@@ -271,7 +255,6 @@ outputs:
           files: []
     about:
       summary: Selects the release lane - AdaptiveCpp at a published release tag
-
   - package:
       name: acpp-nightly-lane
       version: ${{ acpp_lane_version }}
@@ -294,7 +277,6 @@ outputs:
           files: []
     about:
       summary: Selects the nightly lane - AdaptiveCpp develop, built at most daily
-
   - package:
       name: acpp-naga-fork-lane
       version: ${{ acpp_lane_version }}
@@ -317,7 +299,6 @@ outputs:
           files: []
     about:
       summary: Selects the NAGA fork lane - NAGAGroup/AdaptiveCpp
-
   # ── the runtime ───────────────────────────────────────────────────────────
   #
   # THE package any environment carries. OpenMP is baked in unconditionally so
@@ -328,7 +309,6 @@ outputs:
   # It holds three EXECUTABLES - llc, opt, ld.lld - because acpp JITs at run
   # time and shells out to them. "acpp holds the executables" describes what
   # that package contains, not a prohibition elsewhere.
-
   - package:
       name: acpp-compiler-rt
       version: ${{ version }}
@@ -396,12 +376,10 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp runtime - everything a binary built with this toolchain needs
-
   # ── development files ─────────────────────────────────────────────────────
   #
   # Static archives, every header, every cmake config. ~900 MiB, and that is
   # intended: this is the package that makes the toolchain complete.
-
   - package:
       name: acpp-dev
       version: ${{ version }}
@@ -447,7 +425,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp development files - headers, static libraries, cmake configuration
-
   # ── the compiler ──────────────────────────────────────────────────────────
   #
   # Executables and acpp's own configuration, and NO cfg files. This is the
@@ -455,7 +432,6 @@ outputs:
   # gives a working SYCL compiler that builds against whatever system it is on,
   # with prefix libraries taking priority and the system a real fallback. The
   # sysroot-isolating case is the activation package, which ships the cfg files.
-
   - package:
       name: acpp
       version: ${{ version }}
@@ -513,9 +489,7 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp SYCL compiler
-
   # ── tools ─────────────────────────────────────────────────────────────────
-
   - package:
       name: acpp-clang-tools
       version: ${{ version }}
@@ -586,7 +560,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: clang tooling built alongside the AdaptiveCpp toolchain
-
   - package:
       name: acpp-llvm-tools
       version: ${{ version }}
@@ -645,13 +618,11 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: LLVM tools and lldb built alongside the AdaptiveCpp toolchain
-
   # ── backends ──────────────────────────────────────────────────────────────
   #
   # Each carries its own backend library, its JIT target and that target's
   # bitcode - the same carve acpp's own deployment manifests use. ROCm is the
   # only one that repackages files; the rest are metapackages over conda-forge.
-
   - package:
       name: acpp-runtime-rocm
       version: ${{ version }}
@@ -677,7 +648,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp ROCm backend and the ROCm runtime it needs
-
   - package:
       name: acpp-runtime-cuda
       version: ${{ version }}
@@ -719,7 +689,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp CUDA backend
-
   - package:
       name: acpp-runtime-level-zero
       version: ${{ version }}
@@ -740,7 +709,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp Level Zero backend
-
   - package:
       name: acpp-runtime-ocl
       version: ${{ version }}
@@ -765,7 +733,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp OpenCL backend
-
   - package:
       name: acpp-runtime-ocl-system
       version: ${{ version }}
@@ -789,9 +756,7 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp OpenCL backend using the system ICD loader
-
   # ── the meta package ──────────────────────────────────────────────────────
-
   - package:
       name: acpp-toolkit
       version: ${{ version }}
@@ -815,7 +780,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: The complete AdaptiveCpp toolchain, without the optional backends
-
   # ── the compiler activation package ───────────────────────────────────────
   #
   # This IS a conda-forge compiler activation package, consumed as
@@ -865,7 +829,6 @@ outputs:
       homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
       license: Apache-2.0 WITH LLVM-exception
       summary: AdaptiveCpp as a conda compiler, for [cxx_compiler] - "acpp"
-
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp
   license: Apache-2.0 WITH LLVM-exception

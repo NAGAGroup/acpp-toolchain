@@ -5,8 +5,8 @@
 # something, and the published set names the commit it shipped. Each platform
 # is its own build -> gate -> publish chain, so one platform failing never
 # blocks another; `platforms` selects which chains run (a green platform is
-# not rebuilt). linux-64 is the first chain; the others join as they are
-# brought up.
+# not rebuilt). All five chains run: linux-64, linux-aarch64, osx-arm64,
+# win-64, win-arm64.
 name: build
 
 on:
@@ -137,15 +137,24 @@ jobs:
           path: local-channel/
           retention-days: 14
 
-  # The gate BLOCKS publishing: it is the only check that the toolchain can
-  # compile and run a SYCL program at all. Installs through a real solve
-  # against the built channel.
+  # The gate BLOCKS publishing: it builds and runs AdaptiveCpp's OWN test
+  # suite (shared/tests/suite) against the INSTALLED channel through the
+  # naga-acpp-clangxx_linux-64 activation package — a real solve exercising
+  # run_exports/run_constraints, not just a smoke binary.
   gate-linux-64:
     needs: [prepare, build-linux-64]
     runs-on: Linux-x64-GPU
-    timeout-minutes: 60
+    timeout-minutes: 300
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-linux-64
@@ -156,36 +165,97 @@ jobs:
       - run: nvidia-smi
       # pixi solves every platform in the manifest; this artifact channel only
       # carries linux-64.
-      - name: Pin the smoke manifest to linux-64
-        working-directory: shared/tests/gpu-smoke
+      - name: Pin the suite manifest to linux-64
+        working-directory: shared/tests/suite
         run: sed -i 's/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
-      # Install separately from running, with a generous bound: a hung binary
-      # and a slow cold download are otherwise indistinguishable.
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
+      # Install separately from building/running, with a generous bound: a
+      # hung step and a slow cold download are otherwise indistinguishable.
+      - name: Install suite environment
+        working-directory: shared/tests/suite
         timeout-minutes: 30
         run: pixi install
       - name: Visible backends
-        working-directory: shared/tests/gpu-smoke
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
         run: pixi run acpp-info
-      - name: SYCL smoke on the CPU (OpenMP) backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
-      - name: SYCL smoke on the CUDA backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cuda
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build omp "omp"
+      - name: "sycl_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp sycl_tests
+      - name: "rt_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp rt_tests
+      - name: "build: generic (+PSTL/PCUDA)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda
+      - name: "sycl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp sycl_tests
+      - name: "sycl_tests: generic on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic "omp;cuda" sycl_tests
+      - name: "pstl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pstl_tests
+      - name: "pcuda_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pcuda_tests
       # PoCL is a CPU OpenCL driver; if it cannot take our SPIR-V the runtime
-      # skips it with a warning. Informational until it has proven itself.
-      - name: SYCL smoke on OpenCL (PoCL)
+      # skips it with a warning. Informational until PoCL ingests our SPIR-V.
+      - name: "sycl_tests: generic on OpenCL (PoCL)"
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-ocl
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic ocl sycl_tests
+      - name: "build: cuda"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build cuda "cuda:sm_75"
+      - name: "sycl_tests: cuda on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run cuda "omp;cuda" sycl_tests
+      # No AMD GPU on this runner: compile only.
+      - name: "build: hip (compile only, no AMD GPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build hip "hip:gfx906"
+      - name: "build: multipass"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75;hip:gfx906"
+      - name: "sycl_tests: multipass on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run multipass "omp;cuda" sycl_tests
       - name: Sanitizer smoke (naga-acpp-compiler-rt)
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        working-directory: shared/tests/suite
         run: pixi run sanitizer-smoke
 
   publish-linux-64:
@@ -289,9 +359,17 @@ jobs:
   gate-linux-aarch64:
     needs: [prepare, build-linux-aarch64]
     runs-on: linux-arm64-v32
-    timeout-minutes: 60
+    timeout-minutes: 300
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-linux-aarch64
@@ -299,27 +377,73 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
-      # This platform has no CUDA/OpenCL outputs yet: drop them from the
-      # manifest and pin it to this platform before the first solve.
-      - name: Fit the smoke manifest to linux-aarch64
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          sed -i '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; s/^platforms = .*/platforms = ["linux-aarch64"]/' pixi.toml
-          cat pixi.toml
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
+      - name: Pin the suite manifest to linux-aarch64
+        working-directory: shared/tests/suite
+        run: sed -i 's/^platforms = .*/platforms = ["linux-aarch64"]/' pixi.toml
+      - name: Install suite environment
+        working-directory: shared/tests/suite
         timeout-minutes: 30
         run: pixi install
       - name: Visible backends
-        working-directory: shared/tests/gpu-smoke
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
         run: pixi run acpp-info
-      - name: SYCL smoke on the CPU (OpenMP) backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build omp "omp"
+      - name: "sycl_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp sycl_tests
+      - name: "rt_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp rt_tests
+      - name: "build: generic (+PSTL/PCUDA)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda
+      - name: "sycl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp sycl_tests
+      - name: "pstl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pstl_tests
+      - name: "pcuda_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pcuda_tests
+      - name: "sycl_tests: generic on OpenCL (PoCL)"
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic ocl sycl_tests
+      # No GPU on this runner: compile only.
+      - name: "build: cuda (compile only, no GPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build cuda "cuda:sm_75"
+      - name: "build: multipass (compile only, no GPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75"
       - name: Sanitizer smoke (naga-acpp-compiler-rt)
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        working-directory: shared/tests/suite
         run: pixi run sanitizer-smoke
 
   publish-linux-aarch64:
@@ -447,9 +571,17 @@ jobs:
   gate-osx-arm64:
     needs: [prepare, build-osx-arm64]
     runs-on: macOS-26-xlarge
-    timeout-minutes: 60
+    timeout-minutes: 300
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-osx-arm64
@@ -457,49 +589,68 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
-      # No CUDA/OpenCL/compiler-rt outputs on osx yet.
-      - name: Fit the smoke manifest to osx-arm64
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          sed -i '' '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; /^naga-acpp-compiler-rt = /d; s/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
-          cat pixi.toml
-      - name: Point clang at the macOS SDK
-        run: echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
+      # No CUDA/OpenCL/ROCm outputs on osx yet; the activation package
+      # (naga-acpp-clangxx_osx-arm64) points clang at the macOS SDK itself
+      # via sdkroot_env, so the old "Point clang at the macOS SDK" step is
+      # gone.
+      - name: Pin the suite manifest to osx-arm64
+        working-directory: shared/tests/suite
+        run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
+      - name: Install suite environment
+        working-directory: shared/tests/suite
         timeout-minutes: 30
         run: pixi install
       - name: Visible backends
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run acpp-info
-      - name: SYCL smoke on the CPU (OpenMP) backend
         if: ${{ !cancelled() }}
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
-      - name: Diagnose a crash (backtrace, linkage, crash report)
-        if: failure()
-        working-directory: shared/tests/gpu-smoke
-        run: |
-          P="$PWD/.pixi/envs/default"
-          echo "--- libomp copies in the env ---"
-          find "$P" -name 'libomp*' -o -name 'libiomp*' -o -name 'libgomp*' | sort
-          for f in "$P/bin/acpp-info" "$P/lib/libacpp-rt.dylib" "$P/lib/libacpp-common.dylib" "$P"/lib/hipSYCL/librt-backend-omp*; do
-            echo "--- otool -L $f ---"; otool -L "$f" || true
-            echo "--- LC_RPATH $f ---"; otool -l "$f" | grep -A2 LC_RPATH || true
-          done
-          echo "--- acpp-info with loader tracing of libomp ---"
-          DYLD_PRINT_LIBRARIES=1 pixi run acpp-info 2>&1 | grep -Ei 'omp|abort|error' || true
-          echo "--- lldb backtrace ---"
-          pixi run -- lldb --batch -o run -k "bt all" -k quit -- "$P/bin/acpp-info" -l 2>&1 | tail -150 || true
-          echo "--- smoke with debug output ---"
-          ACPP_VISIBILITY_MASK=omp ACPP_DEBUG_LEVEL=3 pixi run -- ./smoke 2>&1 | tail -120 || true
-          echo "--- lldb backtrace of the smoke ---"
-          ACPP_VISIBILITY_MASK=omp pixi run -- lldb --batch -o run -k "bt all" -k quit -- ./smoke 2>&1 | tail -200 || true
-          echo "--- crash reports ---"
-          ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -5 || true
-          f=$(ls -t ~/Library/Logs/DiagnosticReports/{acpp-info,smoke}* 2>/dev/null | head -1)
-          [ -n "$f" ] && head -c 20000 "$f" || true
+        working-directory: shared/tests/suite
+        run: pixi run acpp-info
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build omp "omp"
+      - name: "sycl_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp sycl_tests
+      - name: "rt_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp rt_tests
+      - name: "build: generic (+PSTL/PCUDA)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda
+      - name: "sycl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp sycl_tests
+      # BLOCKING: this is the Metal gate.
+      - name: "sycl_tests: generic on Metal (M2)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic metal sycl_tests
+      - name: "pstl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pstl_tests
+      - name: "pcuda_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pcuda_tests
+      - name: "sycl_tests: generic on OpenCL (PoCL)"
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic ocl sycl_tests
 
   publish-osx-arm64:
     needs: [prepare, build-osx-arm64, gate-osx-arm64]
@@ -532,15 +683,22 @@ jobs:
     needs: prepare
     if: contains(format(' {0} ', inputs.platforms), ' win-64 ')
     runs-on: Win-x64-64
-    timeout-minutes: 300
+    timeout-minutes: 480
     env:
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
       ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
       CCACHE_MAXSIZE: 20G
       CCACHE_NOHASHDIR: "1"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - name: Select build storage
         shell: pwsh
         run: |
@@ -607,22 +765,95 @@ jobs:
           ) -join ";"
           Write-Host "PATH length: $($env:PATH.Length)"
           pixi run -e dev build
-      # Build-once/run-on-GPU: compile the smoke here (this box has VS2026);
-      # the GPU box has no VS and only runs the device-agnostic SSCP binary.
-      - name: Pin smoke manifest to win-64
+      # Build-once/run-on-GPU: compile AdaptiveCpp's own test suite here
+      # (this box's vs2026 activation finds VS2026 via vswhere); the GPU box
+      # has no VS at all and only RUNS the binaries this job produces.
+      - name: Pin the suite manifest to win-64
         shell: pwsh
-        working-directory: shared/tests/gpu-smoke
+        working-directory: shared/tests/suite
         run: |
           (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
-      - name: Compile smoke binary
+      - name: Install suite environment
         shell: pwsh
-        working-directory: shared/tests/gpu-smoke
+        working-directory: shared/tests/suite
         timeout-minutes: 30
-        env:
-          ACPP_SMOKE_VCVARS: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+        run: pixi install
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
         run: |
-          pixi run build-smoke
-          Copy-Item smoke.exe ..\..\..\local-channel\smoke.exe
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build omp "omp"
+      - name: "build: generic (+PCUDA)"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build generic "generic" --pcuda
+      - name: "build: cuda"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build cuda "cuda:sm_75"
+      # No AMD GPU on this box either: compile only.
+      - name: "build: hip (compile only, no AMD GPU)"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build hip "hip:gfx906"
+      - name: "build: multipass"
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75;hip:gfx906"
       - name: Prune stale staging caches
         if: always()
         shell: pwsh
@@ -654,16 +885,32 @@ jobs:
           name: local-channel-win-64
           path: local-channel/
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suite-win-64
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            shared/tests/suite/build/**/*.exe
+            shared/tests/suite/build/**/*.dll
 
   gate-win-64:
     needs: [prepare, build-win-64]
     runs-on: Win-x64-GPU
-    timeout-minutes: 60
+    timeout-minutes: 300
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
     defaults:
       run:
         shell: powershell # Windows PowerShell: this image has no pwsh, and bash is the WSL stub
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-win-64
@@ -680,28 +927,67 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
-      - name: Stage prebuilt smoke binary
-        run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
-      - name: Pin smoke manifest to win-64
-        working-directory: shared/tests/gpu-smoke
+      # Build-once/run-on-GPU: this box has no VS at all, so the binaries
+      # come from build-win-64's VS2026 builder as an artifact.
+      - uses: actions/download-artifact@v4
+        with:
+          name: suite-win-64
+          path: shared/tests/suite/build
+      - name: Pin the suite manifest to win-64
+        working-directory: shared/tests/suite
         run: |
           (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
+      - name: Install suite environment
+        working-directory: shared/tests/suite
         timeout-minutes: 30
-        run: pixi install
+        run: pixi install -e run
       - name: Visible backends
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run acpp-info
-      - name: SYCL smoke on the CPU (OpenMP) backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
-      - name: SYCL smoke on the CUDA backend
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cuda
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        run: pixi run -e run acpp-info
+      - name: "sycl_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run omp omp sycl_tests
+      - name: "rt_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run omp omp rt_tests
+      - name: "sycl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run generic omp sycl_tests
+      - name: "sycl_tests: generic on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run generic "omp;cuda" sycl_tests
+      - name: "pcuda_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run generic omp pcuda_tests
+      # PoCL is a CPU OpenCL driver; if it cannot take our SPIR-V the runtime
+      # skips it with a warning. Informational until PoCL ingests our SPIR-V.
+      - name: "sycl_tests: generic on OpenCL (PoCL)"
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run generic ocl sycl_tests
+      - name: "sycl_tests: cuda on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run cuda "omp;cuda" sycl_tests
+      - name: "sycl_tests: multipass on OMP+CUDA (T4)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run -e run nu suite.nu run multipass "omp;cuda" sycl_tests
 
   publish-win-64:
     needs: [prepare, build-win-64, gate-win-64]
@@ -715,8 +1001,6 @@ jobs:
         with:
           name: local-channel-win-64
           path: local-channel
-      - name: Drop the smoke binary from the channel
-        run: rm -f local-channel/smoke.exe
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
@@ -731,7 +1015,7 @@ jobs:
   # ── win-arm64 ─────────────────────────────────────────────────────────────
   # First cut: OMP-only compiler + runtime (see shared/variants/win-arm64.yaml).
   # conda-forge has no ccache here, so no ccache cache. No GPU: the gate runs on
-  # the build runner, which also has VS2026 for compiling the smoke.
+  # the build runner, which also has VS2026 for compiling and running the suite.
   build-win-arm64:
     needs: prepare
     if: contains(format(' {0} ', inputs.platforms), ' win-arm64 ')
@@ -828,12 +1112,21 @@ jobs:
   gate-win-arm64:
     needs: [prepare, build-win-arm64]
     runs-on: win-arm64-v32
-    timeout-minutes: 60
+    timeout-minutes: 300
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
+      SUITE_BOOST_PREFIX: ${{ github.workspace }}/shared/tests/suite/build/boost-prefix
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
       - uses: actions/download-artifact@v4
         with:
           name: local-channel-win-arm64
@@ -841,39 +1134,63 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
-      # Only naga-acpp exists here: drop the GPU/sanitizer packages, pin the
-      # platform, and point the win tasks (python acpp driver + vcvars) at it.
-      - name: Fit the smoke manifest to win-arm64
-        working-directory: shared/tests/gpu-smoke
+      # Only naga-acpp-runtime-ocl exists here besides naga-acpp itself; the
+      # per-platform [feature.run.target.win-arm64...] section in pixi.toml
+      # already scopes deps correctly, so only the platform line needs
+      # rewriting — no package deletions.
+      - name: Pin the suite manifest to win-arm64
+        working-directory: shared/tests/suite
         run: |
-          $t = Get-Content pixi.toml | Where-Object { $_ -notmatch '^naga-acpp-runtime-cuda = ' -and $_ -notmatch '^naga-acpp-runtime-ocl = ' -and $_ -notmatch '^naga-acpp-compiler-rt = ' }
-          $t = $t -replace '^platforms = .*', 'platforms = ["win-arm64"]' -replace '^\[target\.win-64\.', '[target.win-arm64.'
-          $t | Set-Content pixi.toml
-          Get-Content pixi.toml
-      - name: Locate the ARM64 MSVC environment
-        run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-          $bat = Join-Path $vs 'VC\Auxiliary\Build\vcvarsarm64.bat'
-          if (-not (Test-Path $bat)) { throw "no vcvarsarm64.bat under '$vs'" }
-          Write-Host "vcvars: $bat"
-          "ACPP_SMOKE_VCVARS=$bat" | Add-Content -Path $env:GITHUB_ENV
-      - name: Install smoke environment
-        working-directory: shared/tests/gpu-smoke
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-arm64"]' | Set-Content pixi.toml
+      # This box both compiles AND runs (no separate GPU box exists for
+      # win-arm64), so the default env (run+build, vs2026 activation) is used.
+      - name: Install suite environment
+        working-directory: shared/tests/suite
         timeout-minutes: 30
         run: pixi install
+      # No ICD exists on this runner; whether the OpenCL plugin loads at all
+      # is informational only, read from this listing.
       - name: Visible backends
-        timeout-minutes: 8
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run acpp-info
-      - name: Compile smoke binary
-        timeout-minutes: 30
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run build-smoke
-      - name: SYCL smoke on the CPU (OpenMP) backend
         if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/gpu-smoke
-        run: pixi run smoke-cpu
+        working-directory: shared/tests/suite
+        run: pixi run acpp-info
+      # conda-forge ships no Boost for win-arm64 at all: build Boost.Test
+      # from source once, into SUITE_BOOST_PREFIX.
+      - name: Build Boost.Test from source
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu boost
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build omp "omp"
+      - name: "sycl_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp sycl_tests
+      - name: "rt_tests: omp on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run omp omp rt_tests
+      - name: "build: generic (+PCUDA)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu build generic "generic" --pcuda
+      - name: "sycl_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp sycl_tests
+      - name: "pcuda_tests: generic on OMP (CPU)"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu run generic omp pcuda_tests
 
   publish-win-arm64:
     needs: [prepare, build-win-arm64, gate-win-arm64]
@@ -897,4 +1214,3 @@ jobs:
         run: pixi run -e dev check-closure
       - name: Upload to naga-labs-staging
         run: pixi run -e dev publish-channel
-

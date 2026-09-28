@@ -44,6 +44,16 @@ def common-args [src: string, prefix: string, build: string] {
     # conda is the package manager: vendor runtimes come from their own
     # packages, and the fork writes no deploy manifest.
     "-DACPP_DEPLOYMENT_STRATEGY=managed"
+    # Managed vendors resolve relative to the install prefix, so their
+    # app-config values become $ACPP_RT_LIB_DIR-relative (fork harness
+    # verify-managed-overrides). Without this they bake the BUILD prefix
+    # (published build 1: D:/rb-output/.../h_env on win-64).
+    # Discovery still finds each vendor where the host env put it.
+    "-DACPP_CUDA_ROOT=."
+    "-DACPP_OCL_ROOT=."
+    "-DACPP_ZE_ROOT=."
+    "-DACPP_HIP_ROOT=."
+    (if (is-windows) { "-DACPP_LIBOMP_ROOT=bin" } else { "-DACPP_LIBOMP_ROOT=lib" })
     "-DWITH_CUDA_BACKEND=ON"
     "-DWITH_CPU_BACKEND=ON"
     "-DWITH_ACCELERATED_CPU=ON"
@@ -89,7 +99,7 @@ def is-darwin [] { $nu.os-info.name == "macos" }
 
 def is-arm [] { $nu.os-info.arch == "aarch64" }
 
-# Windows on ARM64, FIRST CUT: OMP-only, compiler + runtime, no compiler-rt
+# Windows on ARM64: OMP and OpenCL (no CUDA, Level Zero or ROCm packages exist for win-arm64); no compiler-rt
 # (the recipe skips that output here) and no clang-tools-extra. Appended after
 # windows-args, so these -D values win.
 def windows-arm-args [] {
@@ -97,7 +107,6 @@ def windows-arm-args [] {
     "-DLLVM_ENABLE_PROJECTS=clang;lld;openmp"
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
-    "-DWITH_OPENCL_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
     "-DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc"
@@ -109,9 +118,9 @@ def windows-arm-args [] {
   ]
 }
 
-# macOS, FIRST CUT — OMP-only, no lldb/bolt (bolt has no darwin port), no
-# compiler-rt (the sanitizer story is its own pass), no GPU backends (Metal
-# comes later). Apple triples are inferred natively — no host/target triple
+# macOS: OMP and Metal; no lldb/bolt (bolt has no darwin port), no
+# compiler-rt (the sanitizer story is its own pass), no CUDA/ROCm/L0/OpenCL.
+# Apple triples are inferred natively — no host/target triple
 # overrides, no sysroot machinery: the activation's CMAKE_ARGS carries
 # CMAKE_OSX_SYSROOT and the deployment target.
 def darwin-args [src: string, prefix: string] {
@@ -123,6 +132,10 @@ def darwin-args [src: string, prefix: string] {
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_OPENCL_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
+    # Metal: metal-cpp is a header-only, build-only source (recipe), found
+    # through METAL_INCLUDE_DIR (fork cmake/discovery/metal.cmake).
+    "-DWITH_METAL_BACKEND=ON"
+    $"-DMETAL_INCLUDE_DIR=($src)/metal-cpp"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
     "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
     "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
@@ -292,7 +305,7 @@ def linux-args [src: string, prefix: string] {
     $"-DLLVM_DEFAULT_TARGET_TRIPLE=(linux-triple)"
     # -pthread now folded into outer-flag-args (explicit CMAKE_*_LINKER_FLAGS
     # override *_INIT, so the old _INIT lines would have been silently dropped)
-  ] ++ (if $nu.os-info.arch == "aarch64" { linux-arm-backend-args } else { linux-x86-backend-args $src $prefix })
+  ] ++ (if $nu.os-info.arch == "aarch64" { linux-arm-backend-args $src $prefix } else { linux-x86-backend-args $src $prefix })
     ++ (conda-toolchain-args))
 }
 
@@ -310,7 +323,6 @@ def linux-x86-backend-args [src: string, prefix: string] {
     # plugins' RUNPATH is $ORIGIN/.., so the HIP libraries must sit in lib/.
     "-DWITH_ROCM_BACKEND=ON"
     $"-Dhip_ROOT=($src)/rocm-dist"
-    "-DACPP_HIP_ROOT=."
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
@@ -320,16 +332,20 @@ def linux-x86-backend-args [src: string, prefix: string] {
   ]
 }
 
-# aarch64: OMP-ONLY by design — the CPU backend and accelerated-CPU compiler
-# are the deliverable; GPU backends arrive per platform as their dependency
-# stories are established. Overrides common-args' CUDA=ON (last -D wins).
-def linux-arm-backend-args [] {
+# aarch64: CUDA (conda-forge ships the sbsa CUDA packages for linux-aarch64)
+# and OpenCL (ocl-icd). conda-forge has no Level Zero or ROCm for aarch64.
+def linux-arm-backend-args [src: string, prefix: string] {
   [
-    "-DWITH_CUDA_BACKEND=OFF"
+    "-DWITH_CUDA_BACKEND=ON"
+    "-DWITH_OPENCL_BACKEND=ON"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
-    "-DWITH_OPENCL_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
-    "-DLLVM_TARGETS_TO_BUILD=AArch64"
+    "-DLLVM_TARGETS_TO_BUILD=AArch64;NVPTX"
+    $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
+    $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
+    $"-DOpenCL_INCLUDE_DIR=($prefix)/include"
+    $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($src)/OpenCL-Headers"
+    $"-DFETCHCONTENT_SOURCE_DIR_OCL-CXX-HEADERS=($src)/OpenCL-CLHPP"
   ]
 }
 
@@ -366,6 +382,12 @@ def windows-args [src: string, libprefix: string, build: string] {
     # cannot work; if this proves wrong, CI is where we find out.
     "-DWITH_LEVEL_ZERO_BACKEND=ON"
     "-DWITH_OPENCL_BACKEND=ON"
+    # ROCm on Windows x64 from TheRock's windows multiarch tarball (a
+    # win-64-only source in the recipe; win-arm64 overrides this OFF).
+    ...(if (($src | path join "rocm-dist") | path exists) { [
+      "-DWITH_ROCM_BACKEND=ON"
+      $"-Dhip_ROOT=($src)/rocm-dist"
+    ] } else { [] })
     $"-DOpenCL_LIBRARY=($libprefix)/lib/OpenCL.lib"
     $"-DOpenCL_INCLUDE_DIR=($libprefix)/include"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($src)/OpenCL-Headers"
@@ -391,6 +413,7 @@ def windows-args [src: string, libprefix: string, build: string] {
     # builds them anyway — kept win-only to avoid churning a green lane.)
     "-DBUILD_EXAMPLES=OFF"
     "-DBUILD_DOCS=OFF"
+    "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
   ]
 }
 
@@ -551,33 +574,62 @@ def main [] {
   } else {
   }
 
-  # ROCm runtime subset (linux-64): the rows of the fork's full-mode HIP
-  # deploy manifest (config/linux/common/deploy/hip.json), which under managed
-  # the fork does not deploy itself. Copied with the tarball's own layout so
-  # the discovered subdirs (lib, lib/rocm_sysdeps/lib, lib/llvm/amdgcn/bitcode)
-  # resolve under the prefix; cp -a keeps the SONAME symlink families.
-  if (not (is-windows)) and ($rocm | path exists) {
-    let libdir = ($prefix | path join "lib")
-    for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
-      let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
-      if ($matches | is-empty) {
-        if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
-          error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
+  # ROCm runtime subset: the rows of the fork's full-mode HIP deploy
+  # manifest (config/{linux,windows}/common/deploy/hip.json), which under
+  # managed the fork does not deploy itself, plus the HIP headers so the
+  # hip multipass target compiles. Copied with the tarball's OWN layout so
+  # the discovered subdirs resolve under the prefix (ACPP_HIP_ROOT=.).
+  if ($rocm | path exists) {
+    if not (is-windows) {
+      let libdir = ($prefix | path join "lib")
+      for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
+        let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
+        if ($matches | is-empty) {
+          if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
+            error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
+          }
+          print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
+          continue
         }
-        print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
-        continue
+        ^cp -a ...$matches $libdir
+        print $"rocm deploy: lib($stem): ($matches | length) files"
       }
-      ^cp -a ...$matches $libdir
-      print $"rocm deploy: lib($stem): ($matches | length) files"
+      let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
+      if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
+      let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
+      if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
+      let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
+      mkdir $bitcode_dest
+      ^cp -a $bitcode $bitcode_dest
+      print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
+    } else {
+      let bindir = ($prefix | path join "bin")
+      let rocm_bin = ($rocm | path join "bin")
+      let dlls = (glob ($rocm_bin | path join "*.dll" | str replace --all '\' '/') | where {|f| ($f | path basename) =~ '^(amdhip64|amd_comgr|hiprtc)' })
+      if ($dlls | where {|f| ($f | path basename) =~ '^amdhip64' } | is-empty) {
+        print (ls $rocm_bin | get name | path basename | str join "\n")
+        error make {msg: $"rocm deploy: no amdhip64*.dll under ($rocm_bin)"}
+      }
+      for f in $dlls { cp $f $bindir }
+      print $"rocm deploy: ($dlls | length) DLLs -> ($bindir)"
+      for lib in (glob ($rocm | path join "lib" "amdhip64*.lib" | str replace --all '\' '/')) { cp $lib ($prefix | path join "lib") }
+      let bc = (glob ($rocm | path join "**" "amdgcn" "bitcode" | str replace --all '\' '/') | first)
+      if ($bc | is-empty) { error make {msg: "rocm deploy: no amdgcn/bitcode in the windows tarball"} }
+      let rel = ($bc | path relative-to $rocm)
+      let dest = ($prefix | path join $rel | path dirname)
+      mkdir $dest
+      cp -r $bc $dest
+      print $"rocm deploy: bitcode ($rel)"
     }
-    let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
-    if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
-    let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
-    if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
-    let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
-    mkdir $bitcode_dest
-    ^cp -a $bitcode $bitcode_dest
-    print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
+    # HIP headers (both platforms): hip/ and hsa/ from the tarball's include.
+    for d in [hip hsa] {
+      let s = ($rocm | path join "include" $d)
+      if ($s | path exists) {
+        mkdir ($prefix | path join "include")
+        cp -r $s ($prefix | path join "include")
+        print $"rocm deploy: include/($d)"
+      }
+    }
   }
 
   if (which ccache | is-not-empty) { ^ccache --show-stats }

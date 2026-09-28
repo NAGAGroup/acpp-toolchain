@@ -9,7 +9,7 @@
 #
 # Two halves, because neither catches the other's failure:
 #
-#  1. COMPLETENESS (metadata vs artifact). Every output the recipes declare for
+#  1. COMPLETENESS (metadata vs artifact). Every output the recipe declares for
 #     a platform must actually be present among the staged artifacts. This is
 #     what catches a `files:` glob that stopped matching: the build stays green,
 #     the package is simply absent or hollow, and nothing downstream notices
@@ -25,7 +25,7 @@
 # Runs alongside the C-11 collision probe and the mutex-version assert in every
 # publish job.
 
-const REMOTE = "https://prefix.dev/jackm97/naga-labs"
+const REMOTE = "https://prefix.dev/jackm97/naga-labs-staging"
 
 def conda-index [pkg: path] {
   let info_glob = "info-*.tar.zst"
@@ -37,26 +37,17 @@ def file-url [p: path] {
   $"file:///($abs | str trim --left --char '/')"
 }
 
-# What the recipes SAY should exist for a platform, for the given lanes.
-#
-# Lanes are passed in rather than always being both: a release publish job
-# stages only release artifacts, so demanding the nightly names there would
-# fail a gate that is working correctly. The caller derives the lanes from what
-# is actually staged.
-def declared-outputs [platform: string, lanes: list<string>] {
+# What the recipe SAYS should exist for a platform, from a fresh render.
+def declared-outputs [platform: string] {
   let variants = ([shared variants $"($platform).yaml"] | path join)
-  $lanes | each {|lane|
-    let recipe = ($lane | path join "recipe.yaml")
-    if not ($recipe | path exists) { return [] }
-    let res = (do {
-      (^rattler-build build --recipe $recipe --experimental --render-only
-        -m $variants --target-platform $platform)
-    } | complete)
-    if $res.exit_code != 0 {
-      error make {msg: $"closure: could not render ($recipe) for ($platform) — cannot determine the declared output set"}
-    }
-    $res.stdout | from json | each {|o| $o.recipe.package.name }
-  } | flatten | uniq | sort
+  let res = (do {
+    (^rattler-build build --recipe recipe.yaml --experimental --render-only
+      -m $variants --target-platform $platform)
+  } | complete)
+  if $res.exit_code != 0 {
+    error make {msg: $"closure: could not render recipe.yaml for ($platform) — cannot determine the declared output set"}
+  }
+  $res.stdout | from json | each {|o| $o.recipe.package.name } | uniq | sort
 }
 
 def solve-one [platform: string, channels: list<string>, name: string, version: string, build: string] {
@@ -108,29 +99,9 @@ def main [channel_dir: string = "local-channel", --remote: string = $REMOTE] {
 
   mut results = []
 
-  # Which lanes are in this upload? A nightly package is exactly one whose name
-  # carries the -nightly infix, and a naga package one whose name starts with
-  # naga-; the lanes are separate package families, so this is a naming fact
-  # rather than a heuristic. Release is what is left over — which is why naga
-  # has to be subtracted explicitly, or a naga-only upload reads as release and
-  # fails completeness against names it never claimed to ship.
-  let has_nightly = ($staged | any {|a| $a.name | str contains "-nightly" })
-  let has_naga = ($staged | any {|a| $a.name | str starts-with "naga-" })
-  let has_release = ($staged | any {|a| (
-    (not ($a.name | str contains "-nightly")) and
-    (not ($a.name | str starts-with "naga-")) and
-    ($a.name != "acpp-llvm")
-  ) })
-  let lanes = ([
-    (if $has_release { "release" }),
-    (if $has_nightly { "nightly" }),
-    (if $has_naga { "naga" })
-  ] | compact)
-  print $"closure: lanes in this upload = ($lanes | str join ', ')"
-
   # ── 1. completeness ──────────────────────────────────────────────────────
   for p in $platforms {
-    let declared = (declared-outputs $p $lanes)
+    let declared = (declared-outputs $p)
     let present = ($staged | where {|a| $a.subdir == $p } | get name | uniq | sort)
     let missing = ($declared | where {|d| not ($d in $present) })
     let ok = ($missing | is-empty)

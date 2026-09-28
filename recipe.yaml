@@ -105,7 +105,9 @@ outputs:
         # in the variant config.
         - cmake >=3.24
         - ninja
-        - ccache
+        # no ccache on conda-forge win-arm64; build-stage.nu only uses it when present
+        - if: target_platform != "win-arm64"
+          then: ccache
         # De-versioned so the single `python` variant key applies. This used to
         # read ">=3.9" while host asked for a bare `python`: two independent
         # solves that could pick different interpreters, with lldb's bindings
@@ -131,8 +133,12 @@ outputs:
         # building compiler matches the clang_rt sources and the shipped
         # clang exactly. An unpinned clang would drift with conda-forge's
         # default and silently skew the sanitizer-runtime build compiler.
-        - if: win
+        - if: target_platform == "win-64"
           then: clang ==${{ llvm_version }}
+        # win-arm64: conda-forge has no clang 21 there; 22.1 is the nearest.
+        # Only the build compiler (compiler-rt is not built on this platform).
+        - if: target_platform == "win-arm64"
+          then: clang 22.1.*
       host:
         # DE-VERSIONED (phase-3 ruling [B]). Every version that used to be
         # written here now lives in shared/variants/<platform>.yaml, which is
@@ -200,7 +206,7 @@ outputs:
             - ocl-icd
             - cuda-driver-dev
             - cuda-crt-dev_linux-64
-        - if: win
+        - if: target_platform == "win-64"
           then:
             - khronos-opencl-icd-loader
         # Linux (both arches): lldb needs python+swig; libxml2/numactl are
@@ -213,7 +219,7 @@ outputs:
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
         # NB the clang compiler itself is a BUILD dep (see build: above).
-        - if: win
+        - if: target_platform == "win-64"
           then:
             # nvcc.exe is what the legacy FindCUDA module anchors detection on.
             # Use -impl, NOT the cuda-nvcc metapackage: that one carries a
@@ -463,7 +469,12 @@ outputs:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
-              - if: win
+              - if: target_platform == "win-arm64"
+                then:
+                  - Library/bin/hipSYCL/rt-backend-omp.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
+                  - Library/etc/AdaptiveCpp/acpp-toolchain.json
+              - if: target_platform == "win-64"
                 then:
                   # backend plugins are RUNTIME artifacts -> bin on win;
                   # llvm-to-backend is linked statically into per-target
@@ -790,6 +801,7 @@ outputs:
       # its own pass (compiler-rt is not built there).
       skip:
         - osx
+        - target_platform == "win-arm64"
       files:
         include:
           # The clang resource directory splits cleanly: include/ holds the
@@ -884,6 +896,7 @@ outputs:
       # macOS first cut ships compiler + runtime only.
       skip:
         - osx
+        - target_platform == "win-arm64"
       files:
         include:
           - if: linux
@@ -1175,6 +1188,7 @@ outputs:
       # macOS first cut ships compiler + runtime only.
       skip:
         - osx
+        - target_platform == "win-arm64"
       files:
         include:
           - if: linux
@@ -1676,6 +1690,7 @@ outputs:
       skip:
         - target_platform == "linux-aarch64"
         - osx
+        - target_platform == "win-arm64"
       # The CUDA bitcode wiring (activation-time libdevice symlink/copy into
       # acpp's redist path) lives HERE, not in naga-acpp-runtime: base packages
       # ship no activation, and this is the package whose install guarantees
@@ -1745,6 +1760,7 @@ outputs:
       skip:
         - target_platform == "linux-aarch64"
         - osx
+        - target_platform == "win-arm64"
     requirements:
       # Real host dep so the floor below tracks the staging solve; see the
       # CUDA metapackage. level-zero comes in via level-zero-devel, which is
@@ -1780,6 +1796,7 @@ outputs:
       skip:
         - target_platform == "linux-aarch64"
         - osx
+        - target_platform == "win-arm64"
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}

@@ -110,7 +110,7 @@ def main [] {
   }
   for r in $RECIPES {
     if not ($r | path exists) { continue }
-    for p in ["linux-64" "linux-aarch64" "win-64" "osx-arm64"] {
+    for p in ["linux-64" "linux-aarch64" "win-64" "win-arm64" "osx-arm64"] {
       $bad = ($bad | append (check-mutex-spec $r $p))
     }
   }

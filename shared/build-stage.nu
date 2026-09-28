@@ -23,8 +23,8 @@ def common-args [src: string, prefix: string, build: string] {
   [
     "-DCMAKE_BUILD_TYPE=Release"
     $"-DCMAKE_INSTALL_PREFIX=($prefix)"
-    "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
-    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+    # ccache when present (conda-forge has none for win-arm64)
+    ...(if (which ccache | is-empty) { [] } else { ["-DCMAKE_C_COMPILER_LAUNCHER=ccache" "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"] })
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX"
     # LLVM_ENABLE_RUNTIMES=compiler-rt is LINUX-ONLY (see linux-args): the
     # runtimes bootstrap exists to keep conda's gcc from building the
@@ -86,6 +86,28 @@ def linux-triple [] {
 }
 
 def is-darwin [] { $nu.os-info.name == "macos" }
+
+def is-arm [] { $nu.os-info.arch == "aarch64" }
+
+# Windows on ARM64, FIRST CUT: OMP-only, compiler + runtime, no compiler-rt
+# (the recipe skips that output here) and no clang-tools-extra. Appended after
+# windows-args, so these -D values win.
+def windows-arm-args [] {
+  [
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;openmp"
+    "-DWITH_CUDA_BACKEND=OFF"
+    "-DWITH_LEVEL_ZERO_BACKEND=OFF"
+    "-DWITH_OPENCL_BACKEND=OFF"
+    "-DWITH_ROCM_BACKEND=OFF"
+    "-DLLVM_TARGETS_TO_BUILD=AArch64"
+    "-DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc"
+    "-DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-pc-windows-msvc"
+    "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
+    "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
+    "-DCOMPILER_RT_BUILD_PROFILE=OFF"
+    "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF"
+  ]
+}
 
 # macOS, FIRST CUT — OMP-only, no lldb/bolt (bolt has no darwin port), no
 # compiler-rt (the sanitizer story is its own pass), no GPU backends (Metal
@@ -469,7 +491,7 @@ def main [] {
     | append (common-args $src $prefix $build)
     | append $flag_args
     | append (if (is-windows) {
-        (windows-args $src $prefix $build)
+        (windows-args $src $prefix $build) ++ (if (is-arm) { windows-arm-args } else { [] })
       } else if (is-darwin) {
         (darwin-args $src $prefix)
       } else {
@@ -502,7 +524,8 @@ def main [] {
   # Not on the macOS first cut: compiler-rt is deliberately not built there
   # (the sanitizer story is its own pass), so absence is the expected state,
   # not hollowness.
-  if not (is-darwin) {
+  # nor on win-arm64 (no compiler-rt in its first cut).
+  if not ((is-darwin) or ((is-windows) and (is-arm))) {
     let rt_glob = (if (is-windows) {
       ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')
     } else {

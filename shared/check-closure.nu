@@ -53,10 +53,16 @@ def declared-outputs [platform: string] {
 def solve-one [platform: string, channels: list<string>, name: string, version: string, build: string] {
   let dir = (mktemp -d)
   let chan_lines = ($channels | each {|c| $'"($c)"' } | str join ", ")
+  # osx: declare the deployment target to the solver (pixi's default __osx is
+  # 13.0; our packages require the variant's c_stdlib_version).
+  let plat_entry = (if $platform == "osx-arm64" {
+    let macos = (open shared/variants/osx-arm64.yaml | get c_stdlib_version | first | into string)
+    $'{ platform = "osx-arm64", macos = "($macos)" }'
+  } else { $'"($platform)"' })
   $'[workspace]
 name = "closure"
 channels = [($chan_lines)]
-platforms = ["($platform)"]
+platforms = [($plat_entry)]
 channel-priority = "strict"
 
 [dependencies]

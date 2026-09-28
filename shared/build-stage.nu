@@ -580,5 +580,5 @@ def main [] {
     print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
   }
 
-  ^ccache --show-stats
+  if (which ccache | is-not-empty) { ^ccache --show-stats }
 }

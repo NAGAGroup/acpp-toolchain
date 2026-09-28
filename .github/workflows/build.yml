@@ -463,6 +463,8 @@ jobs:
         run: |
           sed -i '' '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; /^naga-acpp-compiler-rt = /d; s/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
           cat pixi.toml
+      - name: Point clang at the macOS SDK
+        run: echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
       - name: Install smoke environment
         working-directory: shared/tests/gpu-smoke
         timeout-minutes: 30

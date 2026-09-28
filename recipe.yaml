@@ -16,7 +16,7 @@ context:
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="f8cf4da5f34643d90a5e5cd0441e041b5042c83d") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="a189a1fd757a3b64e6145323cbf0361d90639ce1") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -642,6 +642,10 @@ outputs:
           then:
             - libgcc-devel_linux-64 >=13
             - libstdcxx-devel_linux-64 >=13
+        # clang needs the libc++ headers on macOS; the conda env is where it
+        # looks (<prefix>/include/c++/v1). Unpinned: it follows libcxx.
+        - if: osx
+          then: libcxx-devel
       run_exports:
         # THE headline export (phase-3 ruling [A]). Anything compiled with this
         # toolchain gets, with zero manifest text on the consumer's side:

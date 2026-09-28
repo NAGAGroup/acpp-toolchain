@@ -461,7 +461,7 @@ jobs:
       - name: Fit the smoke manifest to osx-arm64
         working-directory: shared/tests/gpu-smoke
         run: |
-          sed -i '' '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; /^naga-acpp-compiler-rt = /d; s/^platforms = .*/platforms = ["osx-arm64"]/' pixi.toml
+          sed -i '' '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; /^naga-acpp-compiler-rt = /d; s/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
           cat pixi.toml
       - name: Install smoke environment
         working-directory: shared/tests/gpu-smoke

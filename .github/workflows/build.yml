@@ -470,7 +470,27 @@ jobs:
       - name: Visible backends
         working-directory: shared/tests/gpu-smoke
         run: pixi run acpp-info
+      - name: Diagnose a crash (backtrace, linkage, crash report)
+        if: failure()
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          P="$PWD/.pixi/envs/default"
+          echo "--- libomp copies in the env ---"
+          find "$P" -name 'libomp*' -o -name 'libiomp*' -o -name 'libgomp*' | sort
+          for f in "$P/bin/acpp-info" "$P/lib/libacpp-rt.dylib" "$P/lib/libacpp-common.dylib" "$P"/lib/hipSYCL/librt-backend-omp*; do
+            echo "--- otool -L $f ---"; otool -L "$f" || true
+            echo "--- LC_RPATH $f ---"; otool -l "$f" | grep -A2 LC_RPATH || true
+          done
+          echo "--- acpp-info with loader tracing of libomp ---"
+          DYLD_PRINT_LIBRARIES=1 pixi run acpp-info 2>&1 | grep -Ei 'omp|abort|error' || true
+          echo "--- lldb backtrace ---"
+          pixi run -- lldb --batch -o run -k "bt all" -k quit -- "$P/bin/acpp-info" -l 2>&1 | tail -150 || true
+          echo "--- crash reports ---"
+          ls -t ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -5 || true
+          f=$(ls -t ~/Library/Logs/DiagnosticReports/acpp-info* 2>/dev/null | head -1)
+          [ -n "$f" ] && head -c 20000 "$f" || true
       - name: SYCL smoke on the CPU (OpenMP) backend
+        if: ${{ !cancelled() }}
         timeout-minutes: 8
         working-directory: shared/tests/gpu-smoke
         run: pixi run smoke-cpu

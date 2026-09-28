@@ -17,7 +17,7 @@ on:
         default: "naga/develop"
         required: true
       platforms:
-        description: "Space-separated platforms to build"
+        description: "Space-separated platforms to build (linux-64 linux-aarch64 osx-arm64 win-64)"
         default: "linux-64"
         required: true
       publish:
@@ -27,10 +27,6 @@ on:
       build_number:
         description: "Build number (bump to re-publish the same date+SHA with fresh filenames)"
         default: "0"
-
-concurrency:
-  group: build
-  cancel-in-progress: true
 
 jobs:
   prepare:
@@ -204,6 +200,497 @@ jobs:
         with:
           name: local-channel-linux-64
           path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "Gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to naga-labs-staging
+        run: pixi run -e dev publish-channel
+
+  # ── linux-aarch64 ─────────────────────────────────────────────────────────
+  # Backends as the build script has them today (OMP); no GPU on this runner.
+  build-linux-aarch64:
+    needs: prepare
+    if: contains(format(' {0} ', inputs.platforms), ' linux-aarch64 ')
+    runs-on: linux-arm64-v32
+    timeout-minutes: 300
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
+      ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 20G
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disk
+        run: df -h / "$GITHUB_WORKSPACE"
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-aarch64-${{ github.run_id }}
+          restore-keys: |
+            ccache-linux-aarch64-
+            ccache-arm-release-
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-linux-aarch64-${{ github.run_id }}
+          restore-keys: rattler-linux-aarch64-
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: output/build_cache
+          key: staging-linux-aarch64-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+          restore-keys: staging-linux-aarch64-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ needs.prepare.outputs.sha }}-
+      - name: Build -> indexed local channel
+        run: pixi run -e dev build
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd output/build_cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs -r rm -rf
+          du -sh . || true
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/build_cache
+          key: staging-linux-aarch64-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-linux-aarch64-${{ github.run_id }}
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/rattler/cache
+          key: rattler-linux-aarch64-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-linux-aarch64
+          path: local-channel/
+          retention-days: 14
+
+  gate-linux-aarch64:
+    needs: [prepare, build-linux-aarch64]
+    runs-on: linux-arm64-v32
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-linux-aarch64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      # This platform has no CUDA/OpenCL outputs yet: drop them from the
+      # manifest and pin it to this platform before the first solve.
+      - name: Fit the smoke manifest to linux-aarch64
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          sed -i '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; s/^platforms = .*/platforms = ["linux-aarch64"]/' pixi.toml
+          cat pixi.toml
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
+      - name: Visible backends
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on the CPU (OpenMP) backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: Sanitizer smoke (naga-acpp-compiler-rt)
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run sanitizer-smoke
+
+  publish-linux-aarch64:
+    needs: [prepare, build-linux-aarch64, gate-linux-aarch64]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-linux-aarch64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "Gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to naga-labs-staging
+        run: pixi run -e dev publish-channel
+
+  # ── osx-arm64 ─────────────────────────────────────────────────────────────
+  # Backends as the build script has them today (OMP); Metal comes next.
+  build-osx-arm64:
+    needs: prepare
+    if: contains(format(' {0} ', inputs.platforms), ' osx-arm64 ')
+    runs-on: macOS-26-xlarge
+    timeout-minutes: 600
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
+      ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 20G
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      # The image fills most of the disk with Xcodes and simulator runtimes.
+      # Keep the selected Xcode (the macOS SDK and the Metal toolchain), drop
+      # the rest. Best effort: never fails the job.
+      - name: Free disk space
+        shell: bash
+        continue-on-error: true
+        run: |
+          df -h /
+          KEEP=$(xcode-select -p | sed 's#/Contents/Developer##')
+          KEEP=$(cd "$KEEP" && pwd -P)
+          echo "keeping $KEEP"
+          sudo xcode-select -s "$KEEP" || true
+          echo "DEVELOPER_DIR=$KEEP/Contents/Developer" >> "$GITHUB_ENV"
+          for app in /Applications/Xcode_*.app; do
+            r=$(cd "$app" && pwd -P) || continue
+            [ "$r" = "$KEEP" ] || sudo rm -rf "$app" || true
+          done
+          sudo xcrun simctl runtime delete all || true
+          sudo rm -rf /Library/Developer/CoreSimulator ~/Library/Developer/CoreSimulator || true
+          for p in iPhoneOS iPhoneSimulator AppleTVOS AppleTVSimulator WatchOS WatchSimulator XROS XRSimulator; do
+            sudo rm -rf "$KEEP/Contents/Developer/Platforms/$p.platform" || true
+          done
+          sudo rm -rf ~/Library/Android /Users/runner/.dotnet ~/.rustup /usr/local/share/dotnet || true
+          rm -rf "$(brew --cache)" || true
+          sudo mdutil -a -i off || true
+          df -h /
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-osx-arm64-${{ github.run_id }}
+          restore-keys: |
+            ccache-osx-arm64-
+            ccache-mac-release-
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/rattler/cache
+          key: rattler-osx-arm64-${{ github.run_id }}
+          restore-keys: rattler-osx-arm64-
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: output/build_cache
+          key: staging-osx-arm64-${{ hashFiles('shared/variants/osx-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+          restore-keys: staging-osx-arm64-${{ hashFiles('shared/variants/osx-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-
+      - name: Build -> indexed local channel
+        run: pixi run -e dev build
+      - name: Prune stale staging caches
+        if: always()
+        run: |
+          cd output/build_cache 2>/dev/null || exit 0
+          ls -1dt staging_* 2>/dev/null | tail -n +2 | xargs rm -rf
+          du -sh . || true
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: output/build_cache
+          key: staging-osx-arm64-${{ hashFiles('shared/variants/osx-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-osx-arm64-${{ github.run_id }}
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/rattler/cache
+          key: rattler-osx-arm64-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-osx-arm64
+          path: local-channel/
+          retention-days: 14
+
+  gate-osx-arm64:
+    needs: [prepare, build-osx-arm64]
+    runs-on: macOS-26-xlarge
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-osx-arm64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      # No CUDA/OpenCL/compiler-rt outputs on osx yet.
+      - name: Fit the smoke manifest to osx-arm64
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          sed -i '' '/^naga-acpp-runtime-cuda = /d; /^naga-acpp-runtime-ocl = /d; /^naga-acpp-compiler-rt = /d; s/^platforms = .*/platforms = ["osx-arm64"]/' pixi.toml
+          cat pixi.toml
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
+      - name: Visible backends
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on the CPU (OpenMP) backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+
+  publish-osx-arm64:
+    needs: [prepare, build-osx-arm64, gate-osx-arm64]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-osx-arm64
+          path: local-channel
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: "Gate: no conda-forge name collisions"
+        run: pixi run -e dev check-no-collision
+      - name: "Gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to naga-labs-staging
+        run: pixi run -e dev publish-channel
+
+  # ── win-64 ────────────────────────────────────────────────────────────────
+  # Backends as the build script has them today (OMP, CUDA, L0, OpenCL); HIP
+  # comes next. Plumbing carried over from the archived nightly: fast storage,
+  # pwsh, PATH stripped under cmd.exe's 8191-char limit.
+  build-win-64:
+    needs: prepare
+    if: contains(format(' {0} ', inputs.platforms), ' win-64 ')
+    runs-on: Win-x64-64
+    timeout-minutes: 300
+    env:
+      ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
+      ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
+      ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
+      CCACHE_MAXSIZE: 20G
+      CCACHE_NOHASHDIR: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select build storage
+        shell: pwsh
+        run: |
+          $root = $null
+          if (Test-Path "D:\") {
+            $root = "D:"
+          } else {
+            try {
+              $vhd = "C:\build-drive.vhdx"
+              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
+              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
+              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
+              $root = "$($part.DriveLetter):"
+              Write-Host "No D:; mounted ReFS VHDX at $root"
+            } catch {
+              Write-Host "VHDX fallback failed ($_); using workspace drive"
+              $root = $env:GITHUB_WORKSPACE
+            }
+          }
+          Write-Host "Fast storage root: $root"
+          New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
+          @(
+            "CCACHE_DIR=$root\ccache"
+            "CCACHE_BASEDIR=$root\rb-output"
+            "RATTLER_CACHE_DIR=$root\rattler-cache"
+            "ACPP_OUTPUT_DIR=$root\rb-output"
+          ) | Add-Content -Path $env:GITHUB_ENV
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          cache: true
+          environments: dev
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-64-${{ github.run_id }}
+          restore-keys: |
+            ccache-win-64-
+            ccache-win-nightly-
+            ccache-win-
+      - name: Restore rattler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-64-${{ github.run_id }}
+          restore-keys: rattler-win-64-
+      - name: Restore staging cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
+          key: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+          restore-keys: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-
+      - name: Build -> indexed local channel
+        shell: pwsh
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          Write-Host "PATH length: $($env:PATH.Length)"
+          pixi run -e dev build
+      # Build-once/run-on-GPU: compile the smoke here (this box has VS2026);
+      # the GPU box has no VS and only runs the device-agnostic SSCP binary.
+      - name: Pin smoke manifest to win-64
+        shell: pwsh
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
+      - name: Compile smoke binary
+        shell: pwsh
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        env:
+          ACPP_SMOKE_VCVARS: C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat
+        run: |
+          pixi run build-smoke
+          Copy-Item smoke.exe ..\..\..\local-channel\smoke.exe
+      - name: Prune stale staging caches
+        if: always()
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:ACPP_OUTPUT_DIR "build_cache"
+          if ($dir -and (Test-Path $dir)) {
+            Get-ChildItem $dir -Filter "staging_*" | Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 | Remove-Item -Recurse -Force
+          }
+      - name: Save staging cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
+          key: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-win-64-${{ github.run_id }}
+      - name: Save rattler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RATTLER_CACHE_DIR }}
+          key: rattler-win-64-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel/
+          retention-days: 14
+
+  gate-win-64:
+    needs: [prepare, build-win-64]
+    runs-on: Win-x64-GPU
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh # bash on this image is the WSL stub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel
+      - name: Update NVIDIA datacenter driver
+        run: |
+          nvidia-smi
+          $ver = "553.62"
+          $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-winserver-2022-dch-international.exe"
+          Write-Host "Fetching $url"
+          curl.exe -sL -o driver.exe $url
+          Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait
+          nvidia-smi
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      - name: Stage prebuilt smoke binary
+        run: Copy-Item local-channel\smoke.exe shared\tests\gpu-smoke\smoke.exe
+      - name: Pin smoke manifest to win-64
+        working-directory: shared/tests/gpu-smoke
+        run: |
+          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
+      - name: Install smoke environment
+        working-directory: shared/tests/gpu-smoke
+        timeout-minutes: 30
+        run: pixi install
+      - name: Visible backends
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run acpp-info
+      - name: SYCL smoke on the CPU (OpenMP) backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cpu
+      - name: SYCL smoke on the CUDA backend
+        timeout-minutes: 8
+        working-directory: shared/tests/gpu-smoke
+        run: pixi run smoke-cuda
+
+  publish-win-64:
+    needs: [prepare, build-win-64, gate-win-64]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-channel-win-64
+          path: local-channel
+      - name: Drop the smoke binary from the channel
+        run: rm -f local-channel/smoke.exe
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true

@@ -67,26 +67,20 @@ outputs:
         # No patches: the fork branch is cut from the base these patches were
         # written against and carries all of them as commits (0001-0003 from
         # its cut point, 0008 as its own commit).
-      - url: https://github.com/AdaptiveCpp/SPIRV-LLVM-Translator/archive/3d3f0dece590232aab1851f1bea860c2a381ec34.tar.gz
-        sha256: 075b9f62fdf7fb52a24ef88fc7986f227b1fb4b149d0601c878efad2a8e5f703
-        target_directory: SPIRV-LLVM-Translator
       - url: https://github.com/KhronosGroup/OpenCL-Headers/archive/265df85aec478d14a5c5880d7bb92d7dd52714ef.tar.gz
         sha256: 07002bdb6107dfc8ab1736c3894ff7f1501029751960c0b2dd6157e43c0b9290
         target_directory: OpenCL-Headers
       - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
         sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
         target_directory: OpenCL-CLHPP
-      # ROCm, linux-64 only: TheRock's stable core tarball is the BUILD input —
-      # ROCM_PATH points here at configure time and the staging build deploys
-      # the runtime subset into the prefix (carved into naga-acpp-runtime-rocm).
-      # gfx1150 is the SMALLEST family tarball (1.7 GB): the pieces acpp's
-      # hip manifest deploys (hiprtc, amdhip64, hsa-runtime64, amd_comgr,
-      # device-lib bitcode) are family-INDEPENDENT — the .kpack difference
-      # between families is ROCm's own math-library kernels, never deployed.
+      # ROCm, linux-64: TheRock's stable MULTI-ARCH tarball (host code plus
+      # every GPU family's kernels as .kpack) is the BUILD input. The staging
+      # build copies the runtime subset into the prefix (carved into
+      # naga-acpp-runtime-rocm). AMD publishes no checksum sidecar; the sha256
+      # is pinned once a CI run has downloaded it.
       - if: target_platform == "linux-64"
         then:
-          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-gfx1150-10.0.0.tar.gz
-            sha256: e2fc089e2874dcff88384f387d5bb0553ac1392d5cd1c96d6ade0233a94a8c4b
+          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
             target_directory: rocm-dist
       - path: shared
         target_directory: shared
@@ -320,7 +314,8 @@ outputs:
               - lib/libhsa*
               - lib/libamd_comgr*
               - lib/libroc*
-              - lib/hipSYCL/ext/bitcode/amdgcn/**
+              - lib/llvm/amdgcn/**
+              - lib/rocm_sysdeps/**
             else:
               # libomp comes from conda-forge llvm-openmp here too
               - Library/bin/libomp.dll
@@ -1832,15 +1827,15 @@ outputs:
         - target_platform != "linux-64"
       files:
         include:
-          # The subset acpp's own hip deployment manifest names, deployed by
-          # the staging build from the TheRock tarball. Family-independent:
-          # no .kpack, no math libraries.
+          # The fork's full-mode HIP deploy rows, copied into the prefix by the
+          # staging build from the TheRock multi-arch tarball.
           - lib/libhiprtc*
           - lib/libamdhip64*
           - lib/libhsa*
           - lib/libamd_comgr*
           - lib/libroc*
-          - lib/hipSYCL/ext/bitcode/amdgcn/**
+          - lib/llvm/amdgcn/**
+          - lib/rocm_sysdeps/**
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1854,7 +1849,7 @@ outputs:
               - lib/libamdhip64.so*
               - lib/libhsa-runtime64.so*
               - lib/libamd_comgr.so*
-              - lib/hipSYCL/ext/bitcode/amdgcn/ockl.bc
+              - lib/llvm/amdgcn/bitcode/ockl.bc
     about:
       summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
       # Per-component sweep, read from the tarball's own share/doc texts:

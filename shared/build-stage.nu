@@ -41,14 +41,17 @@ def common-args [src: string, prefix: string, build: string] {
     "-DLLVM_EXTERNAL_PROJECTS=AdaptiveCpp"
     $"-DLLVM_EXTERNAL_ADAPTIVECPP_SOURCE_DIR=($src)/AdaptiveCpp"
     "-DLLVM_ADAPTIVECPP_LINK_INTO_TOOLS=ON"
+    # conda is the package manager: vendor runtimes come from their own
+    # packages, and the fork writes no deploy manifest.
+    "-DACPP_DEPLOYMENT_STRATEGY=managed"
     "-DWITH_CUDA_BACKEND=ON"
     "-DWITH_CPU_BACKEND=ON"
     "-DWITH_ACCELERATED_CPU=ON"
     "-DWITH_ROCM_BACKEND=OFF"
     "-DACPP_COMPILER_FEATURE_PROFILE=full"
     $"-DCUDAToolkit_ROOT=($prefix)"
-    $"-DCUDA_TOOLKIT_ROOT_DIR=($prefix)"
-    $"-DLLVMSPIRV_SOURCE_DIR=($src)/SPIRV-LLVM-Translator"
+    # The fork clones its SPIR-V translator itself; pin the commit.
+    "-DLLVMSPIRV_COMMIT=3d3f0dece590232aab1851f1bea860c2a381ec34"
     "-DOPENMP_ENABLE_LIBOMPTARGET=OFF"
     # compiler-rt: builtins plus the sanitizer runtimes (phase-3 ruling [B]).
     #
@@ -276,27 +279,16 @@ def linux-x86-backend-args [src: string, prefix: string] {
   [
     "-DWITH_LEVEL_ZERO_BACKEND=ON"
     "-DWITH_OPENCL_BACKEND=ON"
-    # ROCm: the TheRock core tarball is a BUILD input — ROCM_PATH points into
-    # the extracted source tree so acpp's find_* succeed; the runtime subset
-    # is deployed into the prefix post-install (see the rocm-deploy step) and
-    # carved into acpp-runtime-rocm. Overrides the common-args OFF (cmake:
-    # last -D wins) and widens the LLVM target list — llvm-to-amdgpu JITs
-    # through libLLVM's AMDGPU backend.
+    # ROCm: TheRock's multi-arch tarball is a BUILD input. The fork's
+    # discovery (find_package(hip CONFIG)) finds it through hip_ROOT; main()
+    # adds the tree to CMAKE_FIND_ROOT_PATH so the activation's ONLY-mode
+    # find_* reach it. After install, the runtime subset is copied into the
+    # prefix with the tarball's layout (rocm deploy, below), and
+    # ACPP_HIP_ROOT=. tells the fork the prefix IS the HIP root. The backend
+    # plugins' RUNPATH is $ORIGIN/.., so the HIP libraries must sit in lib/.
     "-DWITH_ROCM_BACKEND=ON"
-    $"-DROCM_PATH=($src)/rocm-dist"
-    # PRESET, not searched: the activation's CMAKE_ARGS confines find_library
-    # and find_path to the prefix + sysroot (FIND_ROOT_PATH_MODE_*=ONLY), and
-    # the ROCm tree is a work-dir input outside both roots, so its HINTS are
-    # discarded (measured: "Could not find AMDHIP64_LIBRARY"). A preset cache
-    # variable skips the search entirely. hsakmt is deliberately NOT preset —
-    # TheRock ships it static-only (folded into hsa-runtime), so it must stay
-    # NOTFOUND and the deploy skips it.
-    $"-DAMDHIP64_LIBRARY=($src)/rocm-dist/lib/libamdhip64.so"
-    $"-DHSARUNTIME64_LIBRARY=($src)/rocm-dist/lib/libhsa-runtime64.so"
-    $"-DAMDCOMGR_LIBRARY=($src)/rocm-dist/lib/libamd_comgr.so"
-    $"-DROCPROFILERREGISTER_LIBRARY=($src)/rocm-dist/lib/librocprofiler-register.so"
-    $"-DHIPRTC_LIBRARY=($src)/rocm-dist/lib/libhiprtc.so"
-    $"-DROCM_DEVICE_LIBS_PATH=($src)/rocm-dist/lib/llvm/amdgcn/bitcode"
+    $"-Dhip_ROOT=($src)/rocm-dist"
+    "-DACPP_HIP_ROOT=."
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
@@ -360,25 +352,8 @@ def windows-args [src: string, libprefix: string, build: string] {
     "-DLLVM_TOOL_BUGPOINT_BUILD=OFF"
     "-DLLVM_HOST_TRIPLE=x86_64-pc-windows-msvc"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-pc-windows-msvc"
-    # AdaptiveCpp still uses the DEPRECATED FindCUDA module
-    # (`find_package(CUDA QUIET)`), which on Windows searches a
-    # <root>/lib/x64 toolkit layout. conda ships the import libs flat in
-    # Library/lib, so detection silently fails and acpp aborts with
-    # "CUDA was not found". Seed the cache entries with the real paths so
-    # the find_* calls short-circuit instead of guessing.
-    $"-DCUDA_TOOLKIT_ROOT_DIR=($libprefix)"
-    $"-DCUDA_NVCC_EXECUTABLE=($libprefix)/bin/nvcc.exe"
-    $"-DCUDA_TOOLKIT_INCLUDE=($libprefix)/include"
-    $"-DCUDA_CUDART_LIBRARY=($libprefix)/lib/cudart.lib"
+    # The fork honours upstream's CUDA_DEVICE_LIBS_PATH for libdevice.
     $"-DCUDA_DEVICE_LIBS_PATH=($libprefix)/nvvm/libdevice"
-    # AdaptiveCpp probes the BUILD compiler for -mcpu=native / -march=native and
-    # uses the result as a proxy for whether llc supports -mcpu=native at JIT
-    # time — upstream's own comment concedes this is the wrong check ("We should
-    # actually check llc/opt here!"). MSVC rejects those clang/gcc spellings, so
-    # the probe fails even though the llc we ship handles -mcpu=native fine.
-    # Force exactly the value the passing path yields on linux, so host JIT
-    # codegen targets the user's CPU identically on both platforms.
-    "-DACPP_HOST_FORCE_MCPU_TARGET=native"
     # AdaptiveCpp requires a clang-family driver (it uses GCC/Clang builtin
     # atomics that MSVC lacks), but we deliberately do NOT pull the
     # clang_win-64 activation package, which is only ever built against
@@ -479,6 +454,17 @@ def main [] {
     $env.CMAKE_ARGS? | default "" | split row -r '\s+' | where {|a| $a != "" }
   })
 
+  # The ROCm tree is a work-dir input outside the activation's find roots
+  # (CMAKE_FIND_ROOT_PATH = prefix + sysroot, find_library/find_path ONLY), so
+  # add it as a root. Paths already under a root are not re-rooted, so
+  # hip_ROOT resolves as given.
+  let rocm = ($src | path join "rocm-dist")
+  let activation_args = (if ($rocm | path exists) {
+    $activation_args | each {|a|
+      if ($a | str starts-with "-DCMAKE_FIND_ROOT_PATH=") { $"($a);($rocm)" } else { $a }
+    }
+  } else { $activation_args })
+
   let args = ($activation_args
     | append (common-args $src $prefix $build)
     | append $flag_args
@@ -542,63 +528,33 @@ def main [] {
   } else {
   }
 
-  # default-cpu-cxx is baked as CMAKE_CXX_COMPILER — the BUILD machine's
-  # compiler, dead on every user machine. Rewrite it to the $ACPP_PATH
-  # placeholder the driver expands at runtime (the mechanism default-clang
-  # already uses); the compiler activation package overrides both via
-  # ACPP_CPU_CXX/ACPP_CLANG with the triple-prefixed form.
-  let core_json = ($prefix | path join "etc" "AdaptiveCpp" "acpp-core.json")
-  if ($core_json | path exists) {
-    let cpu_cxx = (if (is-windows) { "$ACPP_PATH/bin/clang++.exe" } else { "$ACPP_PATH/bin/clang++" })
-    open --raw $core_json | from json | upsert "default-cpu-cxx" $cpu_cxx | to json | save -f $core_json
-    print $"acpp-core.json: default-cpu-cxx -> ($cpu_cxx)"
-  } else {
-    error make {msg: $"acpp-core.json not found at ($core_json)"}
-  }
-
-  # ROCm runtime deploy (linux): acpp's OWN hip deployment manifest names
-  # exactly what the backend needs at runtime. The ROCm tree is a BUILD
-  # input (the TheRock tarball source), so those pieces are deployed into
-  # the prefix here and carved into acpp-runtime-rocm. Entries already
-  # inside the prefix ($ACPP_* placeholders — the backend's own files) are
-  # installed normally and skipped. Symlink families are preserved: the
-  # manifest names find_library's answer (the unversioned dev name) while
-  # DT_NEEDED resolves the SONAME, so both must exist.
-  if (not (is-windows)) and $nu.os-info.arch != "aarch64" {
-    let manifest = ($prefix | path join "etc" "AdaptiveCpp" "deploy" "acpp-deployment-manifest-hip.json")
-    if not ($manifest | path exists) {
-      error make {msg: $"hip deployment manifest missing: ($manifest)"}
-    }
+  # ROCm runtime subset (linux-64): the rows of the fork's full-mode HIP
+  # deploy manifest (config/linux/common/deploy/hip.json), which under managed
+  # the fork does not deploy itself. Copied with the tarball's own layout so
+  # the discovered subdirs (lib, lib/rocm_sysdeps/lib, lib/llvm/amdgcn/bitcode)
+  # resolve under the prefix; cp -a keeps the SONAME symlink families.
+  if (not (is-windows)) and ($rocm | path exists) {
     let libdir = ($prefix | path join "lib")
-    for e in (open --raw $manifest | from json | transpose src dest) {
-      if ($e.src | str contains "$ACPP_") { continue }
-      if ($e.src | str starts-with $prefix) { continue }
-      # optional components acpp probes without REQUIRED (hsakmt was folded
-      # into hsa-runtime; rocprofiler-register is optional) render as
-      # <VAR>-NOTFOUND when the tarball does not carry them
-      if ($e.src | str contains "-NOTFOUND") { continue }
-      let destdir = ([$libdir, ($e.dest | str trim -c '/')] | path join)
-      mkdir $destdir
-      # Stem glob, not name glob: libhiprtc.so's loader dependency is
-      # libhiprtc-builtins.so.7, which only a stem-wide pattern catches.
-      let pattern = (if ($e.src | str ends-with "/*") {
-        $e.src
-      } else {
-        ($e.src | path dirname) + "/" + ($e.src | path basename | str replace -r '\.so.*$' '') + "*"
-      })
-      let matches = (glob $pattern)
-      if ($matches | is-empty) { error make {msg: $"rocm deploy: nothing matches ($pattern)"} }
-      for f in $matches {
-        let name = ($f | path basename)
-        let info = (ls -l $f | get 0)
-        if $info.type == "symlink" {
-          ^ln -sf ($info.target | path basename) ($destdir | path join $name)
-        } else {
-          cp $f ($destdir | path join $name)
+    for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
+      let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
+      if ($matches | is-empty) {
+        if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
+          error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
         }
+        print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
+        continue
       }
-      print $"rocm deploy: ($pattern) -> ($destdir), (($matches | length)) files"
+      ^cp -a ...$matches $libdir
+      print $"rocm deploy: lib($stem): ($matches | length) files"
     }
+    let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
+    if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
+    let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
+    if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
+    let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
+    mkdir $bitcode_dest
+    ^cp -a $bitcode $bitcode_dest
+    print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
   }
 
   ^ccache --show-stats

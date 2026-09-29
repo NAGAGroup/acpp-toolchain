@@ -666,5 +666,28 @@ def main [] {
     ^nu ($src | path join "shared" "activation" "install-cfg.nu") $cfg_triple $has_sysroot
   }
 
+  # STAGING-CACHE DIET. rattler-build caches this whole work dir with the
+  # staging output and, for EVERY inheriting output, deletes and recopies it
+  # (twice per output: upstream process_staging_caches restores the inherited
+  # cache in its loop and again for inherits_from). Measured on win-64 build 2:
+  # 166,968 files per restore, 6-9 min each on D:. The source trees are ~150k
+  # of those files and no output needs them: licenses ship from
+  # shared/licenses (drift-checked at the top of this script) and the cmake
+  # build dir is $SRC_DIR/../build_dir, outside the work dir. Keep shared/ —
+  # the activation outputs copy from $SRC_DIR/shared. Best effort: a failed
+  # delete costs speed, never correctness, so it warns instead of failing.
+  for d in [llvm-project AdaptiveCpp OpenCL-Headers OpenCL-CLHPP metal-cpp rocm-dist] {
+    let p = ($src | path join $d)
+    if not ($p | path exists) { continue }
+    try {
+      rm --recursive --force $p
+    } catch {
+      # Windows: git objects are read-only; clear the attribute and retry.
+      if (is-windows) { try { ^attrib -R ($p | path join "*") /S /D | ignore } }
+      try { rm --recursive --force $p } catch {|e| print $"WARNING: could not prune ($p): ($e.msg)" }
+    }
+    if not ($p | path exists) { print $"staging diet: removed ($d)" }
+  }
+
   if (which ccache | is-not-empty) { ^ccache --show-stats }
 }

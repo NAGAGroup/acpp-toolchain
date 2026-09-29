@@ -92,6 +92,8 @@ tbb-devel = "*"
 cuda-cudart-dev = "*"
 cuda-nvvm-tools = "*"
 cuda-nvcc-tools = "*"
+# clang's __clang_cuda_runtime_wrapper.h includes curand_mtgp32_kernel.h unconditionally
+libcurand-dev = "*"
 cuda-crt-dev_linux-64 = "*"
 
 [feature.build.target.linux-aarch64.dependencies]
@@ -102,6 +104,8 @@ tbb-devel = "*"
 cuda-cudart-dev = "*"
 cuda-nvvm-tools = "*"
 cuda-nvcc-tools = "*"
+# clang's __clang_cuda_runtime_wrapper.h includes curand_mtgp32_kernel.h unconditionally
+libcurand-dev = "*"
 cuda-crt-dev_linux-aarch64 = "*"
 
 [feature.build.target.win-64.dependencies]
@@ -112,6 +116,8 @@ libboost-devel = "*"
 cuda-cudart-dev = "*"
 cuda-nvvm-tools = "*"
 cuda-nvcc-tools = "*"
+# clang's __clang_cuda_runtime_wrapper.h includes curand_mtgp32_kernel.h unconditionally
+libcurand-dev = "*"
 
 [feature.build.target.win-arm64.dependencies]
 naga-acpp-clangxx_win-arm64 = "*"

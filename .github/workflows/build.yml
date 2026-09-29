@@ -193,7 +193,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+PSTL/PCUDA)"
+      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
@@ -213,7 +213,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pstl_tests
-      - name: "pcuda_tests: generic on OMP (CPU)"
+      - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
@@ -403,7 +403,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+PSTL/PCUDA)"
+      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
@@ -418,7 +418,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pstl_tests
-      - name: "pcuda_tests: generic on OMP (CPU)"
+      - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
@@ -619,7 +619,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+PSTL/PCUDA)"
+      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
@@ -640,7 +640,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pstl_tests
-      - name: "pcuda_tests: generic on OMP (CPU)"
+      - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
@@ -808,7 +808,7 @@ jobs:
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
           pixi run nu suite.nu build omp "omp"
-      - name: "build: generic (+PCUDA)"
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
@@ -981,7 +981,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run -e run nu suite.nu run generic "omp;cuda" sycl_tests
-      - name: "pcuda_tests: generic on OMP (CPU)"
+      - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
@@ -1204,7 +1204,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+PCUDA)"
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() }}
         timeout-minutes: 30
         working-directory: shared/tests/suite
@@ -1214,7 +1214,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp sycl_tests
-      - name: "pcuda_tests: generic on OMP (CPU)"
+      - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite

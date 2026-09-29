@@ -727,6 +727,18 @@ jobs:
             "RATTLER_CACHE_DIR=$root\rattler-cache"
             "ACPP_OUTPUT_DIR=$root\rb-output"
           ) | Add-Content -Path $env:GITHUB_ENV
+      - name: Exclude the build tree from Defender
+        shell: pwsh
+        run: |
+          # rattler-build failed to delete a finished test directory
+          # ("Access is denied", run 36506177295): Defender scans the
+          # freshly built test exe and holds the directory. Exclude the
+          # build/cache tree on this self-hosted runner. Non-fatal if we
+          # lack the rights.
+          try {
+            Add-MpPreference -ExclusionPath $env:ACPP_OUTPUT_DIR, $env:RATTLER_CACHE_DIR, $env:CCACHE_DIR -ErrorAction Stop
+            Write-Host "Defender exclusions added"
+          } catch { Write-Warning "could not add Defender exclusions: $_" }
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true
@@ -1060,6 +1072,18 @@ jobs:
             "RATTLER_CACHE_DIR=$root\rattler-cache"
             "ACPP_OUTPUT_DIR=$root\rb-output"
           ) | Add-Content -Path $env:GITHUB_ENV
+      - name: Exclude the build tree from Defender
+        shell: pwsh
+        run: |
+          # rattler-build failed to delete a finished test directory
+          # ("Access is denied", run 36506177295): Defender scans the
+          # freshly built test exe and holds the directory. Exclude the
+          # build/cache tree on this self-hosted runner. Non-fatal if we
+          # lack the rights.
+          try {
+            Add-MpPreference -ExclusionPath $env:ACPP_OUTPUT_DIR, $env:RATTLER_CACHE_DIR -ErrorAction Stop
+            Write-Host "Defender exclusions added"
+          } catch { Write-Warning "could not add Defender exclusions: $_" }
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true

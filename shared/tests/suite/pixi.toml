@@ -75,19 +75,43 @@ ninja = "*"
 # those `check-*` custom targets (only sycl_tests/rt_tests/pstl_tests/
 # pcuda_tests) — see the hand-off report for the full trace. suite.nu still
 # passes -DLLVM_DIR when it happens to be on the prefix, at no cost.
+# CUDA toolkit pieces for the `cuda` / `multipass` builds (`-x cuda`, compile
+# only, no GPU). clang's CUDA front end includes the toolkit's
+# __clang_cuda_runtime_wrapper.h, which needs cuda.h and cuda_runtime.h
+# (both shipped by cuda-cudart-dev, via its cuda-cudart-dev_<platform>
+# package), then needs libdevice (cuda-nvvm-tools) and ptxas
+# (cuda-nvcc-tools) to finish. The naga-acpp-runtime-cuda package
+# deliberately ships only cudart and libdevice, so the toolkit headers and
+# ptxas come from here, in the build environment only. cuda-version is pinned
+# transitively by naga-acpp-runtime-cuda, so it is not pinned here.
+# (gate-linux-aarch64, run 36508914785: "'cuda.h' file not found".)
 [feature.build.target.linux-64.dependencies]
 naga-acpp-clangxx_linux-64 = "*"
 libboost-devel = "*"
 tbb-devel = "*"
+cuda-cudart-dev = "*"
+cuda-nvvm-tools = "*"
+cuda-nvcc-tools = "*"
+cuda-crt-dev_linux-64 = "*"
 
 [feature.build.target.linux-aarch64.dependencies]
 naga-acpp-clangxx_linux-aarch64 = "*"
 libboost-devel = "*"
 tbb-devel = "*"
+# CUDA toolkit pieces: see the comment above the linux-64 table.
+cuda-cudart-dev = "*"
+cuda-nvvm-tools = "*"
+cuda-nvcc-tools = "*"
+cuda-crt-dev_linux-aarch64 = "*"
 
 [feature.build.target.win-64.dependencies]
 naga-acpp-clangxx_win-64 = "*"
 libboost-devel = "*"
+# CUDA toolkit pieces: see the comment above the linux-64 table. (win-64's GPU
+# box uses the `run` environment only, so this affects the builder alone.)
+cuda-cudart-dev = "*"
+cuda-nvvm-tools = "*"
+cuda-nvcc-tools = "*"
 
 [feature.build.target.win-arm64.dependencies]
 naga-acpp-clangxx_win-arm64 = "*"

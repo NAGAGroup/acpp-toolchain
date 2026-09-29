@@ -673,7 +673,7 @@ jobs:
 
   # ── win-64 ────────────────────────────────────────────────────────────────
   # Backends as the build script has them today (OMP, CUDA, L0, OpenCL); HIP
-  # comes next. Plumbing carried over from the archived nightly: fast storage,
+  # is PARKED for build 2 (see HIP-PARKED markers). Plumbing carried over from the archived nightly: fast storage,
   # pwsh, PATH stripped under cmd.exe's 8191-char limit.
   build-win-64:
     needs: prepare
@@ -834,22 +834,23 @@ jobs:
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
           pixi run nu suite.nu build cuda "cuda:sm_75"
-      # No AMD GPU on this box either: compile only.
-      - name: "build: hip (compile only, no AMD GPU)"
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          pixi run nu suite.nu build hip "hip:gfx906"
+      # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+      # # No AMD GPU on this box either: compile only.
+      # - name: "build: hip (compile only, no AMD GPU)"
+      #   if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
+      #   shell: pwsh
+      #   working-directory: shared/tests/suite
+      #   timeout-minutes: 30
+      #   run: |
+      #     $env:PATH = @(
+      #       "$env:SystemRoot\system32",
+      #       "$env:SystemRoot",
+      #       "$env:SystemRoot\System32\Wbem",
+      #       "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+      #       "$env:USERPROFILE\.pixi\bin",
+      #       "$env:ProgramFiles\Git\cmd"
+      #     ) -join ";"
+      #     pixi run nu suite.nu build hip "hip:gfx906"
       - name: "build: multipass"
         if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
@@ -864,7 +865,8 @@ jobs:
             "$env:USERPROFILE\.pixi\bin",
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
-          pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75;hip:gfx906"
+          # HIP-PARKED (build 2): was "omp;cuda.explicit-multipass:sm_75;hip:gfx906" (TheRock comgr links its own libLLVM.so.23)
+          pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75"
       - name: Prune stale staging caches
         if: always()
         shell: pwsh
@@ -1234,6 +1236,11 @@ jobs:
           environments: dev
       - name: "Gate: no conda-forge name collisions"
         run: pixi run -e dev check-no-collision
+      - name: "Gate: complete output set + every spec solvable"
+        run: pixi run -e dev check-closure
+      - name: Upload to naga-labs-staging
+        run: pixi run -e dev publish-channel
+un: pixi run -e dev check-no-collision
       - name: "Gate: complete output set + every spec solvable"
         run: pixi run -e dev check-closure
       - name: Upload to naga-labs-staging

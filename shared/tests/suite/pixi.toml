@@ -31,7 +31,8 @@ nushell = "*"
 naga-acpp-runtime-cuda = "*"
 naga-acpp-runtime-ocl = "*"
 naga-acpp-runtime-level-zero = "*"
-naga-acpp-runtime-rocm = "*"
+# HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+# naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
 # PoCL: a CPU OpenCL driver the ICD loader finds, so the OpenCL backend has
 # a device to run on without a GPU vendor's runtime.
@@ -51,7 +52,8 @@ tbb = "*"
 naga-acpp-runtime-cuda = "*"
 naga-acpp-runtime-ocl = "*"
 naga-acpp-runtime-level-zero = "*"
-naga-acpp-runtime-rocm = "*"
+# HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+# naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
 pocl = "*"
 libboost = "*"

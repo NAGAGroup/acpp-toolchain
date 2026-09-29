@@ -52,7 +52,8 @@ def common-args [src: string, prefix: string, build: string] {
     "-DACPP_CUDA_ROOT=."
     "-DACPP_OCL_ROOT=."
     "-DACPP_ZE_ROOT=."
-    "-DACPP_HIP_ROOT=."
+    # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+    # "-DACPP_HIP_ROOT=."
     (if (is-windows) { "-DACPP_LIBOMP_ROOT=bin" } else { "-DACPP_LIBOMP_ROOT=lib" })
     "-DWITH_CUDA_BACKEND=ON"
     "-DWITH_CPU_BACKEND=ON"
@@ -326,8 +327,11 @@ def linux-x86-backend-args [src: string, prefix: string] {
     # prefix with the tarball's layout (rocm deploy, below), and
     # ACPP_HIP_ROOT=. tells the fork the prefix IS the HIP root. The backend
     # plugins' RUNPATH is $ORIGIN/.., so the HIP libraries must sit in lib/.
-    "-DWITH_ROCM_BACKEND=ON"
-    $"-Dhip_ROOT=($src)/rocm-dist"
+    # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+    # (the comment block above describes the parked ROCm build-input wiring; the two lines below were it)
+    "-DWITH_ROCM_BACKEND=OFF"
+    # "-DWITH_ROCM_BACKEND=ON"
+    # $"-Dhip_ROOT=($src)/rocm-dist"
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
@@ -389,10 +393,12 @@ def windows-args [src: string, libprefix: string, build: string] {
     "-DWITH_OPENCL_BACKEND=ON"
     # ROCm on Windows x64 from TheRock's windows multiarch tarball (a
     # win-64-only source in the recipe; win-arm64 overrides this OFF).
-    ...(if (($src | path join "rocm-dist") | path exists) { [
-      "-DWITH_ROCM_BACKEND=ON"
-      $"-Dhip_ROOT=($src)/rocm-dist"
-    ] } else { [] })
+    # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+    "-DWITH_ROCM_BACKEND=OFF"
+    # ...(if (($src | path join "rocm-dist") | path exists) { [
+    #   "-DWITH_ROCM_BACKEND=ON"
+    #   $"-Dhip_ROOT=($src)/rocm-dist"
+    # ] } else { [] })
     $"-DOpenCL_LIBRARY=($libprefix)/lib/OpenCL.lib"
     $"-DOpenCL_INCLUDE_DIR=($libprefix)/include"
     $"-DFETCHCONTENT_SOURCE_DIR_OCL-HEADERS=($src)/OpenCL-Headers"
@@ -438,23 +444,27 @@ def main [] {
   for pair in ([
     [($src | path join "shared" "licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
     [($src | path join "shared" "licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
-  ] ++ (if (($src | path join "rocm-dist") | path exists) {
-    # ROCm subset licences (linux-64 and win-64 — the tarball is that
-    # platform's build input); vendored for acpp-runtime-rocm's license_file.
-    # Each pair is checked only when its source file exists: the Windows
-    # tarball ships share/doc/amd_comgr but NOT share/doc/hip, rocr or
-    # rocprofiler-register, so those are skipped there (and reported).
-    ([
-      [($src | path join "shared" "licenses" "rocm" "hip-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "hip" "LICENSE.md")]
-      [($src | path join "shared" "licenses" "rocm" "rocr-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocr" "LICENSE.md")]
-      [($src | path join "shared" "licenses" "rocm" "amd_comgr-LICENSE.txt"), ($src | path join "rocm-dist" "share" "doc" "amd_comgr" "LICENSE.txt")]
-      [($src | path join "shared" "licenses" "rocm" "rocprofiler-register-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocprofiler-register" "LICENSE.md")]
-    ] | where {|p|
-      let present = ($p.1 | path exists)
-      if not $present { print ("license check: skipped " + $p.1 + " (not in this platform's tarball)") }
-      $present
-    })
-  } else { [] })) {
+  ]
+  # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+  # The list above used to end `] ++ (if rocm-dist exists { ROCm licence pairs } else { [] })`:
+  #   ++ (if (($src | path join "rocm-dist") | path exists) {
+  #     # ROCm subset licences (linux-64 and win-64 — the tarball is that
+  #     # platform's build input); vendored for acpp-runtime-rocm's license_file.
+  #     # Each pair is checked only when its source file exists: the Windows
+  #     # tarball ships share/doc/amd_comgr but NOT share/doc/hip, rocr or
+  #     # rocprofiler-register, so those are skipped there (and reported).
+  #     ([
+  #       [($src | path join "shared" "licenses" "rocm" "hip-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "hip" "LICENSE.md")]
+  #       [($src | path join "shared" "licenses" "rocm" "rocr-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocr" "LICENSE.md")]
+  #       [($src | path join "shared" "licenses" "rocm" "amd_comgr-LICENSE.txt"), ($src | path join "rocm-dist" "share" "doc" "amd_comgr" "LICENSE.txt")]
+  #       [($src | path join "shared" "licenses" "rocm" "rocprofiler-register-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocprofiler-register" "LICENSE.md")]
+  #     ] | where {|p|
+  #       let present = ($p.1 | path exists)
+  #       if not $present { print ("license check: skipped " + $p.1 + " (not in this platform's tarball)") }
+  #       $present
+  #     })
+  #   } else { [] })
+  ) {
     if ((open --raw $pair.0 | str replace --all "\r" "") != (open --raw $pair.1 | str replace --all "\r" "")) {
       error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update shared/licenses/"}
     }
@@ -515,12 +525,13 @@ def main [] {
   # (CMAKE_FIND_ROOT_PATH = prefix + sysroot, find_library/find_path ONLY), so
   # add it as a root. Paths already under a root are not re-rooted, so
   # hip_ROOT resolves as given.
-  let rocm = ($src | path join "rocm-dist")
-  let activation_args = (if ($rocm | path exists) {
-    $activation_args | each {|a|
-      if ($a | str starts-with "-DCMAKE_FIND_ROOT_PATH=") { $"($a);($rocm)" } else { $a }
-    }
-  } else { $activation_args })
+  # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+  # let rocm = ($src | path join "rocm-dist")
+  # let activation_args = (if ($rocm | path exists) {
+    # $activation_args | each {|a|
+      # if ($a | str starts-with "-DCMAKE_FIND_ROOT_PATH=") { $"($a);($rocm)" } else { $a }
+    # }
+  # } else { $activation_args })
 
   let args = ($activation_args
     | append (common-args $src $prefix $build)
@@ -586,63 +597,64 @@ def main [] {
   } else {
   }
 
+  # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
   # ROCm runtime subset: the rows of the fork's full-mode HIP deploy
   # manifest (config/{linux,windows}/common/deploy/hip.json), which under
   # managed the fork does not deploy itself, plus the HIP headers so the
   # hip multipass target compiles. Copied with the tarball's OWN layout so
   # the discovered subdirs resolve under the prefix (ACPP_HIP_ROOT=.).
-  if ($rocm | path exists) {
-    if not (is-windows) {
-      let libdir = ($prefix | path join "lib")
-      for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
-        let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
-        if ($matches | is-empty) {
-          if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
-            error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
-          }
-          print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
-          continue
-        }
-        ^cp -a ...$matches $libdir
-        print $"rocm deploy: lib($stem): ($matches | length) files"
-      }
-      let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
-      if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
-      let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
-      if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
-      let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
-      mkdir $bitcode_dest
-      ^cp -a $bitcode $bitcode_dest
-      print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
-    } else {
-      let bindir = ($prefix | path join "bin")
-      let rocm_bin = ($rocm | path join "bin")
-      let dlls = (glob ($rocm_bin | path join "*.dll" | str replace --all '\' '/') | where {|f| ($f | path basename) =~ '^(amdhip64|amd_comgr|hiprtc)' })
-      if ($dlls | where {|f| ($f | path basename) =~ '^amdhip64' } | is-empty) {
-        print (ls $rocm_bin | get name | path basename | str join "\n")
-        error make {msg: $"rocm deploy: no amdhip64*.dll under ($rocm_bin)"}
-      }
-      for f in $dlls { cp $f $bindir }
-      print $"rocm deploy: ($dlls | length) DLLs -> ($bindir)"
-      for lib in (glob ($rocm | path join "lib" "amdhip64*.lib" | str replace --all '\' '/')) { cp $lib ($prefix | path join "lib") }
-      let bc = (glob ($rocm | path join "**" "amdgcn" "bitcode" | str replace --all '\' '/') | first)
-      if ($bc | is-empty) { error make {msg: "rocm deploy: no amdgcn/bitcode in the windows tarball"} }
-      let rel = ($bc | path relative-to $rocm)
-      let dest = ($prefix | path join $rel | path dirname)
-      mkdir $dest
-      cp -r $bc $dest
-      print $"rocm deploy: bitcode ($rel)"
-    }
-    # HIP headers (both platforms): hip/ and hsa/ from the tarball's include.
-    for d in [hip hsa] {
-      let s = ($rocm | path join "include" $d)
-      if ($s | path exists) {
-        mkdir ($prefix | path join "include")
-        cp -r $s ($prefix | path join "include")
-        print $"rocm deploy: include/($d)"
-      }
-    }
-  }
+  # if ($rocm | path exists) {
+    # if not (is-windows) {
+      # let libdir = ($prefix | path join "lib")
+      # for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
+        # let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
+        # if ($matches | is-empty) {
+          # if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
+            # error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
+          # }
+          # print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
+          # continue
+        # }
+        # ^cp -a ...$matches $libdir
+        # print $"rocm deploy: lib($stem): ($matches | length) files"
+      # }
+      # let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
+      # if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
+      # let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
+      # if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
+      # let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
+      # mkdir $bitcode_dest
+      # ^cp -a $bitcode $bitcode_dest
+      # print $"rocm deploy: bitcode -> ($bitcode_dest)/bitcode"
+    # } else {
+      # let bindir = ($prefix | path join "bin")
+      # let rocm_bin = ($rocm | path join "bin")
+      # let dlls = (glob ($rocm_bin | path join "*.dll" | str replace --all '\' '/') | where {|f| ($f | path basename) =~ '^(amdhip64|amd_comgr|hiprtc)' })
+      # if ($dlls | where {|f| ($f | path basename) =~ '^amdhip64' } | is-empty) {
+        # print (ls $rocm_bin | get name | path basename | str join "\n")
+        # error make {msg: $"rocm deploy: no amdhip64*.dll under ($rocm_bin)"}
+      # }
+      # for f in $dlls { cp $f $bindir }
+      # print $"rocm deploy: ($dlls | length) DLLs -> ($bindir)"
+      # for lib in (glob ($rocm | path join "lib" "amdhip64*.lib" | str replace --all '\' '/')) { cp $lib ($prefix | path join "lib") }
+      # let bc = (glob ($rocm | path join "**" "amdgcn" "bitcode" | str replace --all '\' '/') | first)
+      # if ($bc | is-empty) { error make {msg: "rocm deploy: no amdgcn/bitcode in the windows tarball"} }
+      # let rel = ($bc | path relative-to $rocm)
+      # let dest = ($prefix | path join $rel | path dirname)
+      # mkdir $dest
+      # cp -r $bc $dest
+      # print $"rocm deploy: bitcode ($rel)"
+    # }
+    # # HIP headers (both platforms): hip/ and hsa/ from the tarball's include.
+    # for d in [hip hsa] {
+      # let s = ($rocm | path join "include" $d)
+      # if ($s | path exists) {
+        # mkdir ($prefix | path join "include")
+        # cp -r $s ($prefix | path join "include")
+        # print $"rocm deploy: include/($d)"
+      # }
+    # }
+  # }
 
   # Clang config files (<triple>-clang{,++,-cpp}.cfg in bin/): bare clang
   # then finds --sysroot/-isystem/-L/-rpath with no activation script. Not on

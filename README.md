@@ -99,6 +99,12 @@ OpenCL), Mesa's rusticl, and pocl.
 
 ### AMD / ROCm
 
+<!-- HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process -->
+> **Parked for build 2.** `acpp-runtime-rocm` is not built or published in
+> this build: TheRock 10.0.0's `libamd_comgr.so.3` links its own
+> `libLLVM.so.23`, which cannot coexist with our `libLLVM.so.21` in one
+> process. It will return. The text below describes the intended package.
+
 ```sh
 pixi add acpp-runtime-rocm    # AMD: needs the AMDGPU driver on the host
 ```

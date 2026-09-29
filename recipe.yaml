@@ -73,24 +73,25 @@ outputs:
       - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
         sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
         target_directory: OpenCL-CLHPP
-      # ROCm, linux-64: TheRock's stable MULTI-ARCH tarball (host code plus
-      # every GPU family's kernels as .kpack) is the BUILD input. The staging
-      # build copies the runtime subset into the prefix (carved into
-      # naga-acpp-runtime-rocm). AMD publishes no checksum sidecar; the sha256
-      # below was computed from a direct download of each tarball.
-      - if: target_platform == "linux-64"
-        then:
-          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
-            sha256: 1c5e807875d26a2470ecc7323daa5b5b9009208a55c3290ac255a909cde15fc6
-            target_directory: rocm-dist
-      # ROCm, win-64: TheRock's windows multi-arch tarball, same role as the
-      # linux one (discovery input; the runtime subset is copied into the
-      # prefix by build-stage.nu).
-      - if: target_platform == "win-64"
-        then:
-          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-multiarch-10.0.0.tar.gz
-            sha256: ebe454fe9ad663655177462187a4c86c72fd0537638f6cbea34660ddebf40056
-            target_directory: rocm-dist
+      # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+      # # ROCm, linux-64: TheRock's stable MULTI-ARCH tarball (host code plus
+      # # every GPU family's kernels as .kpack) is the BUILD input. The staging
+      # # build copies the runtime subset into the prefix (carved into
+      # # naga-acpp-runtime-rocm). AMD publishes no checksum sidecar; the sha256
+      # # below was computed from a direct download of each tarball.
+      # - if: target_platform == "linux-64"
+        # then:
+          # - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
+            # sha256: 1c5e807875d26a2470ecc7323daa5b5b9009208a55c3290ac255a909cde15fc6
+            # target_directory: rocm-dist
+      # # ROCm, win-64: TheRock's windows multi-arch tarball, same role as the
+      # # linux one (discovery input; the runtime subset is copied into the
+      # # prefix by build-stage.nu).
+      # - if: target_platform == "win-64"
+        # then:
+          # - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-multiarch-10.0.0.tar.gz
+            # sha256: ebe454fe9ad663655177462187a4c86c72fd0537638f6cbea34660ddebf40056
+            # target_directory: rocm-dist
       # Metal, osx: metal-cpp headers (Apache-2.0), build-only.
       - if: osx
         then:
@@ -320,8 +321,9 @@ outputs:
               - lib/libompd*
               # lldb's library belongs to naga-acpp-lldb
               - lib/liblldb*
-              # ROCm runtime subset (deployed from the TheRock tarball by the
-              # staging build) belongs to naga-acpp-runtime-rocm
+              # ROCm runtime subset: PARKED for build 2 (naga-acpp-runtime-rocm is
+              # not built and the TheRock tarball is not fetched, so nothing
+              # deploys these). The excludes stay as harmless guards.
               - lib/libhiprtc*
               - lib/libamdhip64*
               - lib/libhsa*
@@ -329,10 +331,18 @@ outputs:
               - lib/libroc*
               - lib/llvm/amdgcn/**
               - lib/rocm_sysdeps/**
+              # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+              # Keep the HIP backend plugin and its JIT tool out of the runtime package (lib/hipSYCL/** is included above).
+              - lib/hipSYCL/librt-backend-hip.so
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
             else:
               # libomp comes from conda-forge llvm-openmp here too
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
+              # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+              # Keep the HIP backend plugin and its JIT tool out of the runtime package (Library/bin/hipSYCL/** is included above).
+              - Library/bin/hipSYCL/rt-backend-hip.dll
+              - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
     requirements:
       run:
         # NB the lane mutex is deliberately absent from this list. It arrives
@@ -481,10 +491,9 @@ outputs:
                   - lib/hipSYCL/librt-backend-cuda.so
                   - lib/hipSYCL/librt-backend-ze.so
                   - lib/hipSYCL/librt-backend-ocl.so
-                  - lib/hipSYCL/librt-backend-hip.so
+                  # HIP-PARKED (build 2): librt-backend-hip.so and libllvm-to-amdgpu.so moved to not_exists below (TheRock comgr links its own libLLVM.so.23)
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
               - if: target_platform == "win-arm64"
                 then:
@@ -503,25 +512,30 @@ outputs:
                   - Library/bin/hipSYCL/rt-backend-cuda.dll
                   - Library/bin/hipSYCL/rt-backend-ze.dll
                   - Library/bin/hipSYCL/rt-backend-ocl.dll
-                  - Library/bin/hipSYCL/rt-backend-hip.dll
+                  # HIP-PARKED (build 2): rt-backend-hip.dll and llvm-to-amdgpu-tool.exe moved to not_exists below (TheRock comgr links its own libLLVM.so.23)
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
-                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
                   - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-toolchain.json
             not_exists:
               - if: linux
                 then:
-                  # the ROCm runtime subset is naga-acpp-runtime-rocm's, not ours
+                  # the ROCm runtime subset is parked (not shipped) for build 2
                   - lib/libamdhip64.so
                   - lib/libhsa-runtime64.so
+                  # HIP-PARKED (build 2): the HIP backend plugin and its JIT tool must not ship (TheRock comgr links its own libLLVM.so.23)
+                  - lib/hipSYCL/librt-backend-hip.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/libomp.so
                   - lib/liblldb.so
                   # base packages ship NO activation; the CUDA bitcode wiring
                   # moved to naga-acpp-runtime-cuda, whose install brings libdevice
                   - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
+                  # HIP-PARKED (build 2): the HIP backend plugin and its JIT tool must not ship (TheRock comgr links its own libLLVM.so.23)
+                  - Library/bin/hipSYCL/rt-backend-hip.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
                   - Library/bin/libomp.dll
                   - etc/conda/activate.d/acpp-runtime-activate.sh
   - package:
@@ -1020,9 +1034,9 @@ outputs:
               - bin/llvm-profgen
               - include/AdaptiveCpp/**
               - lib/cmake/AdaptiveCpp/**
-              # ROCm headers ship with naga-acpp-runtime-rocm (win-64), and
-              # its headers on linux too — exclude both since llvm-dev's
-              # include/** glob would otherwise swallow them.
+              # ROCm subset is PARKED for build 2 (nothing ships it); these
+              # excludes stay as harmless guards so llvm-dev's include/** glob
+              # never swallows ROCm headers if the subset returns.
               - include/hip/**
               - include/hsa/**
               # claimed by naga-acpp-tools
@@ -1107,9 +1121,9 @@ outputs:
               - Library/bin/llvm-profgen.exe
               - Library/include/AdaptiveCpp/**
               - Library/lib/cmake/AdaptiveCpp/**
-              # ROCm headers ship with naga-acpp-runtime-rocm (win-64) —
-              # exclude them since llvm-dev's Library/include/** glob would
-              # otherwise swallow them.
+              # ROCm subset is PARKED for build 2 (nothing ships it); these
+              # excludes stay as harmless guards so llvm-dev's Library/include/**
+              # glob never swallows ROCm headers if the subset returns.
               - Library/include/hip/**
               - Library/include/hsa/**
               - Library/lib/clang/**
@@ -1176,9 +1190,10 @@ outputs:
               - Library/lib/acpp-common.lib
               - Library/bin/hipSYCL/**
               - Library/lib/hipSYCL/**
-              # ROCm runtime DLLs/import libs belong to naga-acpp-runtime-rocm
-              # (win-64) — llvm-dev's Library/bin/** and Library/lib/**/*.lib
-              # globs would otherwise swallow them.
+              # ROCm subset is PARKED for build 2 (nothing ships it); these
+              # excludes stay as harmless guards so llvm-dev's Library/bin/**
+              # and Library/lib/**/*.lib globs never swallow ROCm DLLs/import
+              # libs if the subset returns.
               - Library/bin/amdhip64*.dll
               - Library/bin/amd_comgr*.dll
               - Library/bin/hiprtc*.dll
@@ -2390,82 +2405,83 @@ outputs:
       summary: acpp SYCL runtime with OpenCL backend dependencies (ICD loader)
       license: BSD-3-Clause
 
-  # ROCm is the deliberate exception to "metapackages over conda-forge":
-  # conda-forge's ROCm is generations behind the LLVM this toolchain needs
-  # (the generic JIT requires acpp's LLVM <= ROCm's LLVM), so the runtime
-  # subset is deployed from TheRock's stable core tarball by the staging
-  # build and CARVED here — real files, not dependencies. Named for rocm,
-  # not hip.
-  - package:
-      name: naga-acpp-runtime-rocm
-      version: ${{ version }}
-    # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching shared
-    # ourselves collides with that restore ("File already exists").
-    inherit: llvm-acpp-stage
-    build:
-      # Trial dispatches bump this via the build_number workflow input so
-      # re-published artifacts get fresh filenames instead of 409ing.
-      number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
-      # Lane tag + variant hash + build number. See llvm_build_tag in context.
-      string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      skip:
-        - target_platform not in ["linux-64", "win-64"]
-      files:
-        include:
-          # The fork's full-mode HIP deploy rows, copied into the prefix by the
-          # staging build from the TheRock multi-arch tarball.
-          - if: linux
-            then:
-              - lib/libhiprtc*
-              - lib/libamdhip64*
-              - lib/libhsa*
-              - lib/libamd_comgr*
-              - lib/libroc*
-              - lib/llvm/amdgcn/**
-              - lib/rocm_sysdeps/**
-              - include/hip/**
-              - include/hsa/**
-            else:
-              - Library/bin/amdhip64*.dll
-              - Library/bin/amd_comgr*.dll
-              - Library/bin/hiprtc*.dll
-              - Library/lib/amdhip64*.lib
-              - Library/**/amdgcn/**
-              - Library/include/hip/**
-              - Library/include/hsa/**
-    requirements:
-      run:
-        - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
-      run_constraints:
-        - acpp-runtime-rocm <0.0a0
-        - acpp-runtime-rocm-nightly <0.0a0
-    tests:
-      - package_contents:
-          files:
-            exists:
-              - if: linux
-                then:
-                  - lib/libamdhip64.so*
-                  - lib/libhsa-runtime64.so*
-                  - lib/libamd_comgr.so*
-                  - lib/llvm/amdgcn/bitcode/ockl.bc
-                else:
-                  - Library/bin/amdhip64*.dll
-    about:
-      summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
-      # Per-component sweep, read from the tarball's own share/doc texts:
-      # HIP runtime + hiprtc + rocprofiler-register are MIT, hsa-runtime64
-      # (ROCR) is NCSA, amd_comgr and the amdgcn device libraries are
-      # Apache-2.0 WITH LLVM-exception. Texts vendored beside the other
-      # licenses; drift-checked against the extracted tarball at every
-      # staging build.
-      license: MIT AND NCSA AND Apache-2.0 WITH LLVM-exception
-      license_file:
-        - shared/licenses/rocm/hip-LICENSE.md
-        - shared/licenses/rocm/rocr-LICENSE.md
-        - shared/licenses/rocm/amd_comgr-LICENSE.txt
-        - shared/licenses/rocm/rocprofiler-register-LICENSE.md
+  # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+  # # ROCm is the deliberate exception to "metapackages over conda-forge":
+  # # conda-forge's ROCm is generations behind the LLVM this toolchain needs
+  # # (the generic JIT requires acpp's LLVM <= ROCm's LLVM), so the runtime
+  # # subset is deployed from TheRock's stable core tarball by the staging
+  # # build and CARVED here — real files, not dependencies. Named for rocm,
+  # # not hip.
+  # - package:
+      # name: naga-acpp-runtime-rocm
+      # version: ${{ version }}
+    # # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # # dir restored (shared/ and its licenses included); fetching shared
+    # # ourselves collides with that restore ("File already exists").
+    # inherit: llvm-acpp-stage
+    # build:
+      # # Trial dispatches bump this via the build_number workflow input so
+      # # re-published artifacts get fresh filenames instead of 409ing.
+      # number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
+      # # Lane tag + variant hash + build number. See llvm_build_tag in context.
+      # string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
+      # skip:
+        # - target_platform not in ["linux-64", "win-64"]
+      # files:
+        # include:
+          # # The fork's full-mode HIP deploy rows, copied into the prefix by the
+          # # staging build from the TheRock multi-arch tarball.
+          # - if: linux
+            # then:
+              # - lib/libhiprtc*
+              # - lib/libamdhip64*
+              # - lib/libhsa*
+              # - lib/libamd_comgr*
+              # - lib/libroc*
+              # - lib/llvm/amdgcn/**
+              # - lib/rocm_sysdeps/**
+              # - include/hip/**
+              # - include/hsa/**
+            # else:
+              # - Library/bin/amdhip64*.dll
+              # - Library/bin/amd_comgr*.dll
+              # - Library/bin/hiprtc*.dll
+              # - Library/lib/amdhip64*.lib
+              # - Library/**/amdgcn/**
+              # - Library/include/hip/**
+              # - Library/include/hsa/**
+    # requirements:
+      # run:
+        # - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
+      # run_constraints:
+        # - acpp-runtime-rocm <0.0a0
+        # - acpp-runtime-rocm-nightly <0.0a0
+    # tests:
+      # - package_contents:
+          # files:
+            # exists:
+              # - if: linux
+                # then:
+                  # - lib/libamdhip64.so*
+                  # - lib/libhsa-runtime64.so*
+                  # - lib/libamd_comgr.so*
+                  # - lib/llvm/amdgcn/bitcode/ockl.bc
+                # else:
+                  # - Library/bin/amdhip64*.dll
+    # about:
+      # summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
+      # # Per-component sweep, read from the tarball's own share/doc texts:
+      # # HIP runtime + hiprtc + rocprofiler-register are MIT, hsa-runtime64
+      # # (ROCR) is NCSA, amd_comgr and the amdgcn device libraries are
+      # # Apache-2.0 WITH LLVM-exception. Texts vendored beside the other
+      # # licenses; drift-checked against the extracted tarball at every
+      # # staging build.
+      # license: MIT AND NCSA AND Apache-2.0 WITH LLVM-exception
+      # license_file:
+        # - shared/licenses/rocm/hip-LICENSE.md
+        # - shared/licenses/rocm/rocr-LICENSE.md
+        # - shared/licenses/rocm/amd_comgr-LICENSE.txt
+        # - shared/licenses/rocm/rocprofiler-register-LICENSE.md
 
 about:
   homepage: https://github.com/AdaptiveCpp/AdaptiveCpp

@@ -99,19 +99,18 @@ def is-darwin [] { $nu.os-info.name == "macos" }
 
 def is-arm [] { $nu.os-info.arch == "aarch64" }
 
-# Windows on ARM64: OMP and OpenCL (no CUDA, Level Zero or ROCm packages exist for win-arm64); no compiler-rt
-# (the recipe skips that output here) and no clang-tools-extra. Appended after
-# windows-args, so these -D values win.
+# Windows on ARM64: OMP and OpenCL (no CUDA, Level Zero or ROCm packages exist for win-arm64). compiler-rt BUILTINS only: the vs2026 activation links clang_rt.builtins-aarch64.lib (conda-forge parity), and nothing else supplies it. No sanitizers, no clang-tools-extra.
+# Appended after windows-args, so these -D values win.
 def windows-arm-args [] {
   [
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;openmp"
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;openmp;compiler-rt"
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
     "-DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-pc-windows-msvc"
-    "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
+    "-DCOMPILER_RT_BUILD_BUILTINS=ON"
     "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
     "-DCOMPILER_RT_BUILD_PROFILE=OFF"
     "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF"
@@ -440,14 +439,21 @@ def main [] {
     [($src | path join "shared" "licenses" "llvm-LICENSE.TXT"), ($src | path join "llvm-project" "LICENSE.TXT")]
     [($src | path join "shared" "licenses" "AdaptiveCpp-LICENSE"), ($src | path join "AdaptiveCpp" "LICENSE")]
   ] ++ (if (($src | path join "rocm-dist") | path exists) {
-    # ROCm subset licences (linux-64 only — the tarball is that platform's
-    # build input); vendored for acpp-runtime-rocm's license_file
-    [
+    # ROCm subset licences (linux-64 and win-64 — the tarball is that
+    # platform's build input); vendored for acpp-runtime-rocm's license_file.
+    # Each pair is checked only when its source file exists: the Windows
+    # tarball ships share/doc/amd_comgr but NOT share/doc/hip, rocr or
+    # rocprofiler-register, so those are skipped there (and reported).
+    ([
       [($src | path join "shared" "licenses" "rocm" "hip-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "hip" "LICENSE.md")]
       [($src | path join "shared" "licenses" "rocm" "rocr-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocr" "LICENSE.md")]
       [($src | path join "shared" "licenses" "rocm" "amd_comgr-LICENSE.txt"), ($src | path join "rocm-dist" "share" "doc" "amd_comgr" "LICENSE.txt")]
       [($src | path join "shared" "licenses" "rocm" "rocprofiler-register-LICENSE.md"), ($src | path join "rocm-dist" "share" "doc" "rocprofiler-register" "LICENSE.md")]
-    ]
+    ] | where {|p|
+      let present = ($p.1 | path exists)
+      if not $present { print ("license check: skipped " + $p.1 + " (not in this platform's tarball)") }
+      $present
+    })
   } else { [] })) {
     if ((open --raw $pair.0 | str replace --all "\r" "") != (open --raw $pair.1 | str replace --all "\r" "")) {
       error make {msg: $"vendored license ($pair.0) differs from source tree ($pair.1) — update shared/licenses/"}
@@ -553,7 +559,7 @@ def main [] {
   # Not on the macOS first cut: compiler-rt is deliberately not built there
   # (the sanitizer story is its own pass), so absence is the expected state,
   # not hollowness.
-  # nor on win-arm64 (no compiler-rt in its first cut).
+  # nor on win-arm64 (builtins only there: no asan runtime to look for).
   if not ((is-darwin) or ((is-windows) and (is-arm))) {
     let rt_glob = (if (is-windows) {
       ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')

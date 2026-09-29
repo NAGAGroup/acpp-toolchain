@@ -13,6 +13,7 @@
 # here.
 #
 # Usage: nu install-cfg.nu <triple> <sysroot:true|false>
+#   (sysroot is a nushell bool: pass a bare true or false, not a quoted string)
 #   sysroot=true  (linux): the full template — clang/clang++ end in
 #                 --sysroot=<CFGDIR>/../<triple>/sysroot, clang-cpp gets
 #                 -isystem plus --sysroot (it never links).
@@ -21,7 +22,7 @@
 #                 from SDKROOT, set by the sdkroot_env activation, not by
 #                 this file), and -rpath-link is a GNU-ld-only flag that
 #                 ld64 does not understand. clang-cpp keeps only -isystem.
-def main [triple: string, sysroot: string] {
+def main [triple: string, sysroot: bool] {
   let here = $env.FILE_PWD
   let cfg_dir = ($here | path join "cfg")
   let bindir = ($env.PREFIX | path join "bin")
@@ -36,7 +37,7 @@ def main [triple: string, sysroot: string] {
   for d in $drivers {
     let raw = (open --raw ($cfg_dir | path join $d.tmpl) | str replace --all "@TRIPLE@" $triple)
     let lines = ($raw | lines)
-    let filtered = (if $sysroot == "true" {
+    let filtered = (if $sysroot {
       $lines
     } else {
       $lines | where {|l|

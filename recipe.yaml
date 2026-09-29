@@ -16,7 +16,7 @@ context:
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="e4abbc38b3b678663a83a3e47a13321d653923ad") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="3f96b940d872580d5b6db114bebb447609414cb8") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -77,10 +77,11 @@ outputs:
       # every GPU family's kernels as .kpack) is the BUILD input. The staging
       # build copies the runtime subset into the prefix (carved into
       # naga-acpp-runtime-rocm). AMD publishes no checksum sidecar; the sha256
-      # is pinned once a CI run has downloaded it.
+      # below was computed from a direct download of each tarball.
       - if: target_platform == "linux-64"
         then:
           - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
+            sha256: 1c5e807875d26a2470ecc7323daa5b5b9009208a55c3290ac255a909cde15fc6
             target_directory: rocm-dist
       # ROCm, win-64: TheRock's windows multi-arch tarball, same role as the
       # linux one (discovery input; the runtime subset is copied into the
@@ -88,6 +89,7 @@ outputs:
       - if: target_platform == "win-64"
         then:
           - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-multiarch-10.0.0.tar.gz
+            sha256: ebe454fe9ad663655177462187a4c86c72fd0537638f6cbea34660ddebf40056
             target_directory: rocm-dist
       # Metal, osx: metal-cpp headers (Apache-2.0), build-only.
       - if: osx
@@ -849,11 +851,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # macOS first cut ships compiler + runtime only; the sanitizer story is
-      # its own pass (compiler-rt is not built there).
+      # macOS first cut ships compiler + runtime only; the sanitizer story is its own pass (compiler-rt is not built there). win-arm64 builds BUILTINS only (the vs2026 activation links clang_rt.builtins-aarch64.lib).
       skip:
         - osx
-        - target_platform == "win-arm64"
       files:
         include:
           # The clang resource directory splits cleanly: include/ holds the
@@ -920,8 +920,14 @@ outputs:
                   # and the build must stop rather than certify it.
                   - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.asan*
                   - lib/clang/${{ llvm_major }}/lib/*/libclang_rt.profile*
-                else:
+              - if: target_platform == "win-64"
+                then:
                   - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.asan*
+                  - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.builtins-x86_64.lib
+              # win-arm64 builds builtins only (no sanitizers).
+              - if: target_platform == "win-arm64"
+                then:
+                  - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.builtins-aarch64.lib
             not_exists:
               # The resource HEADERS belong to acpp, not here.
               - if: linux
@@ -1789,6 +1795,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1844,6 +1854,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp-clang_win-64', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1897,6 +1911,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1958,6 +1976,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -2010,6 +2032,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp-clang_win-arm64', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -2062,6 +2088,10 @@ outputs:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
         - vs2026_${{ target_platform }}
         - vswhere
+        # The activation's link line names clang_rt.builtins-<arch>.lib, which
+        # lives in naga-acpp-compiler-rt (conda-forge's clang_win-* depend on
+        # compiler-rt for the same reason).
+        - ${{ pin_subpackage('naga-acpp-compiler-rt', exact=True) }}
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}

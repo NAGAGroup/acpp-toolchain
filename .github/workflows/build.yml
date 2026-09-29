@@ -753,6 +753,7 @@ jobs:
           key: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
           restore-keys: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-
       - name: Build -> indexed local channel
+        id: channel
         shell: pwsh
         run: |
           $env:PATH = @(
@@ -769,17 +770,19 @@ jobs:
       # (this box's vs2026 activation finds VS2026 via vswhere); the GPU box
       # has no VS at all and only RUNS the binaries this job produces.
       - name: Pin the suite manifest to win-64
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         run: |
           (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
       - name: Install suite environment
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
         run: pixi install
       - name: "build: omp"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
@@ -794,7 +797,7 @@ jobs:
           ) -join ";"
           pixi run nu suite.nu build omp "omp"
       - name: "build: generic (+PCUDA)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
@@ -809,7 +812,7 @@ jobs:
           ) -join ";"
           pixi run nu suite.nu build generic "generic" --pcuda
       - name: "build: cuda"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
@@ -825,7 +828,7 @@ jobs:
           pixi run nu suite.nu build cuda "cuda:sm_75"
       # No AMD GPU on this box either: compile only.
       - name: "build: hip (compile only, no AMD GPU)"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
@@ -840,7 +843,7 @@ jobs:
           ) -join ";"
           pixi run nu suite.nu build hip "hip:gfx906"
       - name: "build: multipass"
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         shell: pwsh
         working-directory: shared/tests/suite
         timeout-minutes: 30
@@ -886,6 +889,7 @@ jobs:
           path: local-channel/
           retention-days: 14
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
         with:
           name: suite-win-64
           retention-days: 14

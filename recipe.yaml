@@ -679,8 +679,9 @@ outputs:
         - python >=3.9
         - if: linux
           then:
-            - libgcc-devel_linux-64 >=13
-            - libstdcxx-devel_linux-64 >=13
+            # per-platform: the _linux-64 spelling also solves on aarch64 (it is the cross-compiler's target libgcc) and is useless there.
+            - libgcc-devel_${{ target_platform }} >=13
+            - libstdcxx-devel_${{ target_platform }} >=13
             # The clang cfg files (install-cfg.nu) carry --sysroot=; a
             # consumer needs the sysroot package installed for that flag to
             # resolve to real headers/libs.

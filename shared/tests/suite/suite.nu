@@ -59,12 +59,14 @@ def "main build" [
     error make {msg: "suite.nu build: CXX/CC are not set — the naga-acpp-clangxx_* activation package must be installed and activated in this environment"}
   }
 
-  # AdaptiveCpp_DIR must be the directory CONTAINING AdaptiveCppConfig.cmake
-  # (find_package(AdaptiveCpp) semantics) — its exact subpath under prefix
-  # varies by platform, so glob rather than hardcode it.
-  let cfgs = (glob ($prefix | path join "**" "AdaptiveCppConfig.cmake"))
+  # AdaptiveCpp_DIR must be the directory CONTAINING the package config
+  # (find_package(AdaptiveCpp) semantics). The fork installs
+  # lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake (CMakeLists.txt:1102);
+  # upstream spells it AdaptiveCppConfig.cmake, so accept either. The exact
+  # subpath under prefix varies by platform, so glob rather than hardcode it.
+  let cfgs = (glob ($prefix | path join "**" "{adaptivecpp-config,AdaptiveCppConfig}.cmake"))
   if ($cfgs | is-empty) {
-    error make {msg: $"suite.nu build: AdaptiveCppConfig.cmake not found anywhere under ($prefix) — is naga-acpp installed in this environment?"}
+    error make {msg: $"suite.nu build: adaptivecpp-config.cmake not found anywhere under ($prefix) — is naga-acpp installed in this environment?"}
   }
   let acpp_dir = ($cfgs | first | path dirname)
 

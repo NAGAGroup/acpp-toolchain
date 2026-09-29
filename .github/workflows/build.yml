@@ -718,24 +718,48 @@ jobs:
       - name: Select build storage
         shell: pwsh
         run: |
+          # Staging-cache restores are small-file I/O bound. Prefer a Dev Drive
+          # VHDX (ReFS: rattler-build's reflink_or_copy block-clones there, and
+          # Defender runs in performance mode), then plain ReFS, then D:, then
+          # the workspace. diskpart, not New-VHD: no Hyper-V module needed.
           $root = $null
-          if (Test-Path "D:\") {
-            $root = "D:"
-          } else {
-            try {
-              $vhd = "C:\build-drive.vhdx"
-              New-VHD -Path $vhd -SizeBytes 120GB -Dynamic | Out-Null
-              $disk = Mount-VHD -Path $vhd -PassThru | Initialize-Disk -PassThru
-              $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
-              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false | Out-Null
-              $root = "$($part.DriveLetter):"
-              Write-Host "No D:; mounted ReFS VHDX at $root"
-            } catch {
-              Write-Host "VHDX fallback failed ($_); using workspace drive"
-              $root = $env:GITHUB_WORKSPACE
+          $kind = $null
+          $hostDrive = if (Test-Path "D:\") { "D:" } else { "C:" }
+          try {
+            $free = (Get-PSDrive -Name $hostDrive.TrimEnd(':')).Free
+            $size = [math]::Min(300GB, [math]::Floor($free * 0.85 / 1GB) * 1GB)
+            if ($size -lt 100GB) { throw "only $([math]::Round($free / 1GB)) GB free on $hostDrive" }
+            $vhd = "$hostDrive\acpp-dev-drive.vhdx"
+            if (Test-Path $vhd) {
+              Dismount-DiskImage -ImagePath $vhd -ErrorAction SilentlyContinue | Out-Null
+              Remove-Item $vhd -Force
             }
+            $dp = "create vdisk file=`"$vhd`" maximum=$([int64]($size / 1MB)) type=expandable`r`nselect vdisk file=`"$vhd`"`r`nattach vdisk`r`n"
+            $dpFile = Join-Path $env:RUNNER_TEMP "mkvhd.txt"
+            Set-Content -Path $dpFile -Value $dp -Encoding ascii
+            diskpart /s $dpFile | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "diskpart exited $LASTEXITCODE" }
+            $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
+            if ($disk.PartitionStyle -eq 'RAW') { Initialize-Disk -Number $disk.Number -PartitionStyle GPT | Out-Null }
+            $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
+            try {
+              Format-Volume -DriveLetter $part.DriveLetter -DevDrive -Confirm:$false -Force -ErrorAction Stop | Out-Null
+              $kind = "Dev Drive"
+              fsutil devdrv trust "$($part.DriveLetter):" | Out-Host
+            } catch {
+              Write-Host "Dev Drive format unavailable ($_); formatting plain ReFS"
+              Format-Volume -DriveLetter $part.DriveLetter -FileSystem ReFS -Confirm:$false -Force -ErrorAction Stop | Out-Null
+              $kind = "ReFS"
+            }
+            $root = "$($part.DriveLetter):"
+          } catch {
+            Write-Host "VHDX setup failed ($_)"
           }
-          Write-Host "Fast storage root: $root"
+          if (-not $root) {
+            if (Test-Path "D:\") { $root = "D:"; $kind = "D: (NTFS)" } else { $root = $env:GITHUB_WORKSPACE; $kind = "workspace" }
+          }
+          Write-Host "Fast storage root: $root [$kind]"
+          Get-Volume | Where-Object DriveLetter | Format-Table DriveLetter, FileSystem, SizeRemaining, Size | Out-Host
           New-Item -ItemType Directory -Force -Path "$root\rattler-cache", "$root\rb-output", "$root\ccache" | Out-Null
           @(
             "CCACHE_DIR=$root\ccache"

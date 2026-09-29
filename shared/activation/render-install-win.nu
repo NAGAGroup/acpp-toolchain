@@ -102,7 +102,10 @@ def render [text: string, llvm_major: string, side: string, target_platform: str
   # the MSVC-style flag set.
   let cflags = (if $side == "clang-cl" { final-cl-flags $target_platform } else { final-cflags $target_platform })
   let cxxflags = (if $side == "clang-cl" { final-cl-flags $target_platform } else { final-cxxflags $target_platform })
+  # Our clang resource dir lives under Library/ (the conda Windows prefix), not at the prefix root where conda-forge's compiler-rt_win puts it; the templates' /lib/clang/<major>/ path would miss clang_rt.builtins-<arch>.lib.
+  # Must run BEFORE the @MAJOR_VER@ substitution, which it keys on.
   $text
+  | str replace --all "/lib/clang/@MAJOR_VER@/" "/Library/lib/clang/@MAJOR_VER@/"
   | str replace --all "@CHOST@" (chost-for $target_platform)
   | str replace --all "@CFLAGS@" $cflags
   | str replace --all "@CXXFLAGS@" $cxxflags

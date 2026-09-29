@@ -1,12 +1,14 @@
-# acpp-suite: AdaptiveCpp's OWN test suite (tests/) as the gate workspace,
-# built and run against the toolchain THROUGH A REAL SOLVE against the
-# indexed local channel the build job produced — same design as the
-# gpu-smoke workspace it replaces, so run_exports / run_constraints and the
-# channel's repodata get exercised too, not just the files inside packages.
+# acpp-suite: AdaptiveCpp's OWN test suite (tests/) as the test workspace,
+# built and run against the toolchain THROUGH A REAL SOLVE — so run_exports /
+# run_constraints and the channel's repodata get exercised too, not just the
+# files inside packages.
 #
-# The local channel is a relative path: CI downloads the build artifact to
-# <repo>/local-channel, which is three levels up from this manifest. Works
-# identically locally after `pixi run -e dev build`.
+# In CI the suite solves against the PUBLISHED channel: pin-published.nu
+# rewrites this manifest to one platform, drops the local-channel entry and
+# pins every naga-acpp* dependency to the exact version + build number.
+# Locally it still works against the indexed local channel, a relative path:
+# ../../../local-channel is <repo>/local-channel, produced by
+# `pixi run -e dev build`.
 [workspace]
 name = "acpp-suite"
 channels = ["../../../local-channel", "https://prefix.dev/jackm97/naga-labs-staging"]
@@ -34,9 +36,8 @@ naga-acpp-runtime-level-zero = "*"
 # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
 # naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
-# PoCL: a CPU OpenCL driver the ICD loader finds, so the OpenCL backend has
-# a device to run on without a GPU vendor's runtime.
-pocl = "*"
+# Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
+intel-opencl-rt = "*"
 libboost = "*"
 tbb = "*"
 
@@ -44,7 +45,6 @@ tbb = "*"
 naga-acpp-runtime-cuda = "*"
 naga-acpp-runtime-ocl = "*"
 naga-acpp-compiler-rt = "*"
-pocl = "*"
 libboost = "*"
 tbb = "*"
 
@@ -55,14 +55,14 @@ naga-acpp-runtime-level-zero = "*"
 # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
 # naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
-pocl = "*"
+# Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
+intel-opencl-rt = "*"
 libboost = "*"
 
 [feature.run.target.win-arm64.dependencies]
 naga-acpp-runtime-ocl = "*"
 
 [feature.run.target.osx-arm64.dependencies]
-pocl = "*"
 libboost = "*"
 
 # ── build: what COMPILING the tests needs ───────────────────────────────

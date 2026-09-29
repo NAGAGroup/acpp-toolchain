@@ -3,10 +3,13 @@
 #
 # Manual only, with an explicit fork commit: we publish when we have landed
 # something, and the published set names the commit it shipped. Each platform
-# is its own build -> gate -> publish chain, so one platform failing never
+# is its own build -> publish -> test chain, so one platform failing never
 # blocks another; `platforms` selects which chains run (a green platform is
 # not rebuilt). All five chains run: linux-64, linux-aarch64, osx-arm64,
-# win-64, win-arm64.
+# win-64, win-arm64. Tests install the PUBLISHED packages from the channel,
+# pinned to the exact version + build number, and never gate publishing: a
+# red test job is information only. (win-64 compiles its suite in
+# suite-build-win-64, after publish, and test-win-64 runs the binaries.)
 name: build
 
 on:
@@ -21,7 +24,7 @@ on:
         default: "linux-64"
         required: true
       publish:
-        description: "Publish to naga-labs-staging after the gates pass"
+        description: "Publish to naga-labs-staging after the build"
         type: boolean
         default: false
       build_number:
@@ -64,6 +67,8 @@ jobs:
     if: contains(format(' {0} ', inputs.platforms), ' linux-64 ')
     runs-on: Linux-x64-64
     timeout-minutes: 300
+    outputs:
+      version: ${{ steps.pkgver.outputs.version }}
     env:
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
@@ -136,44 +141,50 @@ jobs:
           name: local-channel-linux-64
           path: local-channel/
           retention-days: 14
+      - name: Package version
+        id: pkgver
+        run: pixi run -e dev nu shared/pkg-version.nu
 
-  # The gate BLOCKS publishing: it builds and runs AdaptiveCpp's OWN test
-  # suite (shared/tests/suite) against the INSTALLED channel through the
+  # Tests run AFTER publish, from the PUBLISHED channel, and never block
+  # publishing: this builds and runs AdaptiveCpp's OWN test suite
+  # (shared/tests/suite) against the naga-acpp-* packages pinned to the exact
+  # version + build number just published, through the
   # naga-acpp-clangxx_linux-64 activation package — a real solve exercising
-  # run_exports/run_constraints, not just a smoke binary.
-  gate-linux-64:
-    needs: [prepare, build-linux-64]
+  # run_exports/run_constraints, not just a smoke binary. A failure here makes
+  # this job red for information only.
+  test-linux-64:
+    needs: [prepare, build-linux-64, publish-linux-64]
     runs-on: Linux-x64-GPU
-    timeout-minutes: 300
+    timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      - name: Runner core count
+        run: nproc
       - uses: actions/checkout@v4
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-linux-64
-          path: local-channel
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
       - run: nvidia-smi
-      # pixi solves every platform in the manifest; this artifact channel only
-      # carries linux-64.
-      - name: Pin the suite manifest to linux-64
-        working-directory: shared/tests/suite
-        run: sed -i 's/^platforms = .*/platforms = ["linux-64"]/' pixi.toml
+      # pixi solves every platform in the manifest; this rewrites it to
+      # linux-64, drops the local-channel entry and pins every naga-acpp*
+      # dependency to the published version + build number.
+      - name: Pin the suite to the published linux-64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu linux-64 ${{ needs.build-linux-64.outputs.version }} ${{ inputs.build_number }}
       # Install separately from building/running, with a generous bound: a
       # hung step and a slow cold download are otherwise indistinguishable.
+      # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install
+        timeout-minutes: 60
+        run: |
+          for i in 1 2 3 4 5; do pixi install && exit 0; echo "retry $i"; sleep 60; done; exit 1
       - name: Visible backends
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
@@ -218,11 +229,10 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pcuda_tests
-      # PoCL is a CPU OpenCL driver; if it cannot take our SPIR-V the runtime
-      # skips it with a warning. Informational until PoCL ingests our SPIR-V.
-      - name: "sycl_tests: generic on OpenCL (PoCL)"
+      # Intel's CPU OpenCL runtime (conda-forge intel-opencl-rt) is the OpenCL
+      # device here, on x86-64 only.
+      - name: "sycl_tests: generic on OpenCL (Intel CPU)"
         if: ${{ !cancelled() }}
-        continue-on-error: true
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic ocl sycl_tests
@@ -236,17 +246,19 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run cuda "omp;cuda" sycl_tests
-      # No AMD GPU on this runner: compile only.
-      - name: "build: hip (compile only, no AMD GPU)"
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build hip "hip:gfx906"
+      # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+      # # No AMD GPU on this runner: compile only.
+      # - name: "build: hip (compile only, no AMD GPU)"
+      #   if: ${{ !cancelled() }}
+      #   timeout-minutes: 20
+      #   working-directory: shared/tests/suite
+      #   run: pixi run nu suite.nu build hip "hip:gfx906"
       - name: "build: multipass"
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75;hip:gfx906"
+        # HIP-PARKED (build 2): was "omp;cuda.explicit-multipass:sm_75;hip:gfx906" (TheRock comgr links its own libLLVM.so.23)
+        run: pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75"
       - name: "sycl_tests: multipass on OMP+CUDA (T4)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
@@ -259,7 +271,7 @@ jobs:
         run: pixi run sanitizer-smoke
 
   publish-linux-64:
-    needs: [prepare, build-linux-64, gate-linux-64]
+    needs: [prepare, build-linux-64]
     if: inputs.publish
     runs-on: ubuntu-latest
     permissions:
@@ -288,6 +300,8 @@ jobs:
     if: contains(format(' {0} ', inputs.platforms), ' linux-aarch64 ')
     runs-on: linux-arm64-v32
     timeout-minutes: 300
+    outputs:
+      version: ${{ steps.pkgver.outputs.version }}
     env:
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
@@ -355,35 +369,39 @@ jobs:
           name: local-channel-linux-aarch64
           path: local-channel/
           retention-days: 14
+      - name: Package version
+        id: pkgver
+        run: pixi run -e dev nu shared/pkg-version.nu
 
-  gate-linux-aarch64:
-    needs: [prepare, build-linux-aarch64]
+  # Tests run after publish, from the published channel; they never block
+  # publishing (see test-linux-64).
+  test-linux-aarch64:
+    needs: [prepare, build-linux-aarch64, publish-linux-aarch64]
     runs-on: linux-arm64-v32
-    timeout-minutes: 300
+    timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      - name: Runner core count
+        run: nproc
       - uses: actions/checkout@v4
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-linux-aarch64
-          path: local-channel
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
-      - name: Pin the suite manifest to linux-aarch64
-        working-directory: shared/tests/suite
-        run: sed -i 's/^platforms = .*/platforms = ["linux-aarch64"]/' pixi.toml
+      - name: Pin the suite to the published linux-aarch64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu linux-aarch64 ${{ needs.build-linux-aarch64.outputs.version }} ${{ inputs.build_number }}
+      # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install
+        timeout-minutes: 60
+        run: |
+          for i in 1 2 3 4 5; do pixi install && exit 0; echo "retry $i"; sleep 60; done; exit 1
       - name: Visible backends
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
@@ -423,12 +441,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pcuda_tests
-      - name: "sycl_tests: generic on OpenCL (PoCL)"
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic ocl sycl_tests
       # No GPU on this runner: compile only.
       - name: "build: cuda (compile only, no GPU)"
         if: ${{ !cancelled() }}
@@ -447,7 +459,7 @@ jobs:
         run: pixi run sanitizer-smoke
 
   publish-linux-aarch64:
-    needs: [prepare, build-linux-aarch64, gate-linux-aarch64]
+    needs: [prepare, build-linux-aarch64]
     if: inputs.publish
     runs-on: ubuntu-latest
     permissions:
@@ -476,6 +488,8 @@ jobs:
     if: contains(format(' {0} ', inputs.platforms), ' osx-arm64 ')
     runs-on: macOS-26-xlarge
     timeout-minutes: 600
+    outputs:
+      version: ${{ steps.pkgver.outputs.version }}
     env:
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
@@ -567,25 +581,29 @@ jobs:
           name: local-channel-osx-arm64
           path: local-channel/
           retention-days: 14
+      - name: Package version
+        id: pkgver
+        run: pixi run -e dev nu shared/pkg-version.nu
 
-  gate-osx-arm64:
-    needs: [prepare, build-osx-arm64]
+  # Tests run after publish, from the published channel; they never block
+  # publishing (see test-linux-64).
+  test-osx-arm64:
+    needs: [prepare, build-osx-arm64, publish-osx-arm64]
     runs-on: macOS-26-xlarge
-    timeout-minutes: 300
+    timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
       - uses: actions/checkout@v4
+      # macOS has no nproc; sysctl reports the same logical core count.
+      - name: Runner core count
+        run: sysctl -n hw.logicalcpu
       - uses: actions/checkout@v4
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-osx-arm64
-          path: local-channel
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
@@ -593,13 +611,19 @@ jobs:
       # (naga-acpp-clangxx_osx-arm64) points clang at the macOS SDK itself
       # via sdkroot_env, so the old "Point clang at the macOS SDK" step is
       # gone.
-      - name: Pin the suite manifest to osx-arm64
+      - name: Pin the suite to the published osx-arm64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu osx-arm64 ${{ needs.build-osx-arm64.outputs.version }} ${{ inputs.build_number }}
+      # pin-published.nu writes the plain platform; osx needs the macOS 26
+      # virtual-package floor, as before.
+      - name: Pin the macOS floor
         working-directory: shared/tests/suite
         run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
+      # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install
+        timeout-minutes: 60
+        run: |
+          for i in 1 2 3 4 5; do pixi install && exit 0; echo "retry $i"; sleep 60; done; exit 1
       - name: Visible backends
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
@@ -630,7 +654,7 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp sycl_tests
-      # BLOCKING: this is the Metal gate.
+      # The Metal check (informational: tests never block publishing).
       - name: "sycl_tests: generic on Metal (M2)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
@@ -641,15 +665,9 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pcuda_tests
-      - name: "sycl_tests: generic on OpenCL (PoCL)"
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic ocl sycl_tests
 
   publish-osx-arm64:
-    needs: [prepare, build-osx-arm64, gate-osx-arm64]
+    needs: [prepare, build-osx-arm64]
     if: inputs.publish
     runs-on: ubuntu-latest
     permissions:
@@ -680,6 +698,8 @@ jobs:
     if: contains(format(' {0} ', inputs.platforms), ' win-64 ')
     runs-on: Win-x64-64
     timeout-minutes: 480
+    outputs:
+      version: ${{ steps.pkgver.outputs.version }}
     env:
       ACPP_BUILD_NUMBER: ${{ inputs.build_number || '0' }}
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
@@ -794,99 +814,6 @@ jobs:
           ) -join ";"
           Write-Host "PATH length: $($env:PATH.Length)"
           pixi run -e dev build
-      # Build-once/run-on-GPU: compile AdaptiveCpp's own test suite here
-      # (this box's vs2026 activation finds VS2026 via vswhere); the GPU box
-      # has no VS at all and only RUNS the binaries this job produces.
-      - name: Pin the suite manifest to win-64
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        run: |
-          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
-      - name: Install suite environment
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install
-      - name: "build: omp"
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          pixi run nu suite.nu build omp "omp"
-      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          pixi run nu suite.nu build generic "generic" --pcuda
-      - name: "build: cuda"
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          pixi run nu suite.nu build cuda "cuda:sm_75"
-      # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
-      # # No AMD GPU on this box either: compile only.
-      # - name: "build: hip (compile only, no AMD GPU)"
-      #   if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-      #   shell: pwsh
-      #   working-directory: shared/tests/suite
-      #   timeout-minutes: 30
-      #   run: |
-      #     $env:PATH = @(
-      #       "$env:SystemRoot\system32",
-      #       "$env:SystemRoot",
-      #       "$env:SystemRoot\System32\Wbem",
-      #       "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-      #       "$env:USERPROFILE\.pixi\bin",
-      #       "$env:ProgramFiles\Git\cmd"
-      #     ) -join ";"
-      #     pixi run nu suite.nu build hip "hip:gfx906"
-      - name: "build: multipass"
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
-        shell: pwsh
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          # HIP-PARKED (build 2): was "omp;cuda.explicit-multipass:sm_75;hip:gfx906" (TheRock comgr links its own libLLVM.so.23)
-          pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75"
       - name: Prune stale staging caches
         if: always()
         shell: pwsh
@@ -918,8 +845,121 @@ jobs:
           name: local-channel-win-64
           path: local-channel/
           retention-days: 14
+      - name: Package version
+        id: pkgver
+        shell: pwsh
+        run: pixi run -e dev nu shared/pkg-version.nu
+
+  # Build-once/run-on-GPU: compile AdaptiveCpp's own test suite on this
+  # builder, after publish, against the PUBLISHED packages (this box's vs2026
+  # activation finds VS2026 via vswhere); the GPU box (test-win-64) has no VS
+  # at all and only RUNS the binaries this job produces.
+  suite-build-win-64:
+    needs: [prepare, build-win-64, publish-win-64]
+    runs-on: Win-x64-64
+    timeout-minutes: 90
+    env:
+      ACPP_SRC: ${{ github.workspace }}/acpp-src
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner core count
+        run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
+      - uses: actions/checkout@v4
+        with:
+          repository: NAGAGroup/AdaptiveCpp
+          ref: ${{ needs.prepare.outputs.sha }}
+          path: acpp-src
+          sparse-checkout: tests
+      - uses: prefix-dev/setup-pixi@v0.10.0
+        with:
+          run-install: false
+      - name: Pin the suite to the published win-64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu win-64 ${{ needs.build-win-64.outputs.version }} ${{ inputs.build_number }}
+      # Retries: the channel index can lag the upload.
+      - name: Install suite environment
+        working-directory: shared/tests/suite
+        timeout-minutes: 60
+        run: |
+          foreach ($i in 1..5) { pixi install; if ($LASTEXITCODE -eq 0) { exit 0 }; Write-Host "retry $i"; Start-Sleep 60 }; exit 1
+      - name: "build: omp"
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build omp "omp"
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build generic "generic" --pcuda
+      - name: "build: cuda"
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          pixi run nu suite.nu build cuda "cuda:sm_75"
+      # HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
+      # # No AMD GPU on this box either: compile only.
+      # - name: "build: hip (compile only, no AMD GPU)"
+      #   if: ${{ !cancelled() }}
+      #   shell: pwsh
+      #   working-directory: shared/tests/suite
+      #   timeout-minutes: 30
+      #   run: |
+      #     $env:PATH = @(
+      #       "$env:SystemRoot\system32",
+      #       "$env:SystemRoot",
+      #       "$env:SystemRoot\System32\Wbem",
+      #       "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+      #       "$env:USERPROFILE\.pixi\bin",
+      #       "$env:ProgramFiles\Git\cmd"
+      #     ) -join ";"
+      #     pixi run nu suite.nu build hip "hip:gfx906"
+      - name: "build: multipass"
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        timeout-minutes: 30
+        run: |
+          $env:PATH = @(
+            "$env:SystemRoot\system32",
+            "$env:SystemRoot",
+            "$env:SystemRoot\System32\Wbem",
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
+            "$env:USERPROFILE\.pixi\bin",
+            "$env:ProgramFiles\Git\cmd"
+          ) -join ";"
+          # HIP-PARKED (build 2): was "omp;cuda.explicit-multipass:sm_75;hip:gfx906" (TheRock comgr links its own libLLVM.so.23)
+          pixi run nu suite.nu build multipass "omp;cuda.explicit-multipass:sm_75"
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() && steps.channel.outcome == 'success' }}
+        if: ${{ !cancelled() }}
         with:
           name: suite-win-64
           retention-days: 14
@@ -928,10 +968,13 @@ jobs:
             shared/tests/suite/build/**/*.exe
             shared/tests/suite/build/**/*.dll
 
-  gate-win-64:
-    needs: [prepare, build-win-64]
+  # Tests run after publish, from the published channel; they never block
+  # publishing (see test-linux-64). The binaries come from suite-build-win-64;
+  # this GPU box installs the published runtime and runs them.
+  test-win-64:
+    needs: [prepare, build-win-64, suite-build-win-64]
     runs-on: Win-x64-GPU
-    timeout-minutes: 300
+    timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     defaults:
@@ -939,16 +982,14 @@ jobs:
         shell: powershell # Windows PowerShell: this image has no pwsh, and bash is the WSL stub
     steps:
       - uses: actions/checkout@v4
+      - name: Runner core count
+        run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
       - uses: actions/checkout@v4
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-win-64
-          path: local-channel
       - name: Update NVIDIA datacenter driver
         run: |
           nvidia-smi
@@ -967,14 +1008,14 @@ jobs:
         with:
           name: suite-win-64
           path: shared/tests/suite/build
-      - name: Pin the suite manifest to win-64
-        working-directory: shared/tests/suite
-        run: |
-          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-64"]' | Set-Content pixi.toml
+      - name: Pin the suite to the published win-64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu win-64 ${{ needs.build-win-64.outputs.version }} ${{ inputs.build_number }}
+      # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install -e run
+        timeout-minutes: 60
+        run: |
+          foreach ($i in 1..5) { pixi install -e run; if ($LASTEXITCODE -eq 0) { exit 0 }; Write-Host "retry $i"; Start-Sleep 60 }; exit 1
       - name: Visible backends
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
@@ -1004,11 +1045,10 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run -e run nu suite.nu run generic omp pcuda_tests
-      # PoCL is a CPU OpenCL driver; if it cannot take our SPIR-V the runtime
-      # skips it with a warning. Informational until PoCL ingests our SPIR-V.
-      - name: "sycl_tests: generic on OpenCL (PoCL)"
+      # Intel's CPU OpenCL runtime (conda-forge intel-opencl-rt) is the OpenCL
+      # device here, on x86-64 only.
+      - name: "sycl_tests: generic on OpenCL (Intel CPU)"
         if: ${{ !cancelled() }}
-        continue-on-error: true
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run -e run nu suite.nu run generic ocl sycl_tests
@@ -1024,7 +1064,7 @@ jobs:
         run: pixi run -e run nu suite.nu run multipass "omp;cuda" sycl_tests
 
   publish-win-64:
-    needs: [prepare, build-win-64, gate-win-64]
+    needs: [prepare, build-win-64]
     if: inputs.publish
     runs-on: ubuntu-latest
     permissions:
@@ -1055,6 +1095,8 @@ jobs:
     if: contains(format(' {0} ', inputs.platforms), ' win-arm64 ')
     runs-on: win-arm64-v32
     timeout-minutes: 480
+    outputs:
+      version: ${{ steps.pkgver.outputs.version }}
     defaults:
       run:
         shell: pwsh
@@ -1154,11 +1196,16 @@ jobs:
           name: local-channel-win-arm64
           path: local-channel/
           retention-days: 14
+      - name: Package version
+        id: pkgver
+        run: pixi run -e dev nu shared/pkg-version.nu
 
-  gate-win-arm64:
-    needs: [prepare, build-win-arm64]
+  # Tests run after publish, from the published channel; they never block
+  # publishing (see test-linux-64).
+  test-win-arm64:
+    needs: [prepare, build-win-arm64, publish-win-arm64]
     runs-on: win-arm64-v32
-    timeout-minutes: 300
+    timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
       SUITE_BOOST_PREFIX: ${{ github.workspace }}/shared/tests/suite/build/boost-prefix
@@ -1167,33 +1214,31 @@ jobs:
         shell: pwsh
     steps:
       - uses: actions/checkout@v4
+      - name: Runner core count
+        run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
       - uses: actions/checkout@v4
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: local-channel-win-arm64
-          path: local-channel
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false
       # Only naga-acpp-runtime-ocl exists here besides naga-acpp itself; the
       # per-platform [feature.run.target.win-arm64...] section in pixi.toml
-      # already scopes deps correctly, so only the platform line needs
-      # rewriting — no package deletions.
-      - name: Pin the suite manifest to win-arm64
-        working-directory: shared/tests/suite
-        run: |
-          (Get-Content pixi.toml) -replace '^platforms = .*', 'platforms = ["win-arm64"]' | Set-Content pixi.toml
+      # already scopes deps correctly, so pin-published.nu only rewrites the
+      # platform line, the channels and the pins — no package deletions.
+      - name: Pin the suite to the published win-arm64 packages
+        run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu win-arm64 ${{ needs.build-win-arm64.outputs.version }} ${{ inputs.build_number }}
       # This box both compiles AND runs (no separate GPU box exists for
       # win-arm64), so the default env (run+build, vs2026 activation) is used.
+      # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: pixi install
+        timeout-minutes: 60
+        run: |
+          foreach ($i in 1..5) { pixi install; if ($LASTEXITCODE -eq 0) { exit 0 }; Write-Host "retry $i"; Start-Sleep 60 }; exit 1
       # No ICD exists on this runner; whether the OpenCL plugin loads at all
       # is informational only, read from this listing.
       - name: Visible backends
@@ -1239,7 +1284,7 @@ jobs:
         run: pixi run nu suite.nu run generic omp pcuda_tests
 
   publish-win-arm64:
-    needs: [prepare, build-win-arm64, gate-win-arm64]
+    needs: [prepare, build-win-arm64]
     if: inputs.publish
     runs-on: ubuntu-latest
     permissions:

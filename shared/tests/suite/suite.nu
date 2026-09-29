@@ -116,7 +116,10 @@ def "main build" [
   if $pstl { $targets_list = ($targets_list | append "pstl_tests") }
   if $pcuda { $targets_list = ($targets_list | append "pcuda_tests") }
 
-  mut build_args = ["--build" $dir]
+  # Explicit parallel level: say how many jobs the runner gives us in the log.
+  let jobs = (sys cpu | length)
+  print $"suite.nu: building with ($jobs) parallel jobs"
+  mut build_args = ["--build" $dir "--parallel" ($jobs | into string)]
   for t in $targets_list {
     $build_args = ($build_args | append ["--target" $t])
   }
@@ -207,8 +210,10 @@ def "main boost" [] {
   print $"cmake ($args | str join ' ')"
   ^cmake ...$args
 
-  print $"cmake --build ($dir)"
-  ^cmake --build $dir
+  let jobs = (sys cpu | length)
+  print $"suite.nu: building with ($jobs) parallel jobs"
+  print $"cmake --build ($dir) --parallel ($jobs)"
+  ^cmake --build $dir --parallel ($jobs | into string)
 
   print $"cmake --install ($dir)"
   ^cmake --install $dir

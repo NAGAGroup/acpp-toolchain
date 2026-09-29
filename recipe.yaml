@@ -16,7 +16,7 @@ context:
   llvm_maj_min: "21.1"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="3f96b940d872580d5b6db114bebb447609414cb8") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="7b89cf09047f5b97e05f4fe8a0fca28e512e2d44") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -429,6 +429,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers
@@ -756,6 +757,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers
@@ -883,8 +885,7 @@ outputs:
         # half too (compiler-rt_win-64 20.1.8 exists — checked, not assumed),
         # so constraining only the linux name would have left the Windows
         # collision wide open on the one platform this output is newest on.
-        - compiler-rt_linux-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
-        - compiler-rt_win-64 <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
+        - compiler-rt_${{ target_platform }} <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-compiler-rt <0.0a0
         - acpp-compiler-rt-nightly <0.0a0
       ignore_run_exports:
@@ -896,6 +897,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers
@@ -1221,6 +1223,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers
@@ -1410,6 +1413,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers
@@ -1480,6 +1484,7 @@ outputs:
           - cuda-nvcc-tools
           - cuda-driver-dev
           - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
           - cuda-nvcc-impl
           - level-zero-devel
           - opencl-headers

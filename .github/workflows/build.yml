@@ -1240,8 +1240,3 @@ jobs:
         run: pixi run -e dev check-closure
       - name: Upload to naga-labs-staging
         run: pixi run -e dev publish-channel
-un: pixi run -e dev check-no-collision
-      - name: "Gate: complete output set + every spec solvable"
-        run: pixi run -e dev check-closure
-      - name: Upload to naga-labs-staging
-        run: pixi run -e dev publish-channel

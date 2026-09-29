@@ -619,11 +619,12 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
+      # No PSTL on macOS: stdpar needs libstdc++ >= 11 and libc++ is unsupported (doc/stdpar.md); upstream's macos CI skips it too.
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda
+        run: pixi run nu suite.nu build generic "generic" --pcuda
       - name: "sycl_tests: generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10
@@ -635,11 +636,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic metal sycl_tests
-      - name: "pstl_tests: generic on OMP (CPU)"
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic omp pstl_tests
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         if: ${{ !cancelled() }}
         timeout-minutes: 10

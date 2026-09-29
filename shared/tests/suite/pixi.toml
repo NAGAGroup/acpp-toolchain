@@ -62,7 +62,6 @@ naga-acpp-runtime-ocl = "*"
 [feature.run.target.osx-arm64.dependencies]
 pocl = "*"
 libboost = "*"
-tbb = "*"
 
 # ── build: what COMPILING the tests needs ───────────────────────────────
 [feature.build.dependencies]
@@ -127,7 +126,6 @@ naga-acpp-clangxx_win-arm64 = "*"
 [feature.build.target.osx-arm64.dependencies]
 naga-acpp-clangxx_osx-arm64 = "*"
 libboost-devel = "*"
-tbb-devel = "*"
 
 # ── tasks (same relative depth as gpu-smoke) ────────────────────────────
 [tasks.acpp-info]

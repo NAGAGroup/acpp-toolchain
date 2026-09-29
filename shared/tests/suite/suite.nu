@@ -64,7 +64,9 @@ def "main build" [
   # lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake (CMakeLists.txt:1102);
   # upstream spells it AdaptiveCppConfig.cmake, so accept either. The exact
   # subpath under prefix varies by platform, so glob rather than hardcode it.
-  let cfgs = (glob ($prefix | path join "**" "{adaptivecpp-config,AdaptiveCppConfig}.cmake"))
+  # Backslashes are glob ESCAPES in nushell, so normalise Windows `path join` output to '/'.
+  let cfg_pattern = ($prefix | path join "**" "{adaptivecpp-config,AdaptiveCppConfig}.cmake" | str replace --all '\' '/')
+  let cfgs = (glob $cfg_pattern)
   if ($cfgs | is-empty) {
     error make {msg: $"suite.nu build: adaptivecpp-config.cmake not found anywhere under ($prefix) — is naga-acpp installed in this environment?"}
   }

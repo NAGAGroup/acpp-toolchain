@@ -723,18 +723,38 @@ jobs:
             "RATTLER_CACHE_DIR=$root\rattler-cache"
             "ACPP_OUTPUT_DIR=$root\rb-output"
           ) | Add-Content -Path $env:GITHUB_ENV
-      - name: Exclude the build tree from Defender
+      - name: Exclude the build tree and toolchain processes from Defender
         shell: pwsh
+        continue-on-error: true
         run: |
           # rattler-build failed to delete a finished test directory
           # ("Access is denied", run 36506177295): Defender scans the
           # freshly built test exe and holds the directory. Exclude the
-          # build/cache tree on this self-hosted runner. Non-fatal if we
-          # lack the rights.
-          try {
-            Add-MpPreference -ExclusionPath $env:ACPP_OUTPUT_DIR, $env:RATTLER_CACHE_DIR, $env:CCACHE_DIR -ErrorAction Stop
-            Write-Host "Defender exclusions added"
-          } catch { Write-Warning "could not add Defender exclusions: $_" }
+          # build/cache tree AND the build-tool processes on this
+          # self-hosted runner. Each call is independent: print the error
+          # and carry on (needs admin rights; non-fatal if we lack them).
+          $paths = @(
+            'D:\rb-output',
+            $env:ACPP_OUTPUT_DIR,
+            $env:RATTLER_CACHE_DIR,
+            $env:CCACHE_DIR,
+            $env:RUNNER_TEMP,
+            $env:GITHUB_WORKSPACE
+          ) | Where-Object { $_ } | Select-Object -Unique
+          foreach ($p in $paths) {
+            try {
+              Add-MpPreference -ExclusionPath $p -ErrorAction Stop
+              Write-Host "excluded path: $p"
+            } catch { Write-Warning "ExclusionPath $p failed: $_" }
+          }
+          $procs = @('rattler-build.exe', 'nu.exe', 'clang.exe', 'clang++.exe', 'clang-cl.exe', 'lld-link.exe', 'cmake.exe', 'ninja.exe', 'link.exe', 'cl.exe')
+          foreach ($n in $procs) {
+            try {
+              Add-MpPreference -ExclusionProcess $n -ErrorAction Stop
+              Write-Host "excluded process: $n"
+            } catch { Write-Warning "ExclusionProcess $n failed: $_" }
+          }
+          Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           cache: true

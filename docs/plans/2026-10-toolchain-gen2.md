@@ -60,12 +60,10 @@ Standing rules that apply throughout:
   - Issue #2041 covers the LLVM 23 build failures.
   - `al42and/SPIRV-LLVM-Translator-ACpp` is an auto-updated translator mirror.
 
-**HIP blocker**
-- TheRock 10.0.0's Linux `libamd_comgr.so.3` dynamically links `libLLVM.so.23.0git` and `libclang-cpp.so.23.0git` (symbol version `LLVM_23.0`).
-- Our `libLLVM.so.21` is in the same process (llvm-to-backend/JIT), and the process aborts with "CommandLine Error: Option ... registered more than once".
-- Symbol versioning did not prevent it.
-- The same class of failure is reported in ROCm/ROCm #6511 (open, ROCm 7.14, interposition between ROCm's libLLVM and another LLVM) and AdaptiveCpp #1403.
-- On Windows, TheRock builds amd-llvm **statically** (`LLVM_BUILD_LLVM_DYLIB OFF` on WIN32 in `compiler/pre_hook_amd-llvm.cmake`), and DLLs have separate symbol namespaces. So the Linux blocker should not apply there.
+**HIP (why it's parked, and the approach)**
+- Build 2 parked HIP because TheRock 10.0.0's Linux `libamd_comgr.so.3` links `libLLVM.so.23.0git`, while our toolchain was LLVM 21. Two different LLVM versions in one process abort ("Option ... registered more than once").
+- **The approach (Jack, 2026-10-01):** ROCm's LLVM isn't special. AdaptiveCpp's build instructions set the LLVM flags HIP expects, and they explicitly advise against using ROCm's bundled LLVM. If our LLVM is the same version HIP/comgr was built against, comgr resolves to **our** libLLVM and there is one LLVM in the process. We don't plan isolation workarounds unless this actually fails.
+- "Same version" has to be concrete: our libLLVM's soname and symbol-version tag must match what comgr's `DT_NEEDED` asks for (today `libLLVM.so.23.0git` / `LLVM_23.0`).
 
 **AdaptiveCpp's SSCP/ROCm rule:** AdaptiveCpp's LLVM must be **≤ ROCm's LLVM**. When the versions are equal, real IR-attribute breakage has been seen: ROCm 7.2's LLVM 22.0git couldn't read attributes from 22.1. TheRock 10.0.0 is 23.0git, and 23.1.x is newer.
 
@@ -133,48 +131,19 @@ There are four phases. A and B ship together. C is gated and must not hold up A 
   - *(decide)* Whether a `naga-acpp-full` metapackage pulls in everything.
 - **Smoke tests:** every tool gets at least `--version`. clang-format and clang-tidy run on a small file. lldb runs `lldb --batch -o 'version'`. These run in the test stage, so failures are recorded and don't block publishing.
 
-### Phase C — HIP (gated; Linux and Windows handled separately)
+### Phase C — HIP (Linux and Windows)
 
-The blocker is **two LLVMs in one process**. Moving to 23 alone does not fix it, because TheRock's comgr links `libLLVM.so.23.0git` and ours would be `libLLVM.so.23.1`.
+**C1. Match HIP's LLVM.** Read the exact LLVM that the chosen TheRock release's comgr links: `readelf -d libamd_comgr.so.*` (NEEDED), `readelf -V` (version tag), and its amd-llvm commit and LLVM version. Pin our `llvm_version` and source to match, including `LLVM_VERSION_SUFFIX` if needed so the soname is the same. *(decide)* Either pick a TheRock release whose comgr is built on a released 23.1.x, or build our LLVM from the matching source. Keep AdaptiveCpp's documented LLVM build flags (dylib on, assertions off, AMDGPU and NVPTX targets).
 
-**C0. Reproduce and characterize** on the published LLVM 21 packages, before Phase A finishes.
-- Use a minimal program that loads our llvm-to-backend (libLLVM) and TheRock's `libamd_comgr.so.3`.
-- Record:
-  - `readelf -Ws --wide libLLVM.so | grep -c UNIQUE`, for ours and for TheRock's
-  - `LD_DEBUG=bindings`: which `cl::` / `GlobalParser` symbols bind across the two libraries
-- **Working hypothesis:** our libLLVM is built by GCC (conda toolchain), which emits `STB_GNU_UNIQUE` for inline and template statics. glibc binds those process-wide by name, regardless of symbol version, so both LLVMs share one option registry. TheRock builds with clang, which does not emit them.
+**C2. Confirm comgr uses our libLLVM.** In the staged prefix, `ldd`/`LD_DEBUG=libs` on the HIP backend shows comgr binding to our libLLVM, and no second copy loaded. Run a HIP SSCP kernel end to end.
 
-**C1. Candidate fixes**, cheapest first. Each is judged by the C0 harness on a real comgr load, not by a symbol dump.
-- **(a) No GNU unique objects.** Build our LLVM with `-fno-gnu-unique`, or with clang, keeping symbol versioning. This is the cheapest option and touches only build flags.
-- **(b) Minimal exports on Linux.** Set `LLVM_BUILD_LLVM_DYLIB_VIS=ON` on Linux too, so only `LLVM_ABI`-annotated symbols are exported. This shares the annotation work with B1. The risk is that AdaptiveCpp's llvm-to-backend and the clang integration use unannotated internals.
-- **(c) Out of process.** Run AMDGPU code generation out of process, so our LLVM and comgr never share an address space. This is the most robust option, but it is a fork design change.
-- **(d) Build comgr against our LLVM.** Build comgr from ROCm/llvm-project against our LLVM. This is a last resort, because comgr tracks amd-llvm-specific APIs.
+**C3. Device-libs.** Same version means TheRock's bitcode should be readable. If it isn't, fall back to the proven route: build ROCm device-libs at the matching tag with our clang.
 
-**C2. Version ordering.**
-- With 23.1.x against TheRock 10.0.0 (23.0git), run SSCP→AMDGCN end to end.
-- If IR-attribute or reader errors appear, *(decide)* between:
-  - waiting for a TheRock built on ≥ 23.1
-  - a TheRock-matched device-libs build
-  - accepting SMCP-only HIP for now
-- The device-libs workaround is already proven: we built ROCm device-libs (rocm-7.1.1 tag) with our own clang so the bitcode matches our LLVM. Redo it at the matching tag for 23.
+**C4. Unpark.** Revert every `HIP-PARKED (build 2)` site: `build-stage.nu` (5 sites, including `-DACPP_HIP_ROOT=.` and `-DWITH_ROCM_BACKEND=OFF`), `recipe.yaml` (the TheRock source block, the runtime-rocm output, and the HIP excludes in runtime and naga-acpp), `shared/tests/suite/pixi.toml`, and the README. Re-pin the TheRock tarballs by sha256. Ship comgr against our libLLVM rather than vendoring ROCm's libLLVM. Run a `readelf` NEEDED/RUNPATH audit on vendored ROCm binaries. *(decide)* linux-aarch64 HIP, depending on whether TheRock ships aarch64.
 
-**C3. Unpark.** Only after C1 and C2 pass on linux-64:
-- Revert every `HIP-PARKED (build 2)` site:
-  - `build-stage.nu` (5 sites, including `-DACPP_HIP_ROOT=.` and `-DWITH_ROCM_BACKEND=OFF`)
-  - `recipe.yaml` (the TheRock source block, the runtime-rocm output, and the HIP excludes in runtime and naga-acpp)
-  - `shared/tests/suite/pixi.toml`
-  - the README
-- Re-pin the TheRock tarballs by sha256.
-- Run a `readelf` NEEDED/RUNPATH audit on every vendored ROCm binary.
-- linux-aarch64: *(decide)* whether TheRock ships aarch64. If not, HIP stays x86-64 only.
+**C5. Windows HIP** (win-64 only). Same principle. Validate that `rt-backend-hip.dll` and `llvm-to-amdgpu-tool.exe` load next to our `LLVM-23.dll`, and verify the Windows ROCm tarball layout.
 
-**C4. Windows HIP** (win-64 only; no ROCm on win-arm64).
-- The process-collision blocker should not apply, because TheRock's Windows comgr links LLVM statically.
-- Still pending from before: verifying the Windows ROCm tarball layout.
-- Validate that `rt-backend-hip.dll` and `llvm-to-amdgpu-tool.exe` load next to our `LLVM-23.dll`.
-- This can unpark independently of Linux. *(decide)*
-
-**If Phase C isn't ready, A and B ship with HIP still parked.**
+Only if C2 actually fails do we look at isolation options. None are planned.
 
 ### Phase D — Release
 
@@ -192,7 +161,7 @@ The blocker is **two LLVMs in one process**. Moving to 23 alone does not fix it,
 | conda-forge lacks clang 23.1.x on some platform (win-arm64 especially) for the build dependency | Check before A3. Fall back to a stage-1 bootstrap for that platform. |
 | Windows DLL annotation gaps | Local patches. *(decide)* fallback to static for one generation. |
 | More projects means longer builds (lldb and clang-tools-extra on win-arm64) | Large runners, staging-cache diet, Dev Drive on win-64. Measure on the first build. |
-| HIP fixes don't hold in a real process (ROCm #6511 shows interposition in the wild) | C is gated. Test with real comgr loads, not symbol dumps. |
+| Our LLVM can't exactly match comgr's (for example, TheRock is on an unreleased snapshot) | Pick a TheRock release on a released LLVM, or build from the matching source (C1). |
 | The partition gate finds existing unclaimed files | Expected. Fix them as part of B2. |
 
 ## Open decisions (for the review)
@@ -202,8 +171,8 @@ The blocker is **two LLVMs in one process**. Moving to 23 alone does not fix it,
 3. Polly on Windows and osx (B2).
 4. lldb Python on Windows: now or later (B2).
 5. Package shape: one `naga-acpp-tools` or a split, and whether there's a `-full` metapackage (B2).
-6. The HIP isolation approach: chosen by C0/C1 results.
-7. HIP version ordering: what to do if 23.1 versus 23.0git breaks SSCP (C2).
+6. Which TheRock release and matching LLVM source we pin (C1).
+7. If TheRock's LLVM is a snapshot rather than a release: build from that source, or wait for a TheRock on 23.1.x (C1).
 8. HIP on linux-aarch64 and on win-64: whether each unparks independently (C3, C4).
 
 ## Sources
@@ -215,6 +184,5 @@ The blocker is **two LLVMs in one process**. Moving to 23 alone does not fix it,
 - AdaptiveCpp LLVM 23 build failures: https://github.com/AdaptiveCpp/AdaptiveCpp/issues/2041
 - AdaptiveCpp dynamic LDS fix: https://github.com/AdaptiveCpp/AdaptiveCpp/pull/2039
 - AdaptiveCpp duplicate cl::opt abort: https://github.com/AdaptiveCpp/AdaptiveCpp/issues/1403
-- ROCm libLLVM interposition: https://github.com/ROCm/ROCm/issues/6511
 - TheRock amd-llvm build config: https://github.com/ROCm/TheRock/blob/main/compiler/pre_hook_amd-llvm.cmake
 - LLDB debugserver signing options: llvm-project `lldb/tools/debugserver/source/CMakeLists.txt` (`LLDB_USE_SYSTEM_DEBUGSERVER`)

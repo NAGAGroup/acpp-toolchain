@@ -314,6 +314,13 @@ outputs:
               - Library/lib/libclang.lib
               - Library/lib/acpp-rt.lib
               - Library/lib/acpp-common.lib
+              # libomp, built by the runtimes build: the DLL goes to bin, the
+              # import library to lib. The libiomp5md copies are installed
+              # unconditionally on Windows (openmp/runtime/src/CMakeLists.txt).
+              - Library/bin/libomp.dll
+              - Library/bin/libiomp5md.dll
+              - Library/lib/libomp.lib
+              - Library/lib/libiomp5md.lib
               # JIT backend plugin DLLs + llvm-to-backend tools (DLLs are
               # RUNTIME artifacts on win, so they land under bin)
               - Library/bin/hipSYCL/**
@@ -322,10 +329,10 @@ outputs:
               # runtime JSON configs
               - Library/etc/AdaptiveCpp/**
         exclude:
-          # libomp comes from conda-forge llvm-openmp on mac too
+          # libomp is OURS (built by the runtimes build): lib/libomp.dylib is
+          # matched by lib/*.dylib* above and stays in the runtime.
           - if: osx
             then:
-              - lib/libomp*
               # lldb's library belongs to naga-acpp-lldb
               - lib/liblldb*
               # lib/*.dylib* also matches NESTED files: the compiler-rt
@@ -333,15 +340,13 @@ outputs:
               - lib/clang/**
           - if: linux
             then:
-              # libomp comes from conda-forge llvm-openmp (design §5)
-              - lib/libomp*
-              - lib/libarcher*
-              - lib/libompd*
+              # libomp is OURS (built by the runtimes build, installed to
+              # lib/): lib/libomp.so, and libarcher/libompd if the build
+              # produces them, are matched by lib/*.so* above and ship here.
               # lib/*.so* also matches NESTED files (it did: the published
               # runtime carried the asan/tsan .so files and lldb's _lldb.so,
-              # each also claimed by the compiler-rt / lldb packages, plus the
-              # unpackaged OpenMP copies under lib/<triple>/). Only the
-              # top-level sonames are the runtime's.
+              # each also claimed by the compiler-rt / lldb packages). Only
+              # the top-level sonames are the runtime's.
               - lib/clang/**
               - lib/python*/**
               - lib/*-conda-linux-gnu/**
@@ -367,9 +372,6 @@ outputs:
               - lib/hipSYCL/librt-backend-hip*
               - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu*
             else:
-              # libomp comes from conda-forge llvm-openmp here too
-              - Library/bin/libomp.dll
-              - Library/lib/libomp.lib
               # Vendor backend plugins, their JIT tools and import libs belong
               # to the naga-acpp-runtime-{cuda,level-zero,ocl,rocm} packages.
               - Library/bin/hipSYCL/rt-backend-cuda*
@@ -391,7 +393,6 @@ outputs:
         # the long note there. Naming it here as well would be a second source
         # of truth for the same range, and pin_compatible() cannot resolve it
         # in an inheriting output anyway.
-        - llvm-openmp >=${{ llvm_major }}
         - if: linux
           then:
             - numactl
@@ -422,6 +423,10 @@ outputs:
         # The unversioned-name cases below are the ones that needed widening.
         - libllvm${{ llvm_major }} <0.0a0
         - libclang-cpp${{ llvm_maj_min }} <0.0a0
+        # We ship our own libomp (lib/libomp.so, lib/libomp.dylib,
+        # Library/bin/libomp.dll): conda-forge's llvm-openmp installs the same
+        # files, so the two must never share an environment.
+        - llvm-openmp <0.0a0
         # THE BASE RUNTIME HAS ZERO CUDA SURFACE. This is a ruling, not an
         # oversight, and not a consequence of any build limitation: the base
         # runtime must not constrain CUDA AT ALL.
@@ -514,10 +519,12 @@ outputs:
               - if: osx
                 then:
                   - lib/hipSYCL/*rt-backend-metal*
+                  - lib/libomp.dylib
                   - etc/AdaptiveCpp/acpp-toolchain.json
               - if: linux
                 then:
                   - lib/hipSYCL/librt-backend-omp.so
+                  - lib/libomp.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - etc/AdaptiveCpp/acpp-toolchain.json
@@ -538,6 +545,8 @@ outputs:
               - if: win
                 then:
                   - Library/bin/hipSYCL/rt-backend-omp.dll
+                  - Library/bin/libomp.dll
+                  - Library/lib/libomp.lib
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
                   - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
@@ -552,7 +561,6 @@ outputs:
                   # the ROCm runtime subset is naga-acpp-runtime-rocm's, not ours
                   - lib/libamdhip64.so
                   - lib/libhsa-runtime64.so
-                  - lib/libomp.so
                   - lib/liblldb.so
                   # vendor plugins moved to their vendor packages
                   - lib/hipSYCL/librt-backend-cuda.so
@@ -565,7 +573,6 @@ outputs:
                   # moved to naga-acpp-runtime-cuda, whose install brings libdevice
                   - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
-                  - Library/bin/libomp.dll
                   # vendor plugins moved to their vendor packages
                   - Library/bin/hipSYCL/rt-backend-cuda.dll
                   - Library/bin/hipSYCL/rt-backend-ze.dll
@@ -1270,9 +1277,13 @@ outputs:
               - Library/lib/rocm_kpack.lib
               - Library/lib/llvm/amdgcn/**
               - Library/lib/amdhip64*.lib
-              # unpackaged: libomp comes from conda-forge llvm-openmp
+              # libomp is claimed by naga-acpp-runtime; llvm-dev's
+              # Library/bin/** and Library/lib/**/*.lib globs would otherwise
+              # swallow it.
               - Library/bin/libomp.dll
+              - Library/bin/libiomp5md.dll
               - Library/lib/libomp.lib
+              - Library/lib/libiomp5md.lib
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}

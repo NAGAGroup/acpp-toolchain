@@ -1,0 +1,241 @@
+llvm23: LLVM_ABI on AMD's heterogeneous-debug additions (AMD 0bace190 defect)
+
+AMD's heterogeneous-debug additions in 0bace190 (DIExprBuilder, DIOp, new DIExpression
+entry points, DIBuilder::createGlobalVariable with a memory space, GlobalVariable debug-info
+accessors, Attribute::isSanitizedPaddedGlobal) carry no LLVM_ABI. AMD never builds LLVM as a
+Windows DLL (TheRock's Windows LLVM is static libs only), so nothing exports them. Run
+38570967283 win-arm64 failed linking clang-cpp.dll on
+llvm::DIExprBuilder::DIExprBuilder(LLVMContext&) and DIExprBuilder::intoExpression().
+The list comes from a diff of llvm/include against upstream merge-base 3e7a2ec7 and covers
+every added non-inline, non-template public declaration with an out-of-line definition in
+llvm/lib. Members only, never whole classes (none of these classes is class-annotated).
+
+diff --git a/llvm/include/llvm/IR/Attributes.h b/llvm/include/llvm/IR/Attributes.h
+index 36bdb03..09b170e 100644
+--- a/llvm/include/llvm/IR/Attributes.h
++++ b/llvm/include/llvm/IR/Attributes.h
+@@ -353,7 +353,7 @@ public:
+   LLVM_ABI FPClassTest getNoFPClass() const;
+ 
+   /// Return if global variable is instrumented by AddrSanitizer.
+-  bool isSanitizedPaddedGlobal() const;
++  LLVM_ABI bool isSanitizedPaddedGlobal() const;
+ 
+   /// Returns the value of the range attribute.
+   LLVM_ABI const ConstantRange &getRange() const;
+diff --git a/llvm/include/llvm/IR/DIBuilder.h b/llvm/include/llvm/IR/DIBuilder.h
+index 513245b..cdce331 100644
+--- a/llvm/include/llvm/IR/DIBuilder.h
++++ b/llvm/include/llvm/IR/DIBuilder.h
+@@ -924,7 +924,7 @@ namespace llvm {
+     /// \param MS            DWARF memory space.
+     /// \param AlignInBits   Variable alignment(or 0 if no alignment attr was
+     ///                      specified)
+-    DIGlobalVariable *createGlobalVariable(
++    LLVM_ABI DIGlobalVariable *createGlobalVariable(
+         DIScope *Context, StringRef Name, StringRef LinkageName, DIFile *File,
+         unsigned LineNo, DIType *Ty, bool IsLocalToUnit, bool isDefined = true,
+         MDNode *Decl = nullptr, MDTuple *TemplateParams = nullptr,
+diff --git a/llvm/include/llvm/IR/DebugInfoMetadata.h b/llvm/include/llvm/IR/DebugInfoMetadata.h
+index 727b922..b7678e9 100644
+--- a/llvm/include/llvm/IR/DebugInfoMetadata.h
++++ b/llvm/include/llvm/IR/DebugInfoMetadata.h
+@@ -3467,7 +3467,7 @@ namespace DIOp {
+   public:                                                                      \
+     explicit constexpr NAME() {}                                               \
+     bool operator==(const NAME &O) const { return true; }                      \
+-    friend hash_code hash_value(const NAME &O);                                \
++    LLVM_ABI friend hash_code hash_value(const NAME &O);                       \
+     static constexpr StringRef getAsmName();                                   \
+     static constexpr unsigned getBitcodeID();                                  \
+   };
+@@ -3478,7 +3478,7 @@ namespace DIOp {
+   public:                                                                      \
+     explicit constexpr NAME(TYPE1 NAME1) : NAME1(NAME1) {}                     \
+     bool operator==(const NAME &O) const { return NAME1 == O.NAME1; }          \
+-    friend hash_code hash_value(const NAME &O);                                \
++    LLVM_ABI friend hash_code hash_value(const NAME &O);                       \
+     static constexpr StringRef getAsmName();                                   \
+     static constexpr unsigned getBitcodeID();                                  \
+     TYPE1 get##NAME1() const { return NAME1; }                                 \
+@@ -3495,7 +3495,7 @@ namespace DIOp {
+     bool operator==(const NAME &O) const {                                     \
+       return NAME1 == O.NAME1 && NAME2 == O.NAME2;                             \
+     }                                                                          \
+-    friend hash_code hash_value(const NAME &O);                                \
++    LLVM_ABI friend hash_code hash_value(const NAME &O);                       \
+     static constexpr StringRef getAsmName();                                   \
+     static constexpr unsigned getBitcodeID();                                  \
+     TYPE1 get##NAME1() const { return NAME1; }                                 \
+@@ -3518,7 +3518,7 @@ using Variant = std::variant<
+   constexpr StringRef DIOp::NAME::getAsmName() { return "DIOp" #NAME; }
+ #include "llvm/IR/DIExprOps.def"
+ 
+-StringRef getAsmName(const Variant &V);
++LLVM_ABI StringRef getAsmName(const Variant &V);
+ 
+ #define DEFINE_BC_ID(NAME, ID)                                                 \
+   constexpr unsigned DIOp::NAME::getBitcodeID() { return ID; }
+@@ -3553,10 +3553,10 @@ DEFINE_BC_ID(Xor, 28u)
+ DEFINE_BC_ID(Mod, 29u)
+ #undef DEFINE_BC_ID
+ 
+-unsigned getBitcodeID(const Variant &V);
++LLVM_ABI unsigned getBitcodeID(const Variant &V);
+ 
+ /// Get the number of stack elements this operation consumes.
+-unsigned getNumInputs(Variant V);
++LLVM_ABI unsigned getNumInputs(Variant V);
+ 
+ // The sizeof of `Op` is the size of the largest union variant, which
+ // should essentially be defined as a packed struct equivalent to:
+@@ -4022,7 +4022,7 @@ public:
+   bool holdsOldElements() const { return holds<OldElements>(); }
+   bool holdsNewElements() const { return holds<NewElements>(); }
+ 
+-  bool isPoisoned() const;
++  LLVM_ABI bool isPoisoned() const;
+ 
+   enum SignedOrUnsignedConstant { SignedConstant, UnsignedConstant };
+   /// Determine whether this represents a constant value, if so
+@@ -4041,7 +4041,7 @@ public:
+ 
+   /// Return the number of unique location operands referred to (via DIOpArg) in
+   /// this expression. Like getNumLocationOperands, but for DIOp-DIExpressions.
+-  uint64_t getNewNumLocationOperands() const;
++  LLVM_ABI uint64_t getNewNumLocationOperands() const;
+ 
+   using element_iterator = ArrayRef<uint64_t>::iterator;
+ 
+@@ -4059,7 +4059,7 @@ public:
+   ///
+   /// A divergent address space can be created by a DIOpConvert, and is
+   /// preserved across DIOpReinterpret.
+-  std::optional<unsigned> getNewDivergentAddrSpace() const;
++  LLVM_ABI std::optional<unsigned> getNewDivergentAddrSpace() const;
+ 
+   /// A lightweight wrapper around an expression operand.
+   ///
+@@ -4186,7 +4186,7 @@ public:
+   LLVM_ABI static std::optional<FragmentInfo>
+   getFragmentInfo(expr_op_iterator Start, expr_op_iterator End);
+ 
+-  static std::optional<FragmentInfo> getFragmentInfo(NewElementsRef E);
++  LLVM_ABI static std::optional<FragmentInfo> getFragmentInfo(NewElementsRef E);
+ 
+   /// Retrieve the details of this fragment expression.
+   std::optional<FragmentInfo> getFragmentInfo() const {
+@@ -4349,7 +4349,7 @@ public:
+   /// instance of the operand `DIOpArg(ArgNo, OldArgType)`, updating OldArgType
+   /// to \p NewArgType if non-null. This is used to modify a specific location
+   /// used by \p Expr, such as when salvaging that location.
+-  static DIExpression *appendNewOpsToArg(const DIExpression *Expr,
++  LLVM_ABI static DIExpression *appendNewOpsToArg(const DIExpression *Expr,
+                                          ArrayRef<DIOp::Variant> Ops,
+                                          unsigned ArgNo,
+                                          Type *NewArgType = nullptr);
+@@ -4360,7 +4360,7 @@ public:
+   ///
+   /// Handles both New and Old expressions, including Old expressions without
+   /// an explicit DW_OP_LLVM_arg.
+-  static const DIExpression *spillArgs(const DIExpression *Expr,
++  LLVM_ABI static const DIExpression *spillArgs(const DIExpression *Expr,
+                                        SmallBitVector SpilledOpIndexes,
+                                        unsigned SpillAddrSpace);
+ 
+@@ -4370,11 +4370,11 @@ public:
+   ///
+   /// Handles both Old and New expressions, being a no-op for New expressions
+   /// which always include indirection explicitly.
+-  static const DIExpression *foldIntrinsicIndirection(const DIExpression *Expr,
++  LLVM_ABI static const DIExpression *foldIntrinsicIndirection(const DIExpression *Expr,
+                                                       bool IsIndirect);
+ 
+   /// Create a copy of \p Expr updated to be suitable for use by DBG_INSTR_REF.
+-  static const DIExpression *convertForInstrRef(const DIExpression *Expr,
++  LLVM_ABI static const DIExpression *convertForInstrRef(const DIExpression *Expr,
+                                                 bool IsIndirect);
+ 
+   /// Create a copy of \p Expr with each instance of
+@@ -4554,14 +4554,14 @@ class DIExprBuilder {
+ #endif
+ public:
+   /// Create a builder for a new, initially empty expression.
+-  explicit DIExprBuilder(LLVMContext &C);
++  LLVM_ABI explicit DIExprBuilder(LLVMContext &C);
+   /// Create a builder for a new expression for the sequence of ops in \p IL.
+-  explicit DIExprBuilder(LLVMContext &C,
++  LLVM_ABI explicit DIExprBuilder(LLVMContext &C,
+                          std::initializer_list<DIOp::Variant> IL);
+   /// Create a builder for a new expression for the sequence of ops in \p V.
+-  explicit DIExprBuilder(LLVMContext &C, ArrayRef<DIOp::Variant> V);
++  LLVM_ABI explicit DIExprBuilder(LLVMContext &C, ArrayRef<DIOp::Variant> V);
+   /// Create a builder for a new expression, initially a copy of \p E.
+-  explicit DIExprBuilder(const DIExpression &E);
++  LLVM_ABI explicit DIExprBuilder(const DIExpression &E);
+ 
+   class Iterator
+       : public iterator_facade_base<Iterator, std::random_access_iterator_tag,
+@@ -4594,7 +4594,7 @@ public:
+   Iterator end() { return Elements.end(); }
+   iterator_range<Iterator> range() { return make_range(begin(), end()); }
+ 
+-  Iterator insert(Iterator I, DIOp::Variant O);
++  LLVM_ABI Iterator insert(Iterator I, DIOp::Variant O);
+ 
+   template <typename T, typename... ArgsT>
+   Iterator insert(Iterator I, ArgsT &&...Args) {
+@@ -4617,7 +4617,7 @@ public:
+   }
+ 
+   /// Appends \p O to the expression being built.
+-  DIExprBuilder &append(DIOp::Variant O);
++  LLVM_ABI DIExprBuilder &append(DIOp::Variant O);
+ 
+   /// Appends a new DIOp of type T to the expression being built. The new
+   /// DIOp is constructed in-place by forwarding the provided arguments Args.
+@@ -4627,8 +4627,8 @@ public:
+     return *this;
+   }
+ 
+-  Iterator erase(Iterator I);
+-  Iterator erase(Iterator From, Iterator To);
++  LLVM_ABI Iterator erase(Iterator I);
++  LLVM_ABI Iterator erase(Iterator From, Iterator To);
+ 
+   /// Returns true if the expression being built contains DIOp of type T,
+   /// false otherwise.
+@@ -4648,14 +4648,14 @@ public:
+   /// DIOpAddrOf(<pointer-address-space>) after it.
+   ///
+   /// Returns @c *this to permit chaining with other methods.
+-  DIExprBuilder &removeReferrerIndirection(Type *PointeeType);
++  LLVM_ABI DIExprBuilder &removeReferrerIndirection(Type *PointeeType);
+ 
+   /// Get the uniqued, immutable expression metadata from the current state
+   /// of the builder.
+   ///
+   /// This leaves the Builder in a valid but unspecified state, as if it were
+   /// moved from.
+-  DIExpression *intoExpression();
++  LLVM_ABI DIExpression *intoExpression();
+ };
+ 
+ /// Holds a DIExpression and keeps track of how many operands have been consumed
+diff --git a/llvm/include/llvm/IR/GlobalVariable.h b/llvm/include/llvm/IR/GlobalVariable.h
+index 98da509..1521536 100644
+--- a/llvm/include/llvm/IR/GlobalVariable.h
++++ b/llvm/include/llvm/IR/GlobalVariable.h
+@@ -217,10 +217,10 @@ public:
+   getDebugInfo(SmallVectorImpl<DIGlobalVariableExpression *> &GVs) const;
+ 
+   /// Attach a DIGlobalVariable.
+-  void addDebugInfo(DIGlobalVariable *GV);
++  LLVM_ABI void addDebugInfo(DIGlobalVariable *GV);
+ 
+   /// Fill the vector with all debug info attachements.
+-  void getDebugInfo(SmallVectorImpl<DIGlobalVariable *> &GVs) const;
++  LLVM_ABI void getDebugInfo(SmallVectorImpl<DIGlobalVariable *> &GVs) const;
+ 
+   /// Add attribute to this global.
+   void addAttribute(Attribute::AttrKind Kind) {

@@ -74,7 +74,9 @@ outputs:
       # OMPKinds.def leaks and 0014 includes VirtualFileSystem.h in
       # Instrumentor.h (AMD 0bace190 defects, run 38564796830); 0015 backports
       # upstream's DONT_DEFINE_EPRINTF guard in compiler-rt eprintf.c (osx-arm64,
-      # run 38570967283).
+      # run 38570967283); 0016 adds LLVM_ABI to AMD's heterogeneous-debug
+      # additions (DIExprBuilder etc.), which nothing exports from the Windows
+      # LLVM DLL otherwise (win-arm64, run 38570967283).
       - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
         sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
         target_directory: llvm-project
@@ -83,6 +85,7 @@ outputs:
           - shared/patches/0013-llvm23-ompkinds-undef-helper-macros.patch
           - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
           - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
+          - shared/patches/0016-llvm23-amd-missing-llvm-abi.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

@@ -141,8 +141,7 @@ def is-arm [] { $nu.os-info.arch == "aarch64" }
 def windows-arm-args [] {
   [
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra"
-    # LLVM as a DLL (same four-flag recipe as win-64). clang-cpp.dll is built too
-    # (clang-shlib, see windows-args); clang.exe itself still links clang statically.
+    # LLVM as a DLL (same recipe as win-64, including CLANG_LINK_CLANG_DYLIB=OFF from windows-args, which runs first).
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
@@ -399,7 +398,8 @@ def linux-x86-backend-args [src: string, prefix: string] {
     "-DWITH_ROCM_BACKEND=ON"
     "-DACPP_HIP_ROOT=."
     $"-Dhip_ROOT=($src)/rocm-dist"
-    "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
+    # SPIRV: TheRock's libamd_comgr.so.3 needs LLVMInitializeSPIRV{Target,TargetInfo,TargetMC,AsmPrinter} from our libLLVM (hip backend failed to load otherwise).
+    "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU;SPIRV"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
     $"-DOpenCL_LIBRARY=($prefix)/lib/libOpenCL.so"
     $"-DOpenCL_INCLUDE_DIR=($prefix)/include"
@@ -438,14 +438,17 @@ def windows-args [src: string, libprefix: string, build: string] {
     "-DOPENMP_MSVC_NAME_SCHEME=OFF"
     # LLVM as a DLL on Windows (upstream's documented recipe: LLVM Discourse,
     # "LLVM is buildable as a Windows DLL"): tools link LLVM-<ver>.dll, so the
-    # partition now matches linux's libLLVM.so shape. CLANG_LINK_CLANG_DYLIB is
-    # left at its default (OFF on Windows): clang.exe itself still links clang
-    # statically, but clang-cpp.dll IS built: clang/tools/CMakeLists.txt:38-40
-    # adds clang-shlib when MSVC AND LLVM_BUILD_LLVM_DYLIB_VIS (run 38570967283
-    # linked bin/clang-cpp.dll).
+    # partition matches linux's libLLVM.so shape. clang-cpp.dll is still built
+    # (clang/tools/CMakeLists.txt adds clang-shlib when MSVC AND
+    # LLVM_BUILD_LLVM_DYLIB_VIS), but tools must NOT link it:
+    # CLANG_LINK_CLANG_DYLIB defaults to LLVM_LINK_LLVM_DYLIB
+    # (clang/CMakeLists.txt), and clang's headers carry almost no CLANG_ABI
+    # export annotations, so clang-offload-wrapper.exe failed to link
+    # (getClangToolFullVersion undefined, run 38583556687). Hence the explicit OFF.
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
+    "-DCLANG_LINK_CLANG_DYLIB=OFF"
     # lldb python / lzma / libxml2 / tree-sitter are in common-args (swig,
     # python, xz, libxml2 and the tree-sitter CLI all exist for win-64). Left OFF
     # because no usable library exists for Windows on conda-forge:

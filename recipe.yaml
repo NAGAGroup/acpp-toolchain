@@ -10,9 +10,7 @@
 # packages share our file paths and still exist on the public channel.
 
 context:
-  # AMD's LLVM 23 snapshot (ROCm/llvm-project 0bace190, the commit TheRock
-  # 10.1.0a20260822 built against): LLVM_VERSION_SUFFIX is `git`, so the
-  # libLLVM soname is libLLVM.so.23.0git and the symbol version is LLVM_23.0.
+  # LLVM 23 at 23.0.0git: AMD's ROCm/llvm-project 0bace190 on the HIP platforms (linux-64, win-64), upstream llvm-project 3e7a2ec7 (AMD's merge base) elsewhere — see the staging source. LLVM_VERSION_SUFFIX is "git" in both, so the libLLVM soname is libLLVM.so.23.0git and the symbol version is LLVM_23.0.
   llvm_version: "23.0.0"
   llvm_major: "23"
   llvm_major_next: "24"
@@ -24,7 +22,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="38ac18330a09edfe738cd33ac9fe8ea8d163d919") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="edf839996a32d5810d0642783ddabd4d6c00954e") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -61,34 +59,48 @@ outputs:
           CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
           ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
     source:
+      # llvm-project, per platform. linux-64 and win-64 ship HIP and build
       # AMD's llvm-project at the exact commit TheRock 10.1.0a20260822 pins
-      # (compiler/amd-llvm), as a GitHub archive. The archive's single
-      # top-level directory (llvm-project-<sha>) is stripped by rattler-build,
-      # like the release tarball's was. The Xcode 26 fixes that
-      # shared/patches/0009 and 0011 carried are already in this tree
-      # (verified by git apply --reverse --check; 0011's include is present
-      # in a different position), so they are NOT listed. Patches: 0012 drops
-      # member-level LLVM_ABI(_FOR_TEST) from classes that already carry it,
-      # which clang-cl rejects as a dllexport on a member of a dllexport class
-      # (VPlan.h, win-64/win-arm64 run 38542113236); 0013 #undefs helper macros
-      # OMPKinds.def leaks and 0014 includes VirtualFileSystem.h in
-      # Instrumentor.h (AMD 0bace190 defects, run 38564796830); 0015 backports
-      # upstream's DONT_DEFINE_EPRINTF guard in compiler-rt eprintf.c (osx-arm64,
-      # run 38570967283); 0016 adds LLVM_ABI to AMD's heterogeneous-debug
-      # additions (DIExprBuilder etc.), which nothing exports from the Windows
-      # LLVM DLL otherwise (win-arm64, run 38570967283); 0017 renames the
-      # CurrentVNode local in compiler-rt's InstrProfiling.c that shadows a global
-      # under the kext builtins' -Werror=shadow (osx-arm64, run 38577744298).
-      - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
-        sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
-        target_directory: llvm-project
-        patches:
-          - shared/patches/0012-llvm23-dllexport-double-annotation.patch
-          - shared/patches/0013-llvm23-ompkinds-undef-helper-macros.patch
-          - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
-          - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
-          - shared/patches/0016-llvm23-amd-missing-llvm-abi.patch
-          - shared/patches/0017-compiler-rt-profile-wshadow.patch
+      # (compiler/amd-llvm): linux comgr dynamically links OUR libLLVM, and
+      # the HIP JIT reads AMD-format device bitcode. linux-aarch64, osx-arm64
+      # and win-arm64 ship no HIP and build upstream llvm-project at AMD's
+      # merge base 3e7a2ec7: same date, same 23.0.0git version, so the lane,
+      # the fork's LLVM 23 port and the translator pin are unchanged. AMD's
+      # tree adds ~350k lines of AMD-specific work on top of that base,
+      # including a clang driver change that adds the ELF-only
+      # --disable-new-dtags to every -fopenmp link (broke osx-arm64 rt_tests,
+      # run 38583556687), and it reverts upstream compiler-rt fixes that
+      # 0015/0017 restore. Archives' single top dir is stripped by rattler-build.
+      # Patches: 0012 drops member-level LLVM_ABI(_FOR_TEST) from classes that
+      # already carry it, which clang-cl rejects (VPlan.h, run 38542113236);
+      # 0013 #undefs helper macros AMD's OMPKinds.def leaks and 0014 includes
+      # VirtualFileSystem.h in Instrumentor.h (run 38564796830); 0015 restores
+      # the DONT_DEFINE_EPRINTF guard in compiler-rt eprintf.c (run
+      # 38570967283); 0016 adds LLVM_ABI to AMD's heterogeneous-debug
+      # additions for the Windows LLVM DLL (run 38570967283); 0017 restores
+      # the CurrVNode rename in compiler-rt InstrProfiling.c (run 38577744298).
+      # 0013/0015/0016/0017 address AMD-only code or AMD reverts and are not
+      # needed upstream (checked with git apply --check / --reverse --check).
+      # 0009/0011 (Xcode 26) are already in both trees.
+      - if: target_platform == "linux-64" or target_platform == "win-64"
+        then:
+          - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
+            sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
+            target_directory: llvm-project
+            patches:
+              - shared/patches/0012-llvm23-dllexport-double-annotation.patch
+              - shared/patches/0013-llvm23-ompkinds-undef-helper-macros.patch
+              - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
+              - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
+              - shared/patches/0016-llvm23-amd-missing-llvm-abi.patch
+              - shared/patches/0017-compiler-rt-profile-wshadow.patch
+        else:
+          - url: https://github.com/llvm/llvm-project/archive/3e7a2ec74cd8f8e0e32037d0192a1378789e9af7.tar.gz
+            sha256: 2f39f8e805e229b2a10475430a1daad5014079340bfd598bc55c0a31b9650a5b
+            target_directory: llvm-project
+            patches:
+              - shared/patches/0012-llvm23-dllexport-double-annotation.patch
+              - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

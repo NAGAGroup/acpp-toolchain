@@ -85,6 +85,13 @@ def main [] {
   # empty-arch failure. The outer build sees identical flags via outer-flag-args;
   # the child starts clean and gets exactly what RUNTIMES_CMAKE_ARGS hands it.
   let args = (stage-args $src $prefix $build)
+
+  # Clang config files for the freshly built clang in <build>/bin: sysroot/SDK,
+  # gcc toolchain, deployment target, libc++ headers and the activation flags.
+  # This covers the runtimes child (compiler-rt, libomp) and anything else the
+  # bootstrapped clang compiles for the host. It must run HERE: the activation
+  # env is still intact, and the hide-env loop below strips it.
+  ^nu ($src | path join "shared" "write-build-cfg.nu") $build
   # LDFLAGS deliberately STAYS in the env: the SPIRV-translator inner
   # ExternalProject env-seeds its linker flags and NEEDS conda's -L$PREFIX/lib
   # to resolve libLLVM.so's NEEDED libs (libz/libzstd/libxml2) — stripping it

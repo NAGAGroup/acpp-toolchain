@@ -1,0 +1,30 @@
+openmp: define the AMD-only omp_get_memory_space / omp_destroy_memory_space / active-thread-mask entries for the upper-case Fortran name styles
+
+AMD's kmp_ftn_os.h defines FTN_GET_MEMSPACE and FTN_DESTROY_MEMSPACE only for KMP_FTN_PLAIN and KMP_FTN_APPEND,
+and FTN_GET_ACTIVE_THREAD_MASK for all but KMP_FTN_UAPPEND. The users in kmp_*.cpp expand the macros unconditionally,
+so builds that select KMP_FTN_UPPER / KMP_FTN_UAPPEND (win-64) fail. Upstream llvm-project 3e7a2ec7 has none of
+these three entries at all; they are AMD additions.
+
+diff --git a/openmp/runtime/src/kmp_ftn_os.h b/openmp/runtime/src/kmp_ftn_os.h
+index 7bcadda..4b3618e 100644
+--- a/openmp/runtime/src/kmp_ftn_os.h
++++ b/openmp/runtime/src/kmp_ftn_os.h
+@@ -447,6 +447,8 @@
+ #define FTN_GET_MASTER_THREAD_ID OMP_EXT_GET_MASTER_THREAD_ID
+ #define FTN_GET_ACTIVE_THREAD_MASK OMP_GETACTIVETHREADMASK
+ #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL
++#define FTN_GET_MEMSPACE OMP_GET_MEMORY_SPACE
++#define FTN_DESTROY_MEMSPACE OMP_DESTROY_MEMORY_SPACE
+ #define FTN_INIT_ALLOCATOR OMP_INIT_ALLOCATOR
+ #define FTN_DESTROY_ALLOCATOR OMP_DESTROY_ALLOCATOR
+ #define FTN_SET_DEFAULT_ALLOCATOR OMP_SET_DEFAULT_ALLOCATOR
+@@ -596,6 +598,9 @@
+ #endif
+ 
+ #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL_
++#define FTN_GET_ACTIVE_THREAD_MASK OMP_EXT_GET_ACTIVE_THREADS_MASK_
++#define FTN_GET_MEMSPACE OMP_GET_MEMORY_SPACE_
++#define FTN_DESTROY_MEMSPACE OMP_DESTROY_MEMORY_SPACE_
+ #define FTN_INIT_ALLOCATOR OMP_INIT_ALLOCATOR_
+ #define FTN_DESTROY_ALLOCATOR OMP_DESTROY_ALLOCATOR_
+ #define FTN_SET_DEFAULT_ALLOCATOR OMP_SET_DEFAULT_ALLOCATOR_

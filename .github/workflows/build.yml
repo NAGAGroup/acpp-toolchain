@@ -321,6 +321,12 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
+      - name: "HIP plugin loads (no device)"
+        id: hipload
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu hip-load-check 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/hip-load.log"
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t2
         continue-on-error: true
@@ -557,20 +563,30 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        # Hang diagnostic: after 10 min, any clang -cc1 still compiling reduction.cpp is
-        # sampled (macOS) and sent SIGSEGV so clang prints its pretty stack trace.
+        # Hang diagnostic: after 10 min, list processes mentioning reduction, then for each clang
+        # driver still compiling reduction.cpp (cc1 runs in-process) take a stack (macOS: sample;
+        # Linux: gdb, else /proc/<pid>/stack + wchan) and send SIGSEGV so clang prints its pass stack.
         run: |
           set -o pipefail
           mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" &
+          ( pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" ) &
           build_pid=$!
           (
             sleep 600
-            for pid in $(pgrep -f -- '-cc1.*reduction\.cpp'); do
-              echo "omp-hang watchdog: pid $pid still compiling reduction.cpp after 600 s"
+            echo "omp-hang watchdog: 600 s elapsed; processes mentioning reduction:"
+            ps -eo pid,etime,args | grep -i reduction | grep -v grep || true
+            # the clang driver is the process to inspect: cc1 runs in-process
+            for pid in $(ps -eo pid,args | grep -i clang | grep 'reduction\.cpp' | grep -v grep | awk '{print $1}'); do
+              echo "omp-hang watchdog: pid $pid (clang driver) still compiling reduction.cpp after 600 s"
               if [ "$(uname)" = "Darwin" ]; then
                 sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
                 cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 30' || true
+              else
+                cat "/proc/$pid/stack" || true
+                cat "/proc/$pid/wchan" || true
+                echo
               fi
               kill -SEGV "$pid" || true
             done
@@ -587,7 +603,35 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
+        # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
+        # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          ( pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log" ) &
+          main_pid=$!
+          (
+            sleep 480
+            echo "hang watchdog: 480 s elapsed; acpp-suite / clang processes:"
+            ps -eo pid,etime,args | grep -E 'acpp-suite|clang' | grep -v grep || true
+            for pid in $(ps -eo pid,args | grep -E 'acpp-suite|clang' | grep -v grep | awk '{print $1}'); do
+              echo "hang watchdog: stacks of pid $pid"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 25' || true
+              else
+                for s in /proc/$pid/task/*/stack; do echo "== $s"; cat "$s" || true; done
+              fi
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$main_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       - name: "suite: install packages"
         id: suiteinstall
         continue-on-error: true
@@ -623,14 +667,70 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log"
+        # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
+        # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          ( pixi run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log" ) &
+          main_pid=$!
+          (
+            sleep 480
+            echo "hang watchdog: 480 s elapsed; acpp-suite / clang processes:"
+            ps -eo pid,etime,args | grep -E 'acpp-suite|clang' | grep -v grep || true
+            for pid in $(ps -eo pid,args | grep -E 'acpp-suite|clang' | grep -v grep | awk '{print $1}'); do
+              echo "hang watchdog: stacks of pid $pid"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 25' || true
+              else
+                for s in /proc/$pid/task/*/stack; do echo "== $s"; cat "$s" || true; done
+              fi
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$main_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       - name: "pstl_tests: generic on OMP (CPU)"
         id: t7
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic omp pstl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t7.log"
+        # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
+        # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          ( pixi run nu suite.nu run generic omp pstl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t7.log" ) &
+          main_pid=$!
+          (
+            sleep 480
+            echo "hang watchdog: 480 s elapsed; acpp-suite / clang processes:"
+            ps -eo pid,etime,args | grep -E 'acpp-suite|clang' | grep -v grep || true
+            for pid in $(ps -eo pid,args | grep -E 'acpp-suite|clang' | grep -v grep | awk '{print $1}'); do
+              echo "hang watchdog: stacks of pid $pid"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 25' || true
+              else
+                for s in /proc/$pid/task/*/stack; do echo "== $s"; cat "$s" || true; done
+              fi
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$main_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         id: t8
         continue-on-error: true
@@ -865,20 +965,30 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        # Hang diagnostic: after 10 min, any clang -cc1 still compiling reduction.cpp is
-        # sampled (macOS) and sent SIGSEGV so clang prints its pretty stack trace.
+        # Hang diagnostic: after 10 min, list processes mentioning reduction, then for each clang
+        # driver still compiling reduction.cpp (cc1 runs in-process) take a stack (macOS: sample;
+        # Linux: gdb, else /proc/<pid>/stack + wchan) and send SIGSEGV so clang prints its pass stack.
         run: |
           set -o pipefail
           mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" &
+          ( pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" ) &
           build_pid=$!
           (
             sleep 600
-            for pid in $(pgrep -f -- '-cc1.*reduction\.cpp'); do
-              echo "omp-hang watchdog: pid $pid still compiling reduction.cpp after 600 s"
+            echo "omp-hang watchdog: 600 s elapsed; processes mentioning reduction:"
+            ps -eo pid,etime,args | grep -i reduction | grep -v grep || true
+            # the clang driver is the process to inspect: cc1 runs in-process
+            for pid in $(ps -eo pid,args | grep -i clang | grep 'reduction\.cpp' | grep -v grep | awk '{print $1}'); do
+              echo "omp-hang watchdog: pid $pid (clang driver) still compiling reduction.cpp after 600 s"
               if [ "$(uname)" = "Darwin" ]; then
                 sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
                 cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 30' || true
+              else
+                cat "/proc/$pid/stack" || true
+                cat "/proc/$pid/wchan" || true
+                echo
               fi
               kill -SEGV "$pid" || true
             done
@@ -896,7 +1006,35 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
+        # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
+        # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          ( pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log" ) &
+          main_pid=$!
+          (
+            sleep 480
+            echo "hang watchdog: 480 s elapsed; acpp-suite / clang processes:"
+            ps -eo pid,etime,args | grep -E 'acpp-suite|clang' | grep -v grep || true
+            for pid in $(ps -eo pid,args | grep -E 'acpp-suite|clang' | grep -v grep | awk '{print $1}'); do
+              echo "hang watchdog: stacks of pid $pid"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 25' || true
+              else
+                for s in /proc/$pid/task/*/stack; do echo "== $s"; cat "$s" || true; done
+              fi
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$main_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       - name: "suite: install packages"
         id: suiteinstall
         continue-on-error: true
@@ -932,7 +1070,35 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log"
+        # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
+        # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          ( pixi run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log" ) &
+          main_pid=$!
+          (
+            sleep 480
+            echo "hang watchdog: 480 s elapsed; acpp-suite / clang processes:"
+            ps -eo pid,etime,args | grep -E 'acpp-suite|clang' | grep -v grep || true
+            for pid in $(ps -eo pid,args | grep -E 'acpp-suite|clang' | grep -v grep | awk '{print $1}'); do
+              echo "hang watchdog: stacks of pid $pid"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/hang-sample-$pid.txt" || true
+              elif command -v gdb > /dev/null 2>&1; then
+                gdb -p "$pid" -batch -ex 'thread apply all bt 25' || true
+              else
+                for s in /proc/$pid/task/*/stack; do echo "== $s"; cat "$s" || true; done
+              fi
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$main_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
       # The Metal check (informational: tests never block publishing).
       - name: "sycl_tests: generic on Metal (M2)"
         id: t7
@@ -1379,6 +1545,12 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu info
+      - name: "HIP plugin loads (no device)"
+        id: hipload
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu hip-load-check
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t2
         continue-on-error: true

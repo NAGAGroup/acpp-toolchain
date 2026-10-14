@@ -51,6 +51,7 @@ def run-envs [] {
   mut envs = ["run-omp"]
   if $p in ["linux-64" "linux-aarch64" "win-64" "win-arm64"] { $envs = ($envs | append "run-ocl") }
   if $p in ["linux-64" "linux-aarch64" "win-64"] { $envs = ($envs | append "run-cuda") }
+  if $p in ["linux-64" "win-64"] { $envs = ($envs | append "run-rocm") }
   $envs
 }
 
@@ -134,13 +135,34 @@ def "main run" [
     error make {msg: $"suite.nu run: no run environment for visibility mask '($mask)' (omp/metal -> run-omp, ocl -> run-ocl, *cuda* -> run-cuda)"}
   })
 
+  # Name every test as it starts, so a hang or crash is attributable from the log alone.
+  let has_log_level = ($rest | any {|a| $a | str starts-with "--log_level"})
+  let exe_args = (if $has_log_level { $rest } else { $rest | append "--log_level=test_suite" })
+
   let code = (with-env {ACPP_VISIBILITY_MASK: $mask} {
-    ^pixi run -e $run_env --manifest-path (suite-manifest) $"acpp-suite-($name)-($exe)" ...$rest
+    ^pixi run -e $run_env --manifest-path (suite-manifest) $"acpp-suite-($name)-($exe)" ...$exe_args
     $env.LAST_EXIT_CODE
   })
   if $code != 0 {
     exit $code
   }
+}
+
+# ── hip-load-check ───────────────────────────────────────────────────────
+# The HIP plugin must LOAD (its libraries and symbols resolve) even without a GPU: run acpp-info in
+# run-rocm and fail if the backend loader reports it could not load the HIP backend library.
+def "main hip-load-check" [] {
+  let log_dir = ($env.FILE_PWD | path join "build")
+  mkdir $log_dir
+  let log = ($log_dir | path join "hip-load-check.log")
+  ^pixi run -e run-rocm --manifest-path (suite-manifest) acpp-info o+e>| tee { save -f $log } | print
+  let bad = (open --raw $log | ansi strip | lines | where {|l| ($l | str contains "Could not load library") and ($l | str contains "backend-hip")})
+  if ($bad | is-not-empty) {
+    print "hip-load-check: FAIL — the HIP backend library did not load:"
+    for l in $bad { print $"  ($l)" }
+    exit 1
+  }
+  print "hip-load-check: OK — no 'Could not load library' for backend-hip"
 }
 
 # ── info ─────────────────────────────────────────────────────────────────
@@ -212,5 +234,5 @@ def "main boost" [] {
 
 
 def main [] {
-  print "usage: nu suite.nu {package <name> <targets> | install | run <name> <mask> <exe> [...rest] | info | boost}"
+  print "usage: nu suite.nu {package <name> <targets> | install | run <name> <mask> <exe> [...rest] | info | hip-load-check | boost}"
 }

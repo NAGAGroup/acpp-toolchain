@@ -42,6 +42,8 @@ def compute [] {
   $parts = ($parts | append (open --raw ($root | path join "shared" "build-stage.nu")))
   # and the library it sources (the cmake argument assembly)
   $parts = ($parts | append (open --raw ($root | path join "shared" "build-stage-lib.nu")))
+  # and the build-tree clang cfg writer it calls (changes what the runtimes child compiles with)
+  $parts = ($parts | append (open --raw ($root | path join "shared" "write-build-cfg.nu")))
   # the recipe's staging source spec, as written (the rev is a template, so
   # the text is stable per commit; the rendered rev is in rattler's own key)
   let recipe = ($root | path join "recipe.yaml")

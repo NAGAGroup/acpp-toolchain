@@ -33,6 +33,7 @@ build = ["tools", "build"]
 run-omp = ["tools", "suite", "run-omp"]
 run-ocl = ["tools", "suite", "run-omp", "run-ocl"]
 run-cuda = ["tools", "suite", "run-omp", "run-cuda"]
+run-rocm = ["tools", "suite", "run-omp", "run-rocm"]
 
 [feature.tools.dependencies]
 nushell = "*"
@@ -90,6 +91,13 @@ naga-acpp-runtime-cuda = "*"
 
 [feature.run-cuda.target.win-64.dependencies]
 naga-acpp-runtime-cuda = "*"
+
+# ── run-rocm: HIP plugin load check (no AMD device needed; see suite.nu hip-load-check) ──
+[feature.run-rocm.target.linux-64.dependencies]
+naga-acpp-runtime-rocm = "*"
+
+[feature.run-rocm.target.win-64.dependencies]
+naga-acpp-runtime-rocm = "*"
 
 # ── build: what COMPILING the tests needs ───────────────────────────────
 [feature.build.dependencies]

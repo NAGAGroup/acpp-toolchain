@@ -17,7 +17,9 @@ endif()
 # conda-forge ships no Boost for win-arm64: build Boost.Test from the release
 # CMake tarball (same release as `suite.nu boost`) so the tests'
 # find_package(Boost COMPONENTS unit_test_framework) resolves to it.
+set(ACPP_SUITE_BUILD_BOOST OFF)
 if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64|arm64")
+  set(ACPP_SUITE_BUILD_BOOST ON)
   include(FetchContent)
   set(ACPP_SUITE_BOOST_VERSION "1.92.0")
   set(BOOST_INCLUDE_LIBRARIES test)
@@ -44,6 +46,14 @@ endif()
 foreach(exe IN LISTS ACPP_SUITE_EXES)
   set_target_properties(${exe} PROPERTIES OUTPUT_NAME "acpp-suite-${ACPP_SUITE_TARGETS}-${exe}")
 endforeach()
+
+# The tests find Boost.Test through the overridden find_package, which gives them the include path
+# only; link the fetched Boost.Test library explicitly (win-arm64 builds Boost from source).
+if(ACPP_SUITE_BUILD_BOOST)
+  foreach(exe IN LISTS ACPP_SUITE_EXES)
+    target_link_libraries(${exe} PRIVATE Boost::unit_test_framework)
+  endforeach()
+endif()
 
 add_custom_target(acpp_suite ALL DEPENDS ${ACPP_SUITE_EXES})
 

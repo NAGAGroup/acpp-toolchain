@@ -54,6 +54,10 @@ numactl: ["2.0"]
 # is header-only and date-versioned (no ABI surface to pin), and ocl-icd is a
 # loader whose whole purpose is a stable ABI across versions.
 level-zero-devel: ["1.29"]
+# The runtime pin of the same series for naga-acpp-runtime-level-zero (an output
+# that inherits the staging build cannot use pin_compatible; a bare `level-zero`
+# requirement picks this key up).
+level-zero: ["1.29"]
 
 # ---- python ----------------------------------------------------------------
 # ONE python for the whole build. Previously the staging build asked for
@@ -69,4 +73,4 @@ python: ["3.14"]
 # sources, patches or build script, so editing a patch silently reused a stale
 # toolchain. This hash covers those real inputs; shared/gen-staging-hash.nu
 # regenerates it and CI fails when it is stale.
-staging_inputs: ["dfb6a1d39f631375"]
+staging_inputs: ["2df46c9392331c78"]

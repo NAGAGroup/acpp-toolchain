@@ -5,9 +5,13 @@
 # binary dir lives OUTSIDE the work dir so compile-command paths stay stable
 # for ccache and a staging-cache miss can still reuse objects.
 #
-# Linux and Windows differ materially (upstream AdaptiveCpp only supports
-# clang-cl on Windows, there is no LLVM dylib there, and the backend set is
-# smaller), so the CMake argument list is assembled per platform.
+# Linux, macOS and Windows differ materially (upstream AdaptiveCpp only
+# supports clang-cl on Windows, and the backend set differs per platform), so
+# the CMake argument list is assembled per platform. LLVM itself is built as a
+# dylib on EVERY platform (libLLVM.so / libLLVM.dylib / LLVM-<ver>.dll via
+# LLVM_BUILD_LLVM_DYLIB_VIS on Windows), and every tool links it.
+# The LLVM source is AMD's llvm-project snapshot (version suffix `git`, so the
+# linux soname is libLLVM.so.23.0git), the commit TheRock's comgr is built on.
 
 def is-windows [] { $nu.os-info.name == "windows" }
 
@@ -52,16 +56,22 @@ def common-args [src: string, prefix: string, build: string] {
     "-DACPP_CUDA_ROOT=."
     "-DACPP_OCL_ROOT=."
     "-DACPP_ZE_ROOT=."
-    "-DACPP_HIP_ROOT=."
+    # ACPP_HIP_ROOT=. is set only where the ROCm backend is built (linux-64
+    # and win-64): see linux-x86-backend-args and windows-args.
     (if (is-windows) { "-DACPP_LIBOMP_ROOT=bin" } else { "-DACPP_LIBOMP_ROOT=lib" })
     "-DWITH_CUDA_BACKEND=ON"
     "-DWITH_CPU_BACKEND=ON"
     "-DWITH_ACCELERATED_CPU=ON"
     "-DWITH_ROCM_BACKEND=OFF"
     "-DACPP_COMPILER_FEATURE_PROFILE=full"
+    # The fork refuses LLVM newer than its tested range unless told otherwise;
+    # this build is LLVM 23 (AMD snapshot).
+    "-DACPP_EXPERIMENTAL_LLVM=ON"
     $"-DCUDAToolkit_ROOT=($prefix)"
-    # The fork clones its SPIR-V translator itself; pin the commit.
-    "-DLLVMSPIRV_COMMIT=3d3f0dece590232aab1851f1bea860c2a381ec34"
+    # The fork clones its SPIR-V translator itself (NAGAGroup/SPIRV-LLVM-
+    # Translator); pin the commit: naga/amd-llvm-23, Khronos main 7d4b128d (the
+    # parent of AMD's 2026-07-08 merge) + the AdaptiveCpp address-space patch.
+    "-DLLVMSPIRV_COMMIT=3b9a98b10387aa29e8545a724bb3f43b4e4069ec"
     "-DOPENMP_ENABLE_LIBOMPTARGET=OFF"
     # compiler-rt: builtins plus the sanitizer runtimes (phase-3 ruling [B]).
     #
@@ -99,11 +109,15 @@ def is-darwin [] { $nu.os-info.name == "macos" }
 
 def is-arm [] { $nu.os-info.arch == "aarch64" }
 
-# Windows on ARM64: OMP and OpenCL (no CUDA, Level Zero or ROCm packages exist for win-arm64). compiler-rt BUILTINS only: the vs2026 activation links clang_rt.builtins-aarch64.lib (conda-forge parity), and nothing else supplies it. No sanitizers, no clang-tools-extra.
+# Windows on ARM64: OMP and OpenCL (no CUDA, Level Zero or ROCm packages exist for win-arm64). compiler-rt BUILTINS only: the vs2026 activation links clang_rt.builtins-aarch64.lib (conda-forge parity), and nothing else supplies it. No sanitizers. Otherwise the full tool set: clang-tools-extra, lldb, and LLVM as a DLL.
 # Appended after windows-args, so these -D values win.
 def windows-arm-args [] {
   [
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;openmp;compiler-rt"
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;openmp;compiler-rt"
+    # LLVM as a DLL (same four-flag recipe as win-64; clang stays static).
+    "-DLLVM_BUILD_LLVM_DYLIB=ON"
+    "-DLLVM_LINK_LLVM_DYLIB=ON"
+    "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
@@ -117,16 +131,26 @@ def windows-arm-args [] {
   ]
 }
 
-# macOS: OMP and Metal; no lldb/bolt (bolt has no darwin port), no
-# compiler-rt (the sanitizer story is its own pass), no CUDA/ROCm/L0/OpenCL.
+# macOS: OMP and Metal, plus the full tool set: lldb (against Xcode's signed
+# debugserver, no python), clang-tools-extra and compiler-rt (builtins, profile
+# and the sanitizers/libFuzzer darwin supports). No bolt (no darwin port), no
+# CUDA/ROCm/L0/OpenCL.
 # Apple triples are inferred natively — no host/target triple
 # overrides, no sysroot machinery: the activation's CMAKE_ARGS carries
 # CMAKE_OSX_SYSROOT and the deployment target.
 def darwin-args [src: string, prefix: string] {
   [
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp"
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;openmp;compiler-rt"
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
+    # lldb: Xcode's own signed debugserver (building and codesigning ours
+    # needs entitlements); no python/swig on this platform for now.
+    "-DLLDB_USE_SYSTEM_DEBUGSERVER=ON"
+    "-DLLDB_ENABLE_PYTHON=OFF"
+    "-DLLDB_ENABLE_LIBEDIT=OFF"
+    "-DLLDB_ENABLE_CURSES=OFF"
+    "-DLLDB_ENABLE_LZMA=OFF"
+    "-DLLDB_ENABLE_LIBXML2=OFF"
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_OPENCL_BACKEND=OFF"
@@ -142,10 +166,21 @@ def darwin-args [src: string, prefix: string] {
     # default target, so a bare `clang` invocation finds it with no symlink.
     "-DLLVM_HOST_TRIPLE=arm64-apple-darwin20.0.0"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=arm64-apple-darwin20.0.0"
-    "-DCOMPILER_RT_BUILD_BUILTINS=OFF"
-    "-DCOMPILER_RT_BUILD_SANITIZERS=OFF"
-    "-DCOMPILER_RT_BUILD_PROFILE=OFF"
-    "-DCOMPILER_RT_BUILD_LIBFUZZER=OFF"
+    # compiler-rt rides LLVM_ENABLE_PROJECTS here (as on win; the host
+    # compiler is clang): builtins, profile, the sanitizers and libFuzzer that
+    # darwin supports. XRay, MemProf and ORC are linux/other-first; the
+    # embedded-Apple-platform runtimes are not wanted for a macOS toolchain.
+    "-DCOMPILER_RT_BUILD_BUILTINS=ON"
+    "-DCOMPILER_RT_BUILD_SANITIZERS=ON"
+    "-DCOMPILER_RT_BUILD_PROFILE=ON"
+    "-DCOMPILER_RT_BUILD_LIBFUZZER=ON"
+    "-DCOMPILER_RT_BUILD_XRAY=OFF"
+    "-DCOMPILER_RT_BUILD_MEMPROF=OFF"
+    "-DCOMPILER_RT_BUILD_ORC=OFF"
+    "-DCOMPILER_RT_ENABLE_IOS=OFF"
+    "-DCOMPILER_RT_ENABLE_WATCHOS=OFF"
+    "-DCOMPILER_RT_ENABLE_TVOS=OFF"
+    "-DCOMPILER_RT_ENABLE_XROS=OFF"
     "-DCMAKE_INSTALL_RPATH=@loader_path/../lib"
   ]
 }
@@ -296,7 +331,6 @@ def linux-args [src: string, prefix: string] {
     # One dylib every tool links against — the seam the whole partition rests on
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
-    "-DLLVM_DYLIB_SYMBOL_VERSIONING=ON"
     "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
     "-DLLVM_ENABLE_LIBXML2=FORCE_ON"
     "-DLLVM_ENABLE_LIBEDIT=OFF"
@@ -327,6 +361,7 @@ def linux-x86-backend-args [src: string, prefix: string] {
     # ACPP_HIP_ROOT=. tells the fork the prefix IS the HIP root. The backend
     # plugins' RUNPATH is $ORIGIN/.., so the HIP libraries must sit in lib/.
     "-DWITH_ROCM_BACKEND=ON"
+    "-DACPP_HIP_ROOT=."
     $"-Dhip_ROOT=($src)/rocm-dist"
     "-DLLVM_TARGETS_TO_BUILD=X86;NVPTX;AMDGPU"
     $"-DCUDA_DEVICE_LIBS_PATH=($prefix)/nvvm/libdevice"
@@ -368,13 +403,23 @@ def windows-args [src: string, libprefix: string, build: string] {
     # archived in the naga-labs mechanics reference). This also mirrors
     # upstream AdaptiveCpp's own windows-acppllvm.yml, which builds
     # LLVM_ENABLE_PROJECTS="clang;openmp;lld;compiler-rt" and never uses the
-    # win runtimes bootstrap. lldb/bolt/polly stay linux-only;
-    # clang-tools-extra is added on top for acpp-tools parity.
-    "-DLLVM_ENABLE_PROJECTS=clang;lld;clang-tools-extra;openmp;compiler-rt"
-    # Windows has no libLLVM dylib — tools link the static libs instead, which
-    # is why the win file partition differs from linux by construction.
-    "-DLLVM_BUILD_LLVM_DYLIB=OFF"
-    "-DLLVM_LINK_LLVM_DYLIB=OFF"
+    # win runtimes bootstrap. bolt/polly stay linux-only; clang-tools-extra
+    # and lldb are added on top for the full tool set.
+    "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra;openmp;compiler-rt"
+    # LLVM as a DLL on Windows (upstream's documented recipe: LLVM Discourse,
+    # "LLVM is buildable as a Windows DLL"): tools link LLVM-<ver>.dll, so the
+    # partition now matches linux's libLLVM.so shape. CLANG_LINK_CLANG_DYLIB is
+    # left at its default (OFF on Windows): clang stays static, there is no
+    # clang-cpp DLL.
+    "-DLLVM_BUILD_LLVM_DYLIB=ON"
+    "-DLLVM_LINK_LLVM_DYLIB=ON"
+    "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
+    # lldb without python scripting (first cut; no swig on Windows)
+    "-DLLDB_ENABLE_PYTHON=OFF"
+    "-DLLDB_ENABLE_LIBEDIT=OFF"
+    "-DLLDB_ENABLE_CURSES=OFF"
+    "-DLLDB_ENABLE_LZMA=OFF"
+    "-DLLDB_ENABLE_LIBXML2=OFF"
     # See linux-args: XRay has no Windows port, and MemProf/ORC are not built
     # for Windows by conda-forge's clang either. ASan, the profile runtime and
     # libFuzzer DO support Windows and are enabled in common-args.
@@ -391,6 +436,7 @@ def windows-args [src: string, libprefix: string, build: string] {
     # win-64-only source in the recipe; win-arm64 overrides this OFF).
     ...(if (($src | path join "rocm-dist") | path exists) { [
       "-DWITH_ROCM_BACKEND=ON"
+      "-DACPP_HIP_ROOT=."
       $"-Dhip_ROOT=($src)/rocm-dist"
     ] } else { [] })
     $"-DOpenCL_LIBRARY=($libprefix)/lib/OpenCL.lib"
@@ -535,16 +581,14 @@ def main [] {
 
   ^cmake ($src | path join "llvm-project" "llvm") -G Ninja ...$args -B $build
 
-  if (is-windows) {
-    ^cmake --build $build --parallel (cpu-count)
-  } else {
-    # libLLVM.so must exist BEFORE AdaptiveCpp's SPIRV-LLVM-Translator
-    # ExternalProject builds: its inner cmake links the file directly, so the
-    # outer ninja has no rule for it and high job counts race ahead of the link
-    # (invisible at -j16, fatal at -j64). Windows has no dylib, so no race.
-    ^cmake --build $build --target LLVM --parallel (cpu-count)
-    ^cmake --build $build --parallel (cpu-count)
-  }
+  # The LLVM dylib must exist BEFORE AdaptiveCpp's SPIRV-LLVM-Translator
+  # ExternalProject builds: its inner cmake links the file directly (libLLVM.so,
+  # libLLVM.dylib, or the LLVM import library on Windows), so the outer ninja
+  # has no rule for it and high job counts race ahead of the link (invisible at
+  # -j16, fatal at -j64). Every platform builds the dylib now, so the same
+  # ordering applies everywhere.
+  ^cmake --build $build --target LLVM --parallel (cpu-count)
+  ^cmake --build $build --parallel (cpu-count)
 
   cd $build
   ^cmake --install $build
@@ -556,11 +600,9 @@ def main [] {
   # with the child's CMakeError.log dumped into the CI log.
   # NB backslashes are glob ESCAPES in nushell — normalize the joined path or
   # `glob` fails to parse on Windows (this crash ate a run's evidence).
-  # Not on the macOS first cut: compiler-rt is deliberately not built there
-  # (the sanitizer story is its own pass), so absence is the expected state,
-  # not hollowness.
-  # nor on win-arm64 (builtins only there: no asan runtime to look for).
-  if not ((is-darwin) or ((is-windows) and (is-arm))) {
+  # Not on win-arm64 (builtins only there: no asan runtime to look for).
+  # macOS builds the darwin sanitizers, so its asan dylib is checked too.
+  if not ((is-windows) and (is-arm)) {
     let rt_glob = (if (is-windows) {
       ($prefix | path join "lib" "clang" "**" "clang_rt.asan*" | str replace --all '\' '/')
     } else {
@@ -586,28 +628,33 @@ def main [] {
   } else {
   }
 
-  # ROCm runtime subset: the rows of the fork's full-mode HIP deploy
-  # manifest (config/{linux,windows}/common/deploy/hip.json), which under
-  # managed the fork does not deploy itself, plus the HIP headers so the
-  # hip multipass target compiles. Copied with the tarball's OWN layout so
-  # the discovered subdirs resolve under the prefix (ACPP_HIP_ROOT=.).
+  # ROCm runtime subset: ONLY these files come from TheRock's tarball (rocm-dist),
+  # copied with the tarball's OWN layout so the discovered subdirs resolve
+  # under the prefix (ACPP_HIP_ROOT=.). Nothing from its lib/llvm (no libLLVM,
+  # libclang-cpp, clang, lld or tools), no .kpack/, no HIP/HSA headers: on
+  # Linux libamd_comgr NEEDs libLLVM.so.23.0git and libclang-cpp.so.23.0git
+  # (RUNPATH $ORIGIN first) and binds to OUR copies in the same lib/. The list
+  # matches naga-acpp-runtime-rocm in recipe.yaml, file for file.
   if ($rocm | path exists) {
     if not (is-windows) {
       let libdir = ($prefix | path join "lib")
-      for stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc hiprtc-builtins rocprofiler-register rocm-core] {
-        let matches = (glob ($rocm | path join "lib" $"lib($stem).so*"))
+      # stem -> required? (SONAME symlink families are preserved by cp -a)
+      for stem in [
+        {n: amdhip64, req: true} {n: hsa-runtime64, req: true} {n: amd_comgr, req: true}
+        {n: hiprtc, req: true} {n: hiprtc-builtins, req: true} {n: rocm_kpack, req: true}
+        {n: rocprofiler-register, req: true}
+      ] {
+        let matches = (glob ($rocm | path join "lib" $"lib($stem.n).so*"))
         if ($matches | is-empty) {
-          if $stem in [amdhip64 hsa-runtime64 amd_comgr hiprtc] {
-            error make {msg: $"rocm deploy: no lib($stem).so* under ($rocm)/lib"}
-          }
-          print $"rocm deploy: optional lib($stem) not in the tarball, skipped"
+          if $stem.req { error make {msg: $"rocm deploy: no lib($stem.n).so* under ($rocm)/lib"} }
           continue
         }
         ^cp -a ...$matches $libdir
-        print $"rocm deploy: lib($stem): ($matches | length) files"
+        print $"rocm deploy: lib($stem.n): ($matches | length) files"
       }
       let sysdeps = ($rocm | path join "lib" "rocm_sysdeps")
-      if ($sysdeps | path exists) { ^cp -a $sysdeps $libdir }
+      if not ($sysdeps | path exists) { error make {msg: $"rocm deploy: no rocm_sysdeps at ($sysdeps)"} }
+      ^cp -a $sysdeps $libdir
       let bitcode = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
       if not ($bitcode | path exists) { error make {msg: $"rocm deploy: no device bitcode at ($bitcode)"} }
       let bitcode_dest = ($prefix | path join "lib" "llvm" "amdgcn")
@@ -617,30 +664,28 @@ def main [] {
     } else {
       let bindir = ($prefix | path join "bin")
       let rocm_bin = ($rocm | path join "bin")
-      let dlls = (glob ($rocm_bin | path join "*.dll" | str replace --all '\' '/') | where {|f| ($f | path basename) =~ '^(amdhip64|amd_comgr|hiprtc)' })
-      if ($dlls | where {|f| ($f | path basename) =~ '^amdhip64' } | is-empty) {
-        print (ls $rocm_bin | get name | path basename | str join "\n")
-        error make {msg: $"rocm deploy: no amdhip64*.dll under ($rocm_bin)"}
+      # amdhip64_7.dll, amd_comgr.dll, hiprtc0716.dll, hiprtc-builtins0716.dll, rocm_kpack.dll
+      let dlls = (glob ($rocm_bin | path join "*.dll" | str replace --all '\' "/") | where {|f| ($f | path basename) =~ "^(amdhip64|amd_comgr|hiprtc|rocm_kpack)" })
+      for need in [amdhip64 amd_comgr hiprtc hiprtc-builtins rocm_kpack] {
+        if ($dlls | where {|f| ($f | path basename) | str starts-with $need } | is-empty) {
+          print (ls $rocm_bin | get name | path basename | str join "\n")
+          error make {msg: $"rocm deploy: no ($need)*.dll under ($rocm_bin)"}
+        }
       }
       for f in $dlls { cp $f $bindir }
       print $"rocm deploy: ($dlls | length) DLLs -> ($bindir)"
-      for lib in (glob ($rocm | path join "lib" "amdhip64*.lib" | str replace --all '\' '/')) { cp $lib ($prefix | path join "lib") }
-      let bc = (glob ($rocm | path join "**" "amdgcn" "bitcode" | str replace --all '\' '/') | first)
-      if ($bc | is-empty) { error make {msg: "rocm deploy: no amdgcn/bitcode in the windows tarball"} }
-      let rel = ($bc | path relative-to $rocm)
-      let dest = ($prefix | path join $rel | path dirname)
+      # their import libs
+      let libs = (glob ($rocm | path join "lib" "*.lib" | str replace --all '\' "/") | where {|f| ($f | path basename) =~ "^(amdhip64|amd_comgr|hiprtc|rocm_kpack)" })
+      if ($libs | is-empty) { error make {msg: "rocm deploy: no import libs for the ROCm DLLs"} }
+      mkdir ($prefix | path join "lib")
+      for l in $libs { cp $l ($prefix | path join "lib") }
+      print $"rocm deploy: ($libs | length) import libs"
+      let bc = ($rocm | path join "lib" "llvm" "amdgcn" "bitcode")
+      if not ($bc | path exists) { error make {msg: $"rocm deploy: no amdgcn bitcode at ($bc)"} }
+      let dest = ($prefix | path join "lib" "llvm" "amdgcn")
       mkdir $dest
       cp -r $bc $dest
-      print $"rocm deploy: bitcode ($rel)"
-    }
-    # HIP headers (both platforms): hip/ and hsa/ from the tarball's include.
-    for d in [hip hsa] {
-      let s = ($rocm | path join "include" $d)
-      if ($s | path exists) {
-        mkdir ($prefix | path join "include")
-        cp -r $s ($prefix | path join "include")
-        print $"rocm deploy: include/($d)"
-      }
+      print $"rocm deploy: bitcode -> ($dest)/bitcode"
     }
   }
 

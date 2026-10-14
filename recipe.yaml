@@ -10,13 +10,21 @@
 # packages share our file paths and still exist on the public channel.
 
 context:
-  llvm_version: "21.1.8"
-  llvm_major: "21"
-  llvm_major_next: "22"
-  llvm_maj_min: "21.1"
+  # AMD's LLVM 23 snapshot (ROCm/llvm-project 0bace190, the commit TheRock
+  # 10.1.0a20260822 built against): LLVM_VERSION_SUFFIX is `git`, so the
+  # libLLVM soname is libLLVM.so.23.0git and the symbol version is LLVM_23.0.
+  llvm_version: "23.0.0"
+  llvm_major: "23"
+  llvm_major_next: "24"
+  llvm_maj_min: "23.0"
+  # The LLVM ABI lane: the mutex version. NOT the major: a future LLVM 23.x
+  # release would not be ABI-compatible with this snapshot. conda sorts
+  # "23.0git" BELOW "23", so every pin of the mutex must be an exact `==`;
+  # llvm_major stays for paths (lib/clang/23) and package-name windows.
+  llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="9d4573e776852d4a60d3b2965e2e31716680aedc") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="efdef0fad4b812e482a3bc2fcf6c4902941af6d8") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -53,16 +61,16 @@ outputs:
           CCACHE_NOHASHDIR: ${{ env.get("CCACHE_NOHASHDIR", default="") }}
           ACPP_BUILD_DIR: ${{ env.get("ACPP_BUILD_DIR", default="") }}
     source:
-      - url: https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ llvm_version }}/llvm-project-${{ llvm_version }}.src.tar.xz
-        sha256: 4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142
+      # AMD's llvm-project at the exact commit TheRock 10.1.0a20260822 pins
+      # (compiler/amd-llvm), as a GitHub archive. The archive's single
+      # top-level directory (llvm-project-<sha>) is stripped by rattler-build,
+      # like the release tarball's was. No patches: the Xcode 26 fixes that
+      # shared/patches/0009 and 0011 carried are already in this tree
+      # (verified by git apply --reverse --check; 0011's include is present
+      # in a different position).
+      - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
+        sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
         target_directory: llvm-project
-        patches:
-          # Xcode 26 toolchain: <sys/resource.h> is no longer a transitive
-          # include, so PRIO_DARWIN_* go undeclared (upstream 585f04f2bf1;
-          # applies to 20.1.8 and 21.1.8 alike)
-          - shared/patches/0009-crashrecovery-include-sys-resource-on-apple.patch
-          # libc++ in Xcode 26 no longer brings malloc/free in transitively (upstream #173002)
-          - shared/patches/0011-programstack-include-cstdlib.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
@@ -73,23 +81,25 @@ outputs:
       - url: https://github.com/KhronosGroup/OpenCL-CLHPP/archive/67d100e70612341707725b6648ccca4c10b0dc31.tar.gz
         sha256: a6112af8ba2cc8a5248bcc7399624258cb9609b31ccd4a65222bf61893c2c618
         target_directory: OpenCL-CLHPP
-      # ROCm, linux-64: TheRock's stable MULTI-ARCH tarball (host code plus
-      # every GPU family's kernels as .kpack) is the BUILD input. The staging
-      # build copies the runtime subset into the prefix (carved into
+      # ROCm, linux-64: TheRock's MULTI-ARCH nightly tarball 10.1.0a20260822
+      # (host code plus every GPU family's kernels as .kpack) is the BUILD
+      # input; its LLVM is the very commit we build (see the llvm-project
+      # source above), so comgr binds to OUR libLLVM.so.23.0git. The staging
+      # build copies a small runtime subset into the prefix (carved into
       # naga-acpp-runtime-rocm). AMD publishes no checksum sidecar; the sha256
       # below was computed from a direct download of each tarball.
       - if: target_platform == "linux-64"
         then:
-          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-linux-multiarch-10.0.0.tar.gz
-            sha256: 1c5e807875d26a2470ecc7323daa5b5b9009208a55c3290ac255a909cde15fc6
+          - url: https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-multiarch-10.1.0a20260822.tar.gz
+            sha256: 4a3f211ea2da8c2f566b93d6b3b0d155b7f3c7b63d628e95d854e6c9eb55debb
             target_directory: rocm-dist
       # ROCm, win-64: TheRock's windows multi-arch tarball, same role as the
       # linux one (discovery input; the runtime subset is copied into the
       # prefix by build-stage.nu).
       - if: target_platform == "win-64"
         then:
-          - url: https://stable.repo.amd.com/rocm/core/tarball/therock-dist-windows-multiarch-10.0.0.tar.gz
-            sha256: ebe454fe9ad663655177462187a4c86c72fd0537638f6cbea34660ddebf40056
+          - url: https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-windows-multiarch-10.1.0a20260822.tar.gz
+            sha256: 265912dcac7789bb567a569d63cbb301e710ab8956998ea6bd5bf7588813b85c
             target_directory: rocm-dist
       # Metal, osx: metal-cpp headers (Apache-2.0), build-only.
       - if: osx
@@ -148,12 +158,11 @@ outputs:
         # building compiler matches the clang_rt sources and the shipped
         # clang exactly. An unpinned clang would drift with conda-forge's
         # default and silently skew the sanitizer-runtime build compiler.
-        - if: target_platform == "win-64"
-          then: clang ==${{ llvm_version }}
-        # win-arm64: conda-forge has no clang 21 there; 22.1 is the nearest.
-        # Only the build compiler (compiler-rt is not built on this platform).
-        - if: target_platform == "win-arm64"
-          then: clang 22.1.*
+        # clang 23.1.* on both Windows platforms (conda-forge ships 23.1.x for
+        # win-64 and win-arm64): the nearest released LLVM to the 23.0git
+        # snapshot being built; its clang-cl builds the tree.
+        - if: win
+          then: clang 23.1.*
       host:
         # DE-VERSIONED (phase-3 ruling [B]). Every version that used to be
         # written here now lives in shared/variants/<platform>.yaml, which is
@@ -170,7 +179,7 @@ outputs:
         # declared on an inheriting output never enters any solution. Declared
         # here it does, and the mutex's own weak run_export then reaches every
         # inheriting output automatically as
-        #   naga-acpp-llvm >=20,<21.0a0   (RE of [host: naga-acpp-llvm])
+        #   naga-acpp-llvm ==23.0git      (RE of [host: naga-acpp-llvm])
         # which is the python_abi idiom working exactly as designed, and why
         # none of those outputs names the mutex itself.
         #
@@ -183,7 +192,8 @@ outputs:
         # Names this lane's own major deliberately: a bare `naga-acpp-llvm` resolves
         # to the HIGHEST published major, which would pin the release lane to
         # the nightly lane's range.
-        - naga-acpp-llvm ==${{ llvm_major }}
+        # EXACT lane pin (23.0git sorts below 23: a range would never match).
+        - naga-acpp-llvm ==${{ llvm_lane }}
         - zlib
         - zstd
         # CUDA: every platform conda-forge ships it for (not osx, not win-arm64).
@@ -285,9 +295,13 @@ outputs:
               - Library/bin/llc.exe
               - Library/bin/lld.exe
               - Library/bin/lld-link.exe
-              # No LLVM dylib on Windows (tools link static): the shipped
-              # DLLs are the C-API/LTO/Remarks surface, libclang, and acpp's
-              # own runtime. Import .lib files travel with their DLL.
+              # The tools link LLVM as a DLL on Windows too (LLVM-23*.dll,
+              # LLVM_LINK_LLVM_DYLIB; the counterpart of linux's libLLVM.so),
+              # so it ships here with the C-API/LTO/Remarks surface, libclang
+              # and acpp's own runtime. Import .lib files travel with their
+              # DLL, EXCEPT LLVM's own: that one is a dev file and lands in
+              # naga-acpp-llvm-dev and nowhere else.
+              - Library/bin/LLVM*.dll
               - Library/bin/LLVM-C.dll
               - Library/bin/LTO.dll
               - Library/bin/Remarks.dll
@@ -312,12 +326,25 @@ outputs:
           - if: osx
             then:
               - lib/libomp*
+              # lldb's library belongs to naga-acpp-lldb
+              - lib/liblldb*
+              # lib/*.dylib* also matches NESTED files: the compiler-rt
+              # dylibs under lib/clang belong to naga-acpp-compiler-rt
+              - lib/clang/**
           - if: linux
             then:
               # libomp comes from conda-forge llvm-openmp (design §5)
               - lib/libomp*
               - lib/libarcher*
               - lib/libompd*
+              # lib/*.so* also matches NESTED files (it did: the published
+              # runtime carried the asan/tsan .so files and lldb's _lldb.so,
+              # each also claimed by the compiler-rt / lldb packages, plus the
+              # unpackaged OpenMP copies under lib/<triple>/). Only the
+              # top-level sonames are the runtime's.
+              - lib/clang/**
+              - lib/python*/**
+              - lib/*-conda-linux-gnu/**
               # lldb's library belongs to naga-acpp-lldb
               - lib/liblldb*
               # ROCm runtime subset (deployed from the TheRock tarball by the
@@ -329,10 +356,34 @@ outputs:
               - lib/libroc*
               - lib/llvm/amdgcn/**
               - lib/rocm_sysdeps/**
+              # Vendor backend plugins and their JIT libraries belong to the
+              # naga-acpp-runtime-{cuda,level-zero,ocl,rocm} packages.
+              # llvm-spirv and llvm-to-spirv STAY here (SPIR-V is shared by
+              # level-zero and ocl).
+              - lib/hipSYCL/librt-backend-cuda*
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx*
+              - lib/hipSYCL/librt-backend-ze*
+              - lib/hipSYCL/librt-backend-ocl*
+              - lib/hipSYCL/librt-backend-hip*
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu*
             else:
               # libomp comes from conda-forge llvm-openmp here too
               - Library/bin/libomp.dll
               - Library/lib/libomp.lib
+              # Vendor backend plugins, their JIT tools and import libs belong
+              # to the naga-acpp-runtime-{cuda,level-zero,ocl,rocm} packages.
+              - Library/bin/hipSYCL/rt-backend-cuda*
+              - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx*
+              - Library/bin/hipSYCL/rt-backend-ze*
+              - Library/bin/hipSYCL/rt-backend-ocl*
+              - Library/bin/hipSYCL/rt-backend-hip*
+              - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu*
+              - Library/lib/hipSYCL/rt-backend-cuda*
+              - Library/lib/hipSYCL/llvm-to-backend/llvm-to-ptx*
+              - Library/lib/hipSYCL/rt-backend-ze*
+              - Library/lib/hipSYCL/rt-backend-ocl*
+              - Library/lib/hipSYCL/rt-backend-hip*
+              - Library/lib/hipSYCL/llvm-to-backend/llvm-to-amdgpu*
     requirements:
       run:
         # NB the lane mutex is deliberately absent from this list. It arrives
@@ -361,7 +412,8 @@ outputs:
         # come from the context vars, so a lane bump moves them together. Same
         # carve-out the ratified doctrine already makes for exclusion windows
         # on packages absent from the build env.
-        - naga-acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+        # EXACT lane pin: 23.0git sorts below 23, so a range never matches.
+        - naga-acpp-llvm ==${{ llvm_lane }}
       run_constraints:
         # These two are already major-scoped BY NAME (libllvm20, not libllvm),
         # so a blanket "must not exist" is the same-major window: it forbids
@@ -439,8 +491,10 @@ outputs:
     tests:
       - package_contents:
           lib:
-            # win has no LLVM/clang dylibs (tools link static); the acpp
-            # runtime pair exists on both platforms
+            # linux: libLLVM/libclang/libclang-cpp. win links LLVM as a DLL
+            # too, but only the clang import lib lives here (LLVM's own import
+            # lib is naga-acpp-llvm-dev's), so the name check is linux-only.
+            # The acpp runtime pair exists on both platforms.
             - if: linux
               then:
                 - LLVM
@@ -467,49 +521,31 @@ outputs:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-backend.so
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-host.so
                   - etc/AdaptiveCpp/acpp-toolchain.json
-              # Level Zero/ROCm are x86-only; CUDA and OpenCL also build on
-              # linux-aarch64.
-              - if: target_platform == "linux-aarch64"
-                then:
-                  - lib/hipSYCL/librt-backend-cuda.so
-                  - lib/hipSYCL/librt-backend-ocl.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
-                  - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
+              # The LLVM/clang-cpp sonames are the AMD snapshot's: comgr
+              # (naga-acpp-runtime-rocm) NEEDs exactly these two, so the
+              # lib/*.so* include above MUST cover them.
               - if: target_platform == "linux-64"
                 then:
-                  - lib/hipSYCL/librt-backend-cuda.so
-                  - lib/hipSYCL/librt-backend-ze.so
-                  - lib/hipSYCL/librt-backend-ocl.so
-                  - lib/hipSYCL/librt-backend-hip.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                  - lib/libLLVM.so.${{ llvm_maj_min }}git
+                  - lib/libclang-cpp.so.${{ llvm_maj_min }}git
+              # Vendor plugins (cuda, ze, ocl, hip) ship in the vendor
+              # packages. llvm-spirv/llvm-to-spirv stay here (shared by
+              # level-zero and ocl); aarch64 builds spirv for ocl too.
+              - if: linux
+                then:
                   - lib/hipSYCL/llvm-to-backend/libllvm-to-spirv.so
-                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/hipSYCL/ext/llvm-spirv/bin/llvm-spirv
-              - if: target_platform == "win-arm64"
+              - if: win
                 then:
                   - Library/bin/hipSYCL/rt-backend-omp.dll
-                  - Library/bin/hipSYCL/rt-backend-ocl.dll
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
                   - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
                   - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
                   - Library/etc/AdaptiveCpp/acpp-toolchain.json
-              - if: target_platform == "win-64"
+              # LLVM is a DLL on Windows (name carries the version/suffix).
+              - if: win
                 then:
-                  # backend plugins are RUNTIME artifacts -> bin on win;
-                  # llvm-to-backend is linked statically into per-target
-                  # tools (no llvm-to-*.dll exists)
-                  - Library/bin/hipSYCL/rt-backend-omp.dll
-                  - Library/bin/hipSYCL/rt-backend-cuda.dll
-                  - Library/bin/hipSYCL/rt-backend-ze.dll
-                  - Library/bin/hipSYCL/rt-backend-ocl.dll
-                  - Library/bin/hipSYCL/rt-backend-hip.dll
-                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
-                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-spirv-tool.exe
-                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-host-tool.exe
-                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
-                  - Library/bin/hipSYCL/ext/llvm-spirv/bin/llvm-spirv.exe
-                  - Library/etc/AdaptiveCpp/acpp-toolchain.json
+                  - Library/bin/LLVM-[0-9]*.dll
             not_exists:
               - if: linux
                 then:
@@ -518,11 +554,25 @@ outputs:
                   - lib/libhsa-runtime64.so
                   - lib/libomp.so
                   - lib/liblldb.so
+                  # vendor plugins moved to their vendor packages
+                  - lib/hipSYCL/librt-backend-cuda.so
+                  - lib/hipSYCL/librt-backend-ze.so
+                  - lib/hipSYCL/librt-backend-ocl.so
+                  - lib/hipSYCL/librt-backend-hip.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   # base packages ship NO activation; the CUDA bitcode wiring
                   # moved to naga-acpp-runtime-cuda, whose install brings libdevice
                   - etc/conda/activate.d/acpp-runtime-activate.sh
                 else:
                   - Library/bin/libomp.dll
+                  # vendor plugins moved to their vendor packages
+                  - Library/bin/hipSYCL/rt-backend-cuda.dll
+                  - Library/bin/hipSYCL/rt-backend-ze.dll
+                  - Library/bin/hipSYCL/rt-backend-ocl.dll
+                  - Library/bin/hipSYCL/rt-backend-hip.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
                   - etc/conda/activate.d/acpp-runtime-activate.sh
   - package:
       name: naga-acpp
@@ -564,6 +614,19 @@ outputs:
               - bin/llvm-strings
               - bin/llvm-symbolizer
               - bin/llvm-cxxfilt
+              # the remaining binutils-style tools, as on linux (anything not
+              # claimed here falls into naga-acpp-llvm-dev's bin/**)
+              - bin/clang-cl
+              - bin/llvm-addr2line
+              - bin/llvm-dwarfdump
+              - bin/llvm-dlltool
+              - bin/llvm-lib
+              - bin/llvm-rc
+              - bin/llvm-mt
+              - bin/llvm-windres
+              - bin/llvm-cov
+              - bin/llvm-profdata
+              - bin/llvm-profgen
               - bin/*-clang.cfg
               - bin/*-clang++.cfg
               - bin/*-clang-cpp.cfg
@@ -665,7 +728,7 @@ outputs:
           # naga-acpp-compiler-rt. Two outputs claiming one path is a clobber, and
           # the partition audit fails the build on it — so the split is stated
           # here rather than discovered in CI.
-          - if: linux
+          - if: unix
             then:
               - lib/clang/${{ llvm_major }}/lib/**
               - lib/clang/${{ llvm_major }}/share/**
@@ -681,8 +744,12 @@ outputs:
         - if: linux
           then:
             # per-platform: the _linux-64 spelling also solves on aarch64 (it is the cross-compiler's target libgcc) and is useless there.
-            - libgcc-devel_${{ target_platform }} >=13
-            - libstdcxx-devel_${{ target_platform }} >=13
+            # Floor = the gcc major the toolchain is BUILT with (the variant
+            # file's cxx_compiler_version; the same key drives the staging
+            # compiler): a consumer's libgcc/libstdc++ must be at least that
+            # new, since the shipped runtime links against it.
+            - libgcc-devel_${{ target_platform }} ${{ cxx_compiler_version }}.*
+            - libstdcxx-devel_${{ target_platform }} ${{ cxx_compiler_version }}.*
             # The clang cfg files (install-cfg.nu) carry --sysroot=; a
             # consumer needs the sysroot package installed for that flag to
             # resolve to real headers/libs.
@@ -695,21 +762,24 @@ outputs:
         # (install-cfg.nu) already make bare clang++ work with NO activation
         # at all — dropping this would break bare clang++ for anyone who
         # doesn't also install the activation package.
+        # Pinned to this lane's LLVM major (conda-forge ships libcxx-devel
+        # 23.1.x for osx-arm64): the libc++ headers must match the clang.
         - if: osx
-          then: libcxx-devel
+          then: libcxx-devel ${{ llvm_major }}.*
       run_exports:
         # THE headline export (phase-3 ruling [A]). Anything compiled with this
         # toolchain gets, with zero manifest text on the consumer's side:
         #   naga-acpp-runtime >=25.10.0,<25.11.0a0   (the runtime it links against)
-        #   naga-acpp-llvm    >=20,<21.0a0           (the lane it was built for)
+        #   naga-acpp-llvm    ==23.0git              (the lane it was built for)
         # The second line is what stops a consumer binary built against the
         # llvm20 toolchain from being installed next to the llvm21 runtime.
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
           # Spelled out, not pin_compatible(): the mutex exists only in the
           # staging solution and pin_compatible cannot resolve it from an
-          # inheriting output. Both bounds still come from context vars.
-          - naga-acpp-llvm >=${{ llvm_major }},<${{ llvm_major_next }}.0a0
+          # inheriting output. EXACT, from the context var: 23.0git sorts
+          # below 23, so a range would never match the mutex.
+          - naga-acpp-llvm ==${{ llvm_lane }}
       run_constraints:
         # SAME-MAJOR WINDOWS, not blanket exclusions (phase-3 ruling [B]).
         # These names are unversioned on conda-forge, so a bare "<0.0a0" said
@@ -813,7 +883,7 @@ outputs:
                   - bin/arm64-apple-darwin20.0.0-clang++.cfg
                   - bin/arm64-apple-darwin20.0.0-clang-cpp.cfg
             not_exists:
-              - if: linux
+              - if: unix
                 then:
                   - bin/clang-tidy
                   - bin/lldb
@@ -854,9 +924,9 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # macOS first cut ships compiler + runtime only; the sanitizer story is its own pass (compiler-rt is not built there). win-arm64 builds BUILTINS only (the vs2026 activation links clang_rt.builtins-aarch64.lib).
-      skip:
-        - osx
+      # Built on every platform. win-arm64 builds BUILTINS only (the vs2026
+      # activation links clang_rt.builtins-aarch64.lib); macOS builds builtins,
+      # profile and the sanitizers darwin supports.
       files:
         include:
           # The clang resource directory splits cleanly: include/ holds the
@@ -864,7 +934,7 @@ outputs:
           # the compiler-rt archives, shared objects and sanitizer ignorelists
           # and belong here. acpp excludes exactly these two, so the partition
           # stays a partition (the zero-clobber audit enforces it).
-          - if: linux
+          - if: unix
             then:
               - lib/clang/${{ llvm_major }}/lib/**
               - lib/clang/${{ llvm_major }}/share/**
@@ -908,7 +978,7 @@ outputs:
       - package_contents:
           files:
             exists:
-              - if: linux
+              - if: unix
                 then:
                   # The archives every -fsanitize=address / -fprofile link
                   # needs. GLOBBED deliberately: the directory under lib/ is
@@ -933,7 +1003,7 @@ outputs:
                   - Library/lib/clang/${{ llvm_major }}/lib/*/clang_rt.builtins-aarch64.lib
             not_exists:
               # The resource HEADERS belong to acpp, not here.
-              - if: linux
+              - if: unix
                 then:
                   - lib/clang/${{ llvm_major }}/include/omp.h
                   - bin/clang
@@ -954,13 +1024,10 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # macOS first cut ships compiler + runtime only.
-      skip:
-        - osx
-        - target_platform == "win-arm64"
+      # Built on every platform (osx and win-arm64 included).
       files:
         include:
-          - if: linux
+          - if: unix
             then:
               - bin/**
               - include/**
@@ -977,8 +1044,11 @@ outputs:
               - Library/lib/cmake/**
               - Library/share/man/**
         exclude:
-          - if: linux
+          - if: unix
             then:
+              # lib/**/*.a also matches the compiler-rt archives under
+              # lib/clang, which belong to naga-acpp-compiler-rt.
+              - lib/clang/**
               # naga-acpp ships these (bin/*-clang*.cfg) — llvm-dev's bin/**
               # glob would otherwise swallow them.
               - bin/*-clang.cfg
@@ -1025,6 +1095,10 @@ outputs:
               # include/** glob would otherwise swallow them.
               - include/hip/**
               - include/hsa/**
+              # ROCm runtime payload (lib/**/*.a would otherwise swallow the
+              # static archives under rocm_sysdeps) is naga-acpp-runtime-rocm's
+              - lib/rocm_sysdeps/**
+              - lib/llvm/amdgcn/**
               # claimed by naga-acpp-tools
               - bin/amdgpu-arch
               - bin/clang-apply-replacements
@@ -1157,11 +1231,19 @@ outputs:
               - Library/bin/scan-view
               - Library/lib/libear/**
               - Library/lib/libscanbuild/**
-              # claimed by naga-acpp-runtime (SSCP JIT tools + DLL surface)
+              # claimed by naga-acpp-lldb
+              - Library/bin/lldb*
+              - Library/bin/liblldb*
+              - Library/lib/liblldb*
+              # claimed by naga-acpp-runtime (SSCP JIT tools + DLL surface).
+              # LLVM's own DLL ships there; its IMPORT lib (Library/lib/LLVM*.lib,
+              # matched by the Library/lib/**/*.lib include) is deliberately NOT
+              # excluded: it lands here and nowhere else.
               - Library/bin/opt.exe
               - Library/bin/llc.exe
               - Library/bin/lld.exe
               - Library/bin/lld-link.exe
+              - Library/bin/LLVM*.dll
               - Library/bin/LLVM-C.dll
               - Library/bin/LTO.dll
               - Library/bin/Remarks.dll
@@ -1182,6 +1264,11 @@ outputs:
               - Library/bin/amdhip64*.dll
               - Library/bin/amd_comgr*.dll
               - Library/bin/hiprtc*.dll
+              - Library/bin/rocm_kpack.dll
+              - Library/lib/amd_comgr*.lib
+              - Library/lib/hiprtc*.lib
+              - Library/lib/rocm_kpack.lib
+              - Library/lib/llvm/amdgcn/**
               - Library/lib/amdhip64*.lib
               # unpackaged: libomp comes from conda-forge llvm-openmp
               - Library/bin/libomp.dll
@@ -1237,7 +1324,7 @@ outputs:
             - llvm-as
           files:
             exists:
-              - if: linux
+              - if: unix
                 then:
                   - lib/cmake/llvm/LLVMConfig.cmake
                   - lib/cmake/clang/ClangConfig.cmake
@@ -1245,7 +1332,7 @@ outputs:
                   - Library/lib/cmake/llvm/LLVMConfig.cmake
                   - Library/lib/cmake/clang/ClangConfig.cmake
             not_exists:
-              - if: linux
+              - if: unix
                 then:
                   - bin/clang
                   - bin/acpp
@@ -1269,13 +1356,11 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # macOS first cut ships compiler + runtime only.
-      skip:
-        - osx
-        - target_platform == "win-arm64"
+      # Built on every platform. bolt (and the offload-arch helpers' absence)
+      # is platform-dependent: globs that match nothing ship nothing.
       files:
         include:
-          - if: linux
+          - if: unix
             then:
               - bin/amdgpu-arch
               - bin/clang-apply-replacements
@@ -1445,17 +1530,20 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # lldb is not built on Windows (not in the win LLVM_ENABLE_PROJECTS set)
-      # nor in the macOS first cut
-      skip:
-        - win
-        - osx
+      # Built on every platform. Python bindings only on linux (osx and win
+      # build lldb with LLDB_ENABLE_PYTHON=OFF for now: no swig there).
       files:
         include:
-          - bin/lldb*
-          - lib/liblldb*
-          # python bindings (lldb module)
-          - lib/python*/**
+          - if: unix
+            then:
+              - bin/lldb*
+              - lib/liblldb*
+              # python bindings (lldb module); linux only
+              - lib/python*/**
+            else:
+              - Library/bin/lldb*
+              - Library/bin/liblldb*
+              - Library/lib/liblldb*
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -1465,8 +1553,10 @@ outputs:
         # not asking for one. python's own run_export supplies python_abi,
         # which pins the interpreter's ABI *if* python is present but does not
         # require python to be there at all, so the bindings could land in an
-        # environment with nothing able to import them.
-        - python
+        # environment with nothing able to import them. (linux only: osx and
+        # win build lldb without python scripting.)
+        - if: linux
+          then: python
       run_constraints:
         # Same-major window: a different-major lldb cannot collide with ours.
         - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
@@ -1494,7 +1584,10 @@ outputs:
       - package_contents:
           bin:
             - lldb
-            - lldb-server
+            # darwin debugs through Xcode's signed debugserver
+            # (LLDB_USE_SYSTEM_DEBUGSERVER): no lldb-server there
+            - if: not osx
+              then: lldb-server
 
   # ── Compiler activation packages (canonical family split, design §D2) ──
   - package:
@@ -1533,6 +1626,8 @@ outputs:
       run_exports:
         strong:
           - __glibc >=2.28
+          # Runtime floors = the gcc major the toolchain is built with.
+          - libgcc >=${{ cxx_compiler_version }}
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
       run_constraints:
         # DELIBERATELY BLANKET, not a same-major window — do not "fix" this to
@@ -1603,6 +1698,9 @@ outputs:
       run_exports:
         strong:
           - __glibc >=2.28
+          # Runtime floors = the gcc major the toolchain is built with.
+          - libgcc >=${{ cxx_compiler_version }}
+          - libstdcxx >=${{ cxx_compiler_version }}
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
       run_constraints:
         - clangxx_linux-64 <0.0a0
@@ -1673,6 +1771,8 @@ outputs:
       run_exports:
         strong:
           - __glibc >=2.28
+          # Runtime floors = the gcc major the toolchain is built with.
+          - libgcc >=${{ cxx_compiler_version }}
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
       run_constraints:
         # DELIBERATELY BLANKET, not a same-major window — see the note on
@@ -1735,6 +1835,9 @@ outputs:
       run_exports:
         strong:
           - __glibc >=2.28
+          # Runtime floors = the gcc major the toolchain is built with.
+          - libgcc >=${{ cxx_compiler_version }}
+          - libstdcxx >=${{ cxx_compiler_version }}
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
       run_constraints:
         - clangxx_linux-aarch64 <0.0a0
@@ -1991,7 +2094,6 @@ outputs:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
           - vc >=14.3
           - vc14_runtime >=14.44.35208
-          - ucrt >=10.0.20348.0
       run_constraints:
         - clang_win-arm64 <0.0a0
         - clang-cl_win-arm64 <0.0a0
@@ -2047,7 +2149,6 @@ outputs:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
           - vc >=14.3
           - vc14_runtime >=14.44.35208
-          - ucrt >=10.0.20348.0
       run_constraints:
         - clangxx_win-arm64 <0.0a0
         - acpp-clangxx_win-arm64 <0.0a0
@@ -2103,7 +2204,6 @@ outputs:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
           - vc >=14.3
           - vc14_runtime >=14.44.35208
-          - ucrt >=10.0.20348.0
       run_constraints:
         - clang-cl_win-arm64 <0.0a0
         - clang_win-arm64 <0.0a0
@@ -2216,11 +2316,12 @@ outputs:
         - sed
       run:
         - ${{ pin_subpackage('naga-acpp-clang_osx-arm64', exact=True) }}
-        - libcxx-devel
+        # lane major (conda-forge ships libcxx-devel 23.1.x for osx-arm64)
+        - libcxx-devel ${{ llvm_major }}.*
       run_exports:
         strong:
           - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
-          - libcxx >=19
+          - libcxx >=${{ llvm_major }}
       run_constraints:
         - clangxx_osx-arm64 <0.0a0
     tests:
@@ -2255,19 +2356,27 @@ outputs:
           run:
             - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
 
-  # ── Backend metapackages (precise runtime deps, design §5) ────────────────
-  # One-package install path: `naga-acpp-runtime-cuda` PULLS IN the lane runtime,
-  # so a CUDA user installs exactly one thing (and still gets the omp backend,
-  # which ships in the runtime). Lane-bound + exactly pinned so the pair can
-  # never drift; the nightly lane carries `-nightly` twins.
+  # ── Vendor backend packages (plugin split) ─────────────────────────────────
+  # Each vendor package CARVES its backend plugin (and the JIT library/tool that
+  # feeds it) out of the staging build, exactly like the other inheriting
+  # outputs, and pulls in the lane runtime plus the vendor's own runtime
+  # dependencies. A CUDA user installs exactly one thing
+  # (`naga-acpp-runtime-cuda`) and still gets the omp backend, which ships in
+  # the runtime. naga-acpp-runtime EXCLUDES these files (same globs), so each
+  # file has exactly one owner. llvm-spirv and llvm-to-spirv stay in the
+  # runtime: SPIR-V is shared by level-zero and ocl. Lane-bound + exactly
+  # pinned so the pair can never drift.
+  #
+  # They inherit the staging build, so none of them has a host environment of
+  # its own: run dependencies are written as bare names (the variant files
+  # supply the pins) or from context variables, never pin_compatible.
   - package:
       name: naga-acpp-runtime-cuda
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: shared
-        target_directory: shared
+    # No source here: staging-inheriting outputs get the ENTIRE staging work
+    # dir restored (shared/ and its licenses included); fetching shared
+    # ourselves collides with that restore ("File already exists").
+    inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
@@ -2279,6 +2388,17 @@ outputs:
         - osx
         - target_platform == "win-arm64"
       # No activation: the runtime finds libdevice through its runtime-relative CUDA root (ACPP_CUDA_ROOT=.).
+      files:
+        include:
+          - if: unix
+            then:
+              - lib/hipSYCL/librt-backend-cuda*
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx*
+            else:
+              - Library/bin/hipSYCL/rt-backend-cuda*
+              - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx*
+              - Library/lib/hipSYCL/rt-backend-cuda*
+              - Library/lib/hipSYCL/llvm-to-backend/llvm-to-ptx*
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -2300,6 +2420,34 @@ outputs:
         # ceiling, unlike the "<13" we used to assert against a driver.
         - acpp-runtime-cuda <0.0a0
         - acpp-runtime-cuda-nightly <0.0a0
+      ignore_run_exports:
+        # Build-time-only host deps of the shared staging build; the real
+        # runtime dependencies are the explicit run deps above.
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm-tools
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: unix
+                then:
+                  - lib/hipSYCL/librt-backend-cuda.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-ptx.so
+                else:
+                  - Library/bin/hipSYCL/rt-backend-cuda.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-ptx-tool.exe
     about:
       summary: acpp SYCL runtime with CUDA backend dependencies (generic SSCP JIT)
       license: BSD-3-Clause
@@ -2312,11 +2460,8 @@ outputs:
   - package:
       name: naga-acpp-runtime-level-zero
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: shared
-        target_directory: shared
+    # No source here (see naga-acpp-runtime-cuda).
+    inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
@@ -2328,19 +2473,50 @@ outputs:
         - target_platform == "linux-aarch64"
         - osx
         - target_platform == "win-arm64"
+      files:
+        include:
+          - if: unix
+            then:
+              - lib/hipSYCL/librt-backend-ze*
+            else:
+              - Library/bin/hipSYCL/rt-backend-ze*
+              - Library/lib/hipSYCL/rt-backend-ze*
     requirements:
-      # Real host dep so the floor below tracks the staging solve; see the
-      # CUDA metapackage. level-zero comes in via level-zero-devel, which is
-      # what the runtime was actually built against. The GPU driver itself is
-      # the system's — no channel ships it.
-      host:
-        - level-zero-devel
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
-        - ${{ pin_compatible('level-zero') }}
+        # Bare: the variant files carry the same series the runtime was built
+        # against (`level-zero` is keyed beside `level-zero-devel`). This used
+        # to be pin_compatible('level-zero'), which cannot resolve in an
+        # output that inherits the staging build. The GPU driver itself is the
+        # system's — no channel ships it.
+        - level-zero
       run_constraints:
         - acpp-runtime-level-zero <0.0a0
         - acpp-runtime-level-zero-nightly <0.0a0
+      ignore_run_exports:
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm-tools
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: unix
+                then:
+                  - lib/hipSYCL/librt-backend-ze.so
+                else:
+                  - Library/bin/hipSYCL/rt-backend-ze.dll
     about:
       summary: acpp SYCL runtime with Level Zero backend dependencies (Intel GPUs)
       license: BSD-3-Clause
@@ -2348,11 +2524,8 @@ outputs:
   - package:
       name: naga-acpp-runtime-ocl
       version: ${{ version }}
-    source:
-      # Thin source: license texts + activation/render scripts only. The big
-      # trees live on the staging output (see note above outputs:).
-      - path: shared
-        target_directory: shared
+    # No source here (see naga-acpp-runtime-cuda).
+    inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so
       # re-published artifacts get fresh filenames instead of 409ing.
@@ -2362,6 +2535,14 @@ outputs:
       # OpenCL: builds and runs everywhere but osx.
       skip:
         - osx
+      files:
+        include:
+          - if: unix
+            then:
+              - lib/hipSYCL/librt-backend-ocl*
+            else:
+              - Library/bin/hipSYCL/rt-backend-ocl*
+              - Library/lib/hipSYCL/rt-backend-ocl*
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
@@ -2386,22 +2567,49 @@ outputs:
       run_constraints:
         - acpp-runtime-ocl <0.0a0
         - acpp-runtime-ocl-nightly <0.0a0
+      ignore_run_exports:
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm-tools
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
+    tests:
+      - package_contents:
+          files:
+            exists:
+              - if: unix
+                then:
+                  - lib/hipSYCL/librt-backend-ocl.so
+                else:
+                  - Library/bin/hipSYCL/rt-backend-ocl.dll
     about:
       summary: acpp SYCL runtime with OpenCL backend dependencies (ICD loader)
       license: BSD-3-Clause
 
   # ROCm is the deliberate exception to "metapackages over conda-forge":
   # conda-forge's ROCm is generations behind the LLVM this toolchain needs
-  # (the generic JIT requires acpp's LLVM <= ROCm's LLVM), so the runtime
-  # subset is deployed from TheRock's stable core tarball by the staging
-  # build and CARVED here — real files, not dependencies. Named for rocm,
-  # not hip.
+  # (the generic JIT requires acpp's LLVM <= ROCm's LLVM). The runtime subset
+  # is deployed from TheRock's multi-arch tarball by the staging build and
+  # CARVED here — real files, not dependencies. Named for rocm, not hip.
+  #
+  # ONLY the files below come from TheRock. Nothing from its lib/llvm: no
+  # libLLVM, libclang-cpp, clang, lld or tools (and no .kpack/ either). On
+  # Linux libamd_comgr NEEDs libLLVM.so.23.0git and libclang-cpp.so.23.0git
+  # with RUNPATH $ORIGIN first; both resolve to OUR copies, which
+  # naga-acpp-runtime ships (lib/*.so*) and this package pins exactly.
   - package:
       name: naga-acpp-runtime-rocm
       version: ${{ version }}
-    # No source here: staging-inheriting outputs get the ENTIRE staging work
-    # dir restored (shared/ and its licenses included); fetching shared
-    # ourselves collides with that restore ("File already exists").
+    # No source here (see naga-acpp-runtime-cuda).
     inherit: llvm-acpp-stage
     build:
       # Trial dispatches bump this via the build_number workflow input so
@@ -2413,47 +2621,89 @@ outputs:
         - target_platform not in ["linux-64", "win-64"]
       files:
         include:
-          # The fork's full-mode HIP deploy rows, copied into the prefix by the
-          # staging build from the TheRock multi-arch tarball.
           - if: linux
             then:
-              - lib/libhiprtc*
+              # The backend plugin and its JIT library
+              - lib/hipSYCL/librt-backend-hip*
+              - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu*
+              # TheRock runtime subset
               - lib/libamdhip64*
-              - lib/libhsa*
+              - lib/libhiprtc*
+              - lib/libhsa-runtime64*
               - lib/libamd_comgr*
-              - lib/libroc*
-              - lib/llvm/amdgcn/**
+              - lib/librocm_kpack*
+              - lib/librocprofiler-register*
               - lib/rocm_sysdeps/**
-              - include/hip/**
-              - include/hsa/**
+              - lib/llvm/amdgcn/bitcode/**
             else:
+              # The backend plugin and its JIT tool (+ import libs)
+              - Library/bin/hipSYCL/rt-backend-hip*
+              - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu*
+              - Library/lib/hipSYCL/rt-backend-hip*
+              - Library/lib/hipSYCL/llvm-to-backend/llvm-to-amdgpu*
+              # TheRock runtime subset: amdhip64_7.dll, amd_comgr*.dll,
+              # hiprtc0716.dll + hiprtc-builtins0716.dll, rocm_kpack.dll,
+              # their import libs, and the amdgcn device bitcode.
               - Library/bin/amdhip64*.dll
               - Library/bin/amd_comgr*.dll
               - Library/bin/hiprtc*.dll
+              - Library/bin/rocm_kpack.dll
               - Library/lib/amdhip64*.lib
-              - Library/**/amdgcn/**
-              - Library/include/hip/**
-              - Library/include/hsa/**
+              - Library/lib/amd_comgr*.lib
+              - Library/lib/hiprtc*.lib
+              - Library/lib/rocm_kpack.lib
+              - Library/lib/llvm/amdgcn/bitcode/**
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
       run_constraints:
         - acpp-runtime-rocm <0.0a0
         - acpp-runtime-rocm-nightly <0.0a0
+      ignore_run_exports:
+        from_package:
+          - cuda-version
+          - cuda-cudart-dev
+          - cuda-nvvm-tools
+          - cuda-nvcc-tools
+          - cuda-driver-dev
+          - cuda-crt-dev_linux-64
+          - cuda-crt-dev_linux-aarch64
+          - cuda-nvcc-impl
+          - level-zero-devel
+          - opencl-headers
+          - ocl-icd
+          - khronos-opencl-icd-loader
+          - python
     tests:
       - package_contents:
           files:
             exists:
               - if: linux
                 then:
+                  - lib/hipSYCL/librt-backend-hip.so
+                  - lib/hipSYCL/llvm-to-backend/libllvm-to-amdgpu.so
                   - lib/libamdhip64.so*
                   - lib/libhsa-runtime64.so*
                   - lib/libamd_comgr.so*
+                  - lib/librocm_kpack.so*
                   - lib/llvm/amdgcn/bitcode/ockl.bc
                 else:
+                  - Library/bin/hipSYCL/rt-backend-hip.dll
+                  - Library/bin/hipSYCL/llvm-to-backend/llvm-to-amdgpu-tool.exe
                   - Library/bin/amdhip64*.dll
+                  - Library/bin/amd_comgr*.dll
+                  - Library/bin/rocm_kpack.dll
+            not_exists:
+              # None of TheRock's LLVM ships here.
+              - if: linux
+                then:
+                  - lib/libLLVM*
+                  - lib/libclang-cpp*
+                  - lib/llvm/lib/**
+                else:
+                  - Library/bin/LLVM*.dll
     about:
-      summary: acpp SYCL runtime with ROCm backend runtime (TheRock stable core subset)
+      summary: acpp SYCL runtime with ROCm backend runtime (TheRock subset)
       # Per-component sweep, read from the tarball's own share/doc texts:
       # HIP runtime + hiprtc + rocprofiler-register are MIT, hsa-runtime64
       # (ROCR) is NCSA, amd_comgr and the amdgcn device libraries are

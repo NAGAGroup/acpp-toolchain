@@ -138,6 +138,9 @@ def main [--src: string = "/tmp/acpp-configure-smoke", --keep-build] {
   $errors | each {|b| print $b; print "" } | ignore
   print $"===== blocks mentioning 'deprecat' \(any case\): ($deprec | length) ====="
   $deprec | each {|b| print $b; print "" } | ignore
+  # which optional features and which OpenMP the configure ended up with
+  print "\n===== feature / OpenMP lines ====="
+  $text | lines | where {|l| $l =~ '(?i)(Enable (SWIG|editline|curses|LZMA|Libxml|Python|Tree-sitter)|Python3? |OpenMP|tree-sitter|libxml|LLDB_ENABLE|LLVM_ENABLE_(LIBXML2|LIBEDIT))' } | each {|l| print $l } | ignore
   print $"command: ($src)/cmake-command.txt\nlog:     ($log)"
   if not $ok or ($errors | is-not-empty) {
     error make {msg: "configure FAILED (see the CMake Error blocks above)"}

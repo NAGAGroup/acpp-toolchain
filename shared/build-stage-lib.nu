@@ -91,6 +91,35 @@ def common-args [src: string, prefix: string, build: string] {
     "-DLLVM_INCLUDE_TESTS=OFF"
     "-DLLVM_ENABLE_ZLIB=FORCE_ON"
     "-DLLVM_ENABLE_ZSTD=FORCE_ON"
+    # Optional LLVM / LLDB features: ON wherever the library exists on
+    # conda-forge, on EVERY platform (no platform-specific trimming).
+    # FORCE_ON (LLVM_ENABLE_*) / ON (LLDB_ENABLE_*) make a missing library fail
+    # the configure instead of silently disabling the feature. LLDB's option
+    # macro (LLDBConfig.cmake add_optional_dependency) knows only On/Off/Auto:
+    # FORCE_ON there evaluates as a variable lookup and silently turns the
+    # feature OFF (seen in the first smoke run). Not wanted: Lua, OCaml,
+    # docs/doxygen.
+    #
+    # libxml2: LLVM (llvm-mt, lld-link manifest merging) and lldb.
+    "-DLLVM_ENABLE_LIBXML2=FORCE_ON"
+    "-DLLDB_ENABLE_LIBXML2=ON"
+    # xz / liblzma: lldb (compressed debug sections, minidebuginfo).
+    "-DLLDB_ENABLE_LZMA=ON"
+    # python scripting. SWIG >= 4 generates the bindings; the module is built
+    # against the Python LIMITED API (abi3, SWIG 4.5.1 is past the 4.2 floor and
+    # the 4.4.0-only bug at LLDBConfig.cmake:247), so naga-acpp-lldb works with
+    # any CPython >= 3.8 instead of the build's exact version. Limited API is
+    # incompatible with LLDB_EMBED_PYTHON_HOME, which defaults to ON on Windows
+    # (and would bake the BUILD prefix in anyway), so it is OFF everywhere.
+    "-DLLDB_ENABLE_SWIG=ON"
+    "-DLLDB_ENABLE_PYTHON=ON"
+    "-DLLDB_ENABLE_PYTHON_LIMITED_API=ON"
+    "-DLLDB_EMBED_PYTHON_HOME=OFF"
+    # tree-sitter syntax highlighting (needs libtree-sitter AND the
+    # tree-sitter CLI at build time, plus node for `tree-sitter generate`).
+    # conda-forge has the CLI everywhere but win-arm64: windows-arm-args turns
+    # it off there.
+    "-DLLDB_ENABLE_TREESITTER=ON"
   ]
 }
 
@@ -119,6 +148,11 @@ def windows-arm-args [] {
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_ROCM_BACKEND=OFF"
+    # tree-sitter: libtree-sitter exists for win-arm64 but conda-forge has no
+    # tree-sitter-cli for it, and lldb's FindTreeSitter requires the CLI to
+    # generate the grammars (a win-64 package cannot be installed into a
+    # win-arm64 environment).
+    "-DLLDB_ENABLE_TREESITTER=OFF"
     "-DLLVM_TARGETS_TO_BUILD=AArch64"
     "-DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc"
     "-DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-pc-windows-msvc"
@@ -144,13 +178,12 @@ def darwin-args [src: string, prefix: string] {
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     # lldb: Xcode's own signed debugserver (building and codesigning ours
-    # needs entitlements); no python/swig on this platform for now.
+    # needs entitlements). libedit / curses (+panel) from conda-forge, like
+    # linux; python, lzma, libxml2 and tree-sitter are in common-args.
     "-DLLDB_USE_SYSTEM_DEBUGSERVER=ON"
-    "-DLLDB_ENABLE_PYTHON=OFF"
-    "-DLLDB_ENABLE_LIBEDIT=OFF"
-    "-DLLDB_ENABLE_CURSES=OFF"
-    "-DLLDB_ENABLE_LZMA=OFF"
-    "-DLLDB_ENABLE_LIBXML2=OFF"
+    "-DLLVM_ENABLE_LIBEDIT=FORCE_ON"
+    "-DLLDB_ENABLE_LIBEDIT=ON"
+    "-DLLDB_ENABLE_CURSES=ON"
     "-DWITH_CUDA_BACKEND=OFF"
     "-DWITH_LEVEL_ZERO_BACKEND=OFF"
     "-DWITH_OPENCL_BACKEND=OFF"
@@ -322,6 +355,9 @@ def linux-args [src: string, prefix: string] {
     # pseudo-cross args from conda-toolchain-args below.
     # TheRock parity for GNU hosts.
     "-DLLVM_ENABLE_PEDANTIC=OFF"
+    # With ccache as the compiler launcher LLVM warns about precompiled headers
+    # (HandleLLVMOptions.cmake:1407); off on every platform now (win/osx above).
+    "-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON"
     # compiler-rt components that upstream supports on linux but not on
     # Windows. XRay has no Windows port at all; MemProf and ORC are
     # linux-first and not built by conda-forge's own Windows clang either.
@@ -332,13 +368,12 @@ def linux-args [src: string, prefix: string] {
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"
-    "-DLLVM_ENABLE_LIBXML2=FORCE_ON"
-    "-DLLVM_ENABLE_LIBEDIT=OFF"
-    "-DLLDB_ENABLE_PYTHON=ON"
-    "-DLLDB_ENABLE_LIBEDIT=OFF"
-    "-DLLDB_ENABLE_CURSES=OFF"
-    "-DLLDB_ENABLE_LZMA=OFF"
-    "-DLLDB_ENABLE_LIBXML2=OFF"
+    # libedit / curses (+panel): lldb line editing and the `gui` command; LLVM's
+    # own libedit use (LineEditor) is on too. Python, lzma, libxml2 and
+    # tree-sitter are in common-args.
+    "-DLLVM_ENABLE_LIBEDIT=FORCE_ON"
+    "-DLLDB_ENABLE_LIBEDIT=ON"
+    "-DLLDB_ENABLE_CURSES=ON"
     "-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib"
     $"-DLLVM_HOST_TRIPLE=(linux-triple)"
     $"-DLLVM_DEFAULT_TARGET_TRIPLE=(linux-triple)"
@@ -408,12 +443,17 @@ def windows-args [src: string, libprefix: string, build: string] {
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
-    # lldb without python scripting (first cut; no swig on Windows)
-    "-DLLDB_ENABLE_PYTHON=OFF"
+    # lldb python / lzma / libxml2 / tree-sitter are in common-args (swig,
+    # python, xz, libxml2 and the tree-sitter CLI all exist for win-64). Left OFF
+    # because no usable library exists for Windows on conda-forge:
+    #  - libedit: no windows build (a unix line-editing library).
+    #  - curses: ncurses has no windows build; pdcurses (win-64 only) ships no
+    #    panel library and no terminfo symbols, which lldb's FindCursesAndPanel
+    #    requires, and win-arm64 has no curses package at all.
     "-DLLDB_ENABLE_LIBEDIT=OFF"
     "-DLLDB_ENABLE_CURSES=OFF"
-    "-DLLDB_ENABLE_LZMA=OFF"
-    "-DLLDB_ENABLE_LIBXML2=OFF"
+    # The host python for FindPython3 (the build env carries one as well).
+    $"-DPython3_ROOT_DIR=($libprefix | path dirname)"
     # See linux-args: XRay has no Windows port, and MemProf/ORC are linux-first.
     # ASan, the profile runtime and libFuzzer DO support Windows and are
     # enabled in common-args.

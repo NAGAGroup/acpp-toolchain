@@ -24,7 +24,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="efdef0fad4b812e482a3bc2fcf6c4902941af6d8") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="c5584b498fda86dd0ae6dc52bb4e2753450d0bdc") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -64,13 +64,18 @@ outputs:
       # AMD's llvm-project at the exact commit TheRock 10.1.0a20260822 pins
       # (compiler/amd-llvm), as a GitHub archive. The archive's single
       # top-level directory (llvm-project-<sha>) is stripped by rattler-build,
-      # like the release tarball's was. No patches: the Xcode 26 fixes that
+      # like the release tarball's was. The Xcode 26 fixes that
       # shared/patches/0009 and 0011 carried are already in this tree
       # (verified by git apply --reverse --check; 0011's include is present
-      # in a different position).
+      # in a different position), so they are NOT listed. One patch: 0012 drops
+      # member-level LLVM_ABI(_FOR_TEST) from classes that already carry it,
+      # which clang-cl rejects as a dllexport on a member of a dllexport class
+      # (VPlan.h, win-64/win-arm64 run 38542113236).
       - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
         sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
         target_directory: llvm-project
+        patches:
+          - shared/patches/0012-llvm23-dllexport-double-annotation.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
@@ -138,9 +143,18 @@ outputs:
         # solves that could pick different interpreters, with lldb's bindings
         # compiled against the host one.
         - python
-        # swig is only needed for lldb's python bindings (linux-only build)
-        - if: linux
-          then: swig
+        # swig (>=4, conda-forge ships 4.5.1 on all five platforms) generates
+        # lldb's python bindings, which are built on every platform.
+        - swig
+        # lldb's tree-sitter syntax highlighters: `tree-sitter generate` turns
+        # the vendored grammar.js files into parsers at build time, and runs
+        # them through node. FindTreeSitter requires the CLI as well as the
+        # library. conda-forge has no tree-sitter-cli for win-arm64, so the
+        # feature is off there (build-stage-lib.nu windows-arm-args).
+        - if: target_platform != "win-arm64"
+          then:
+            - tree-sitter-cli
+            - nodejs
         # AdaptiveCpp uses GCC/Clang builtin atomics (__atomic_load_n,
         # __ATOMIC_ACQUIRE, ...) which MSVC does not implement, so acpp
         # itself must be compiled by a clang-family driver. We take the
@@ -226,12 +240,30 @@ outputs:
         - if: win
           then:
             - khronos-opencl-icd-loader
-        # Linux (both arches): lldb needs python+swig; libxml2/numactl are
-        # linux packages.
+        # LLDB / LLVM optional features, on every platform whose library
+        # exists on conda-forge (Jack's rule: no platform-specific trimming):
+        #   python (+ swig in build): lldb scripting, limited API (abi3)
+        #   libxml2: LLVM (llvm-mt, lld-link manifest merging) and lldb
+        #   xz (liblzma): lldb
+        #   libedit + ncurses: lldb and LLVM; none exist for win-64/win-arm64
+        #     (pdcurses is win-64 only and has no panel library or terminfo
+        #     symbols, which lldb's FindCursesAndPanel requires)
+        #   libtree-sitter: lldb highlighting (needs the CLI too, see build)
+        # Their run_exports are ignored on every output except
+        # naga-acpp-runtime (libLLVM) and naga-acpp-lldb, see
+        # ignore_run_exports below.
+        - libxml2-devel
+        - python
+        - xz
+        - if: unix
+          then:
+            - libedit
+            - ncurses
+        - if: target_platform != "win-arm64"
+          then:
+            - libtree-sitter
         - if: linux
           then:
-            - libxml2-devel
-            - python
             - numactl
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
@@ -493,6 +525,8 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           lib:
@@ -841,6 +875,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           bin:
@@ -981,6 +1021,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           files:
@@ -1328,6 +1374,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           bin:
@@ -1516,6 +1568,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           bin:
@@ -1541,43 +1599,47 @@ outputs:
       number: ${{ env.get("ACPP_BUILD_NUMBER", default="0") | int }}
       # Lane tag + variant hash + build number. See llvm_build_tag in context.
       string: ${{ llvm_build_tag }}_h${{ hash }}_${{ build_number }}
-      # Built on every platform. Python bindings only on linux (osx and win
-      # build lldb with LLDB_ENABLE_PYTHON=OFF for now: no swig there).
+      # Built on every platform, with python scripting on every platform.
+      # The python module is built against the Python LIMITED API
+      # (LLDB_ENABLE_PYTHON_LIMITED_API=ON, abi3), so one build serves any
+      # CPython >= the limited-API floor (3.8, LLDB_MINIMUM_PYTHON_VERSION in
+      # lldb-python.h) instead of one interpreter version.
       files:
         include:
           - if: unix
             then:
               - bin/lldb*
               - lib/liblldb*
-              # python bindings (lldb module); linux only
+              # python bindings (lldb module): lib/python<X.Y>/site-packages
+              # (LLDB_PYTHON_RELATIVE_PATH from the build interpreter's platlib)
               - lib/python*/**
             else:
               - Library/bin/lldb*
               - Library/bin/liblldb*
               - Library/lib/liblldb*
+              # python bindings: LLDB_PYTHON_RELATIVE_PATH is "Lib/site-packages"
+              # relative to the install prefix, which on Windows is %PREFIX%\Library
+              - Library/Lib/site-packages/**
     requirements:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
 
-        # POINT REPAIR: this package ships lib/python*/** — the lldb python
-        # bindings — so it needs an interpreter to be of any use, and it was
-        # not asking for one. python's own run_export supplies python_abi,
-        # which pins the interpreter's ABI *if* python is present but does not
-        # require python to be there at all, so the bindings could land in an
-        # environment with nothing able to import them. (linux only: osx and
-        # win build lldb without python scripting.)
-        - if: linux
-          then: python
+        # This package ships the lldb python module, so it needs an
+        # interpreter. The module uses only the Python limited API, so the
+        # requirement is the API floor, NOT python_abi: python's own
+        # run_export (python_abi 3.14.* *_cp314) is ignored below, otherwise
+        # the package would be tied to the exact interpreter it was built with.
+        - python >=3.8
       run_constraints:
         # Same-major window: a different-major lldb cannot collide with ours.
         - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
         - acpp-lldb <0.0a0
         - acpp-lldb-nightly <0.0a0
       ignore_run_exports:
-        # By source package; see the note on naga-acpp-runtime. NB python is NOT
-        # ignored here — unlike the other outputs, this one genuinely depends
-        # on the interpreter, so python_abi pinning it to the interpreter it
-        # was built against is exactly what we want.
+        # By source package; see the note on naga-acpp-runtime. This output is
+        # the one that legitimately links libedit, ncurses, xz, libxml2 and
+        # libtree-sitter (lldb), so their run_exports are KEPT. python is
+        # ignored (and replaced by `python >=3.8` above): abi3 module.
         from_package:
           - cuda-version
           - cuda-cudart-dev
@@ -1591,6 +1653,7 @@ outputs:
           - opencl-headers
           - ocl-icd
           - khronos-opencl-icd-loader
+          - python
     tests:
       - package_contents:
           bin:
@@ -2448,6 +2511,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           files:
@@ -2519,6 +2588,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           files:
@@ -2593,6 +2668,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           files:
@@ -2685,6 +2766,12 @@ outputs:
           - ocl-icd
           - khronos-opencl-icd-loader
           - python
+          - libxml2
+          - libxml2-devel
+          - libedit
+          - ncurses
+          - xz
+          - libtree-sitter
     tests:
       - package_contents:
           files:

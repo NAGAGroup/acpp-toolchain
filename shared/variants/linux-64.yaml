@@ -73,4 +73,4 @@ python: ["3.14"]
 # sources, patches or build script, so editing a patch silently reused a stale
 # toolchain. This hash covers those real inputs; shared/gen-staging-hash.nu
 # regenerates it and CI fails when it is stale.
-staging_inputs: ["50bd024ac9830f3d"]
+staging_inputs: ["24e698c5b2e2ac04"]

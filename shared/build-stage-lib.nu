@@ -141,7 +141,8 @@ def is-arm [] { $nu.os-info.arch == "aarch64" }
 def windows-arm-args [] {
   [
     "-DLLVM_ENABLE_PROJECTS=clang;lld;lldb;clang-tools-extra"
-    # LLVM as a DLL (same four-flag recipe as win-64; clang stays static).
+    # LLVM as a DLL (same four-flag recipe as win-64). clang-cpp.dll is built too
+    # (clang-shlib, see windows-args); clang.exe itself still links clang statically.
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"
@@ -438,8 +439,10 @@ def windows-args [src: string, libprefix: string, build: string] {
     # LLVM as a DLL on Windows (upstream's documented recipe: LLVM Discourse,
     # "LLVM is buildable as a Windows DLL"): tools link LLVM-<ver>.dll, so the
     # partition now matches linux's libLLVM.so shape. CLANG_LINK_CLANG_DYLIB is
-    # left at its default (OFF on Windows): clang stays static, there is no
-    # clang-cpp DLL.
+    # left at its default (OFF on Windows): clang.exe itself still links clang
+    # statically, but clang-cpp.dll IS built: clang/tools/CMakeLists.txt:38-40
+    # adds clang-shlib when MSVC AND LLVM_BUILD_LLVM_DYLIB_VIS (run 38570967283
+    # linked bin/clang-cpp.dll).
     "-DLLVM_BUILD_LLVM_DYLIB=ON"
     "-DLLVM_LINK_LLVM_DYLIB=ON"
     "-DLLVM_BUILD_LLVM_DYLIB_VIS=ON"

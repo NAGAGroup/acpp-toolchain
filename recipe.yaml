@@ -24,7 +24,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="c5584b498fda86dd0ae6dc52bb4e2753450d0bdc") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="d5d79e917afece1917da8823478acf86e11e7b95") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -72,7 +72,9 @@ outputs:
       # which clang-cl rejects as a dllexport on a member of a dllexport class
       # (VPlan.h, win-64/win-arm64 run 38542113236); 0013 #undefs helper macros
       # OMPKinds.def leaks and 0014 includes VirtualFileSystem.h in
-      # Instrumentor.h (AMD 0bace190 defects, run 38564796830).
+      # Instrumentor.h (AMD 0bace190 defects, run 38564796830); 0015 backports
+      # upstream's DONT_DEFINE_EPRINTF guard in compiler-rt eprintf.c (osx-arm64,
+      # run 38570967283).
       - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
         sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
         target_directory: llvm-project
@@ -80,6 +82,7 @@ outputs:
           - shared/patches/0012-llvm23-dllexport-double-annotation.patch
           - shared/patches/0013-llvm23-ompkinds-undef-helper-macros.patch
           - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
+          - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

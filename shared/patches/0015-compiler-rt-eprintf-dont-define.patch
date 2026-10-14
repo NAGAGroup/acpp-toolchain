@@ -1,0 +1,28 @@
+compiler-rt: backport the DONT_DEFINE_EPRINTF guard in builtins/eprintf.c (AMD 0bace190 defect)
+
+Upstream llvm/llvm-project 2e9df860468425645dcd1b241c5dbf76c072e314,
+"[compiler-rt][builtins] Add compiler flags to catch potential errors that can
+lead to security vulnerabilities", wraps the whole __eprintf definition in
+#ifndef DONT_DEFINE_EPRINTF ... #endif. The AMD tree already passes
+-Werror=format-nonliteral -DDONT_DEFINE_EPRINTF (CompilerRTUtils.cmake:639, macOS
+>= 10.7) but still compiles the body, where fprintf(stderr, format, ...) trips
+-Wformat-nonliteral. Our just-built clang's new -Wmissing-format-attribute (in the
+-Wformat-nonliteral group) makes that a hard error (run 38570967283, osx-arm64).
+
+diff --git a/compiler-rt/lib/builtins/eprintf.c b/compiler-rt/lib/builtins/eprintf.c
+index 89fb0e3..daf90b4 100644
+--- a/compiler-rt/lib/builtins/eprintf.c
++++ b/compiler-rt/lib/builtins/eprintf.c
+@@ -15,6 +15,7 @@
+ //
+ // It should never be exported from a dylib, so it is marked
+ // visibility hidden.
++#ifndef DONT_DEFINE_EPRINTF
+ #ifndef _WIN32
+ __attribute__((visibility("hidden")))
+ #endif
+@@ -25,3 +26,4 @@ __eprintf(const char *format, const char *assertion_expression,
+   fflush(stderr);
+   compilerrt_abort();
+ }
++#endif

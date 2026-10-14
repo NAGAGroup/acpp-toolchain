@@ -1,14 +1,20 @@
 #!/usr/bin/env nu
-# suite.nu — build and run AdaptiveCpp's OWN test suite (tests/) against the
-# INSTALLED naga-acpp channel, through the compiler activation packages.
+# suite.nu — package, install and run AdaptiveCpp's OWN test suite (tests/)
+# against the INSTALLED naga-acpp channel.
 #
-# Runs INSIDE the pixi environment (the `build` or `default` environment
-# from pixi.toml), so CONDA_PREFIX and the activation variables (CXX, CC,
-# CMAKE_ARGS) are already set by the time this script executes.
+# The suite is BUILT as pixi source packages (pkg-omp/, pkg-generic/): `package`
+# copies the fork's tests/ in and runs `pixi publish --target-dir`, which
+# compiles it against the toolchain (compiler activation packages, run_exports,
+# the exact naga-acpp-llvm lane pin) and leaves a .conda under pkgs/<name>/.
+# `install` adds those .conda files to the `suite` feature and installs the
+# per-backend run environments (run-omp, run-ocl, run-cuda); `run` executes an
+# installed test binary in the environment that matches the backend mask.
 #
 # Subcommands:
-#   nu suite.nu build <name> <targets> [--pstl] [--pcuda]
+#   nu suite.nu package <name> <targets>        (omp omp | generic generic; needs ACPP_SRC)
+#   nu suite.nu install
 #   nu suite.nu run <name> <mask> <exe> [...rest]
+#   nu suite.nu info
 #   nu suite.nu boost
 #
 # Pinned so the win-arm64 Boost.Test-from-source build is reproducible
@@ -16,164 +22,137 @@
 # hand-off time: boostorg/boost's latest GitHub release is boost-1.92.0,
 # and it publishes a boost-1.92.0-cmake.tar.xz asset (checked via
 # `http get https://api.github.com/repos/boostorg/boost/releases/latest`).
+# pkg-*/CMakeLists.txt fetches the same release for win-arm64.
 const BOOST_VERSION = "1.92.0"
 
-# CONDA_PREFIX on unix; CONDA_PREFIX/Library on windows, where conda-forge
-# puts headers/libs/cmake files under a Library subdir.
-def suite-prefix [] {
-  let conda_prefix = ($env.CONDA_PREFIX? | default "")
-  if $conda_prefix == "" {
-    error make {msg: "suite.nu: CONDA_PREFIX is not set — run this inside the pixi environment (e.g. `pixi run -e default nu suite.nu ...`)"}
-  }
-  if $nu.os-info.name == "windows" {
-    $conda_prefix | path join "Library"
-  } else {
-    $conda_prefix
+# The suite workspace manifest.
+def suite-manifest [] {
+  $env.FILE_PWD | path join "pixi.toml"
+}
+
+# The pixi platform name of this machine.
+def current-platform [] {
+  let os = $nu.os-info.name
+  let arch = $nu.os-info.arch
+  match [$os $arch] {
+    ["linux" "x86_64"] => "linux-64"
+    ["linux" "aarch64"] => "linux-aarch64"
+    ["windows" "x86_64"] => "win-64"
+    ["windows" "aarch64"] => "win-arm64"
+    ["macos" "aarch64"] => "osx-arm64"
+    _ => { error make {msg: $"suite.nu: unsupported platform ($os)/($arch)"} }
   }
 }
 
-def suite-build-dir [name: string] {
-  $env.FILE_PWD | path join "build" $name
+# The run environments that exist on this platform (see pixi.toml: run-ocl
+# and run-cuda only carry runtimes where the toolchain ships them).
+def run-envs [] {
+  let p = (current-platform)
+  mut envs = ["run-omp"]
+  if $p in ["linux-64" "linux-aarch64" "win-64" "win-arm64"] { $envs = ($envs | append "run-ocl") }
+  if $p in ["linux-64" "linux-aarch64" "win-64"] { $envs = ($envs | append "run-cuda") }
+  $envs
 }
 
-# ── build ────────────────────────────────────────────────────────────────
-def "main build" [
-  name: string      # build/<name> — one dir per ACPP_TARGETS configuration
-  targets: string   # -DACPP_TARGETS value, e.g. "generic" or "omp;cuda:sm_70"
-  --pstl            # also configure+build pstl_tests (WITH_PSTL_TESTS=ON)
-  --pcuda           # also configure+build pcuda_tests (WITH_PCUDA_TESTS=ON)
+# ── package ──────────────────────────────────────────────────────────────
+def "main package" [
+  name: string      # pkg-<name>: omp or generic
+  targets: string   # the ACPP_TARGETS of that package (fixed in its pixi.toml): omp or generic
 ] {
+  if $targets != $name {
+    error make {msg: $"suite.nu package: targets '($targets)' does not match package '($name)' — pkg-($name)/pixi.toml fixes ACPP_TARGETS=($name)"}
+  }
   let acpp_src = ($env.ACPP_SRC? | default "")
   if $acpp_src == "" {
-    error make {msg: "suite.nu build: ACPP_SRC is not set — point it at the acpp-fork checkout (CI checks the fork out there)"}
+    error make {msg: "suite.nu package: ACPP_SRC is not set — point it at the acpp-fork checkout (CI checks the fork out there)"}
   }
-  let src = ($acpp_src | path join "tests")
-  let dir = (suite-build-dir $name)
-  mkdir $dir
-
-  let prefix = (suite-prefix)
-
-  let cxx = ($env.CXX? | default "")
-  let cc = ($env.CC? | default "")
-  if $cxx == "" or $cc == "" {
-    error make {msg: "suite.nu build: CXX/CC are not set — the naga-acpp-clangxx_* activation package must be installed and activated in this environment"}
+  let pkg = ($env.FILE_PWD | path join $"pkg-($name)")
+  if not ($pkg | path join "pixi.toml" | path exists) {
+    error make {msg: $"suite.nu package: ($pkg)/pixi.toml does not exist"}
   }
 
-  # AdaptiveCpp_DIR must be the directory CONTAINING the package config
-  # (find_package(AdaptiveCpp) semantics). The fork installs
-  # lib/cmake/AdaptiveCpp/adaptivecpp-config.cmake (CMakeLists.txt:1102);
-  # upstream spells it AdaptiveCppConfig.cmake, so accept either. The exact
-  # subpath under prefix varies by platform, so glob rather than hardcode it.
-  # Backslashes are glob ESCAPES in nushell, so normalise Windows `path join` output to '/'.
-  let cfg_pattern = ($prefix | path join "**" "{adaptivecpp-config,AdaptiveCppConfig}.cmake" | str replace --all '\' '/')
-  let cfgs = (glob $cfg_pattern)
-  if ($cfgs | is-empty) {
-    error make {msg: $"suite.nu build: adaptivecpp-config.cmake not found anywhere under ($prefix) — is naga-acpp installed in this environment?"}
+  # Replace the old copy: stale files must not survive into the package.
+  let dest = ($pkg | path join "tests")
+  rm -rf $dest
+  cp -r ($acpp_src | path join "tests") $dest
+
+  let out = ($env.FILE_PWD | path join "pkgs" $name)
+  rm -rf $out
+  mkdir $out
+
+  cd $env.FILE_PWD
+  print $"pixi publish --path ($pkg) --target-dir ($out)"
+  ^pixi publish --path $pkg --target-dir $out
+
+  let pattern = ($out | path join "**" "*.conda" | str replace --all '\' '/')
+  let built = (glob $pattern)
+  if ($built | is-empty) {
+    error make {msg: $"suite.nu package: pixi publish left no .conda under ($out)"}
   }
-  let acpp_dir = ($cfgs | first | path dirname)
+  for b in $built { print $"suite.nu package: built ($b)" }
+}
 
-  mut args = [
-    "-G" "Ninja"
-    "-S" $src
-    "-B" $dir
-    "-DCMAKE_BUILD_TYPE=Release"
-    $"-DACPP_TARGETS=($targets)"
-    $"-DCMAKE_CXX_COMPILER=($cxx)"
-    $"-DCMAKE_C_COMPILER=($cc)"
-    $"-DAdaptiveCpp_DIR=($acpp_dir)"
-    # tests/CMakeLists.txt shells out to `brew list libomp` on APPLE when
-    # OpenMP_ROOT/OMP_ROOT are undefined — pointing it at prefix avoids that.
-    $"-DOpenMP_ROOT=($prefix)"
-  ]
-
-  # CMAKE_PREFIX_PATH: prefix, plus SUITE_BOOST_PREFIX (win-arm64's
-  # from-source Boost.Test install, set by `main boost`) when present.
-  let boost_prefix = ($env.SUITE_BOOST_PREFIX? | default "")
-  let cmake_prefix_path = (if $boost_prefix == "" { $prefix } else { $"($prefix);($boost_prefix)" })
-  $args = ($args | append $"-DCMAKE_PREFIX_PATH=($cmake_prefix_path)")
-
-  # Only tests/compiler/'s lit-based check-* targets need LLVM_DIR, and this
-  # suite never builds/runs those — but pass it through when it happens to
-  # exist on the prefix, at no cost.
-  let llvm_dir = ($prefix | path join "lib" "cmake" "llvm")
-  if ($llvm_dir | path exists) {
-    $args = ($args | append $"-DLLVM_DIR=($llvm_dir)")
+# ── install ──────────────────────────────────────────────────────────────
+def "main install" [] {
+  let manifest = (suite-manifest)
+  let pattern = ($env.FILE_PWD | path join "pkgs" "**" "*.conda" | str replace --all '\' '/')
+  let pkgs = (glob $pattern)
+  if ($pkgs | is-empty) {
+    error make {msg: $"suite.nu install: no .conda under ($env.FILE_PWD)/pkgs — run `nu suite.nu package ...` first"}
   }
-
-  if $pstl { $args = ($args | append "-DWITH_PSTL_TESTS=ON") }
-  if $pcuda { $args = ($args | append "-DWITH_PCUDA_TESTS=ON") }
-
-  # The conda contract: CMAKE_ARGS carries sysroot/deployment-target/ar-
-  # ranlib flags as a single space-separated string, same as any conda-forge
-  # build script.
-  let extra = ($env.CMAKE_ARGS? | default "" | split row " " | where {|w| $w != "" })
-  $args = ($args | append $extra)
-
-  print $"cmake ($args | str join ' ')"
-  ^cmake ...$args
-
-  mut targets_list = ["sycl_tests" "rt_tests"]
-  if $pstl { $targets_list = ($targets_list | append "pstl_tests") }
-  if $pcuda { $targets_list = ($targets_list | append "pcuda_tests") }
-
-  # Explicit parallel level: say how many jobs the runner gives us in the log.
-  let jobs = (sys cpu | length)
-  print $"suite.nu: building with ($jobs) parallel jobs"
-  mut build_args = ["--build" $dir "--parallel" ($jobs | into string)]
-  for t in $targets_list {
-    $build_args = ($build_args | append ["--target" $t])
+  for p in $pkgs {
+    print $"pixi add --feature suite ($p)"
+    ^pixi add --manifest-path $manifest --feature suite --no-install $p
+    if $env.LAST_EXIT_CODE != 0 {
+      error make {msg: $"suite.nu install: pixi add --feature suite ($p) failed with exit code ($env.LAST_EXIT_CODE)"}
+    }
   }
-  # -k 0 (keep going, unlimited failures) surfaces every compile error in
-  # one run instead of stopping at the first.
-  $build_args = ($build_args | append ["--" "-k" "0"])
-
-  print $"cmake ($build_args | str join ' ')"
-  ^cmake ...$build_args
+  for e in (run-envs) {
+    print $"pixi install -e ($e)"
+    ^pixi install --manifest-path $manifest -e $e
+    if $env.LAST_EXIT_CODE != 0 {
+      error make {msg: $"suite.nu install: pixi install -e ($e) failed with exit code ($env.LAST_EXIT_CODE)"}
+    }
+  }
 }
 
 # ── run ──────────────────────────────────────────────────────────────────
 def "main run" [
-  name: string       # same build/<name> used in `main build`
-  mask: string        # ACPP_VISIBILITY_MASK, e.g. "omp", "cuda", "ocl"
-  exe: string          # executable name, without extension
+  name: string       # omp or generic: which test package
+  mask: string        # ACPP_VISIBILITY_MASK, e.g. "omp", "cuda", "ocl", "omp;cuda"
+  exe: string          # test executable: sycl_tests, rt_tests, pstl_tests, pcuda_tests
   ...rest: string      # extra args forwarded to the executable
 ] {
-  let dir = (suite-build-dir $name)
-  if not ($dir | path exists) {
-    error make {msg: $"suite.nu run: build dir ($dir) does not exist — run `nu suite.nu build ($name) ...` first"}
-  }
-  let is_windows = ($nu.os-info.name == "windows")
-  let exe_name = (if $is_windows { $"($exe).exe" } else { $exe })
+  # The environment that has the runtime for the mask.
+  let run_env = (if ($mask | str contains "cuda") {
+    "run-cuda"
+  } else if ($mask | str contains "ocl") {
+    "run-ocl"
+  } else if $mask in ["omp" "metal"] {
+    "run-omp"
+  } else {
+    error make {msg: $"suite.nu run: no run environment for visibility mask '($mask)' (omp/metal -> run-omp, ocl -> run-ocl, *cuda* -> run-cuda)"}
+  })
 
-  cd $dir
-  with-env {ACPP_VISIBILITY_MASK: $mask} {
-    if $is_windows {
-      let boost_prefix = ($env.SUITE_BOOST_PREFIX? | default "")
-      mut prepend = [$dir]
-      if $boost_prefix != "" {
-        $prepend = ([($boost_prefix | path join "bin")] | append $prepend)
-      }
-      with-env {PATH: ($prepend | append $env.PATH)} {
-        ^$"./($exe_name)" ...$rest
-      }
-    } else if $nu.os-info.name == "linux" {
-      # Binaries may have been built in another environment (the linux-64
-      # suite is built on the builder box and run on the GPU box): their
-      # RUNPATH names the BUILDER's env. Put this env's lib dir on the search
-      # path so the conda libraries (acpp-rt, boost, tbb, libstdc++) resolve.
-      let conda_lib = ($env.CONDA_PREFIX? | default "" | path join "lib")
-      let old_ld = ($env.LD_LIBRARY_PATH? | default "")
-      with-env {LD_LIBRARY_PATH: (if $old_ld == "" { $conda_lib } else { $"($conda_lib):($old_ld)" })} {
-        ^$"./($exe_name)" ...$rest
-      }
-    } else {
-      ^$"./($exe_name)" ...$rest
-    }
+  let code = (with-env {ACPP_VISIBILITY_MASK: $mask} {
+    ^pixi run -e $run_env --manifest-path (suite-manifest) $"acpp-suite-($name)-($exe)" ...$rest
+    $env.LAST_EXIT_CODE
+  })
+  if $code != 0 {
+    exit $code
   }
+}
 
-  if $env.LAST_EXIT_CODE != 0 {
-    exit $env.LAST_EXIT_CODE
+# ── info ─────────────────────────────────────────────────────────────────
+def "main info" [] {
+  mut worst = 0
+  for e in (run-envs) {
+    print $"===== acpp-info -l in ($e)"
+    # `acpp-info` is the pixi task (cmd = "acpp-info -l"), so no extra -l here.
+    ^pixi run -e $e --manifest-path (suite-manifest) acpp-info
+    if $env.LAST_EXIT_CODE != 0 { $worst = $env.LAST_EXIT_CODE }
   }
+  if $worst != 0 { exit $worst }
 }
 
 # ── boost (win-arm64 only) ───────────────────────────────────────────────
@@ -231,6 +210,7 @@ def "main boost" [] {
   print $"SUITE_BOOST_PREFIX=($prefix)"
 }
 
+
 def main [] {
-  print "usage: nu suite.nu {build <name> <targets> [--pstl] [--pcuda] | run <name> <mask> <exe> [...rest] | boost}"
+  print "usage: nu suite.nu {package <name> <targets> | install | run <name> <mask> <exe> [...rest] | info | boost}"
 }

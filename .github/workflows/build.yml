@@ -213,14 +213,14 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build omp "omp" 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
+        run: pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         id: t2
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
+        run: pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
       # Needs a compiler and no GPU, so it runs here rather than on the GPU box.
       - name: Sanitizer smoke (naga-acpp-compiler-rt)
         id: t3
@@ -228,16 +228,15 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         working-directory: shared/tests/suite
-        run: pixi run sanitizer-smoke 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
-      # A tar keeps the executable bits that upload-artifact would drop.
+        run: pixi run -e build sanitizer-smoke 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
+      # The test packages (.conda) are the artifact: test-linux-64 adds them to its run environments.
       - name: Package the suite binaries
         id: t4
         continue-on-error: true
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: |
-          find build -type f \( -name sycl_tests -o -name rt_tests -o -name pstl_tests -o -name pcuda_tests -o -name '*.so' -o -name '*.so.*' \) -print0 | tar --null -T - -cf "$GITHUB_WORKSPACE/suite-linux-64.tar"
-          ls -l "$GITHUB_WORKSPACE/suite-linux-64.tar"
+          find pkgs -type f -name '*.conda' -exec ls -l {} +
       - uses: actions/upload-artifact@v4
         id: t5
         continue-on-error: true
@@ -246,7 +245,7 @@ jobs:
           name: suite-linux-64
           retention-days: 14
           if-no-files-found: error
-          path: suite-linux-64.tar
+          path: shared/tests/suite/pkgs/**
       - name: Upload logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -256,8 +255,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -292,11 +290,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: suite-linux-64
-          path: .
-      - name: Unpack the suite binaries
-        run: |
-          mkdir -p shared/tests/suite
-          tar -xf suite-linux-64.tar -C shared/tests/suite
+          path: shared/tests/suite/pkgs
       - name: Pin the suite to the published linux-64 packages
         run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu linux-64 ${{ needs.build-linux-64.outputs.version }} ${{ inputs.build_number }}
       # Retries: the channel index can lag the upload.
@@ -304,62 +298,71 @@ jobs:
         working-directory: shared/tests/suite
         timeout-minutes: 60
         run: |
-          for i in 1 2 3 4 5; do pixi install -e run && exit 0; echo "retry $i"; sleep 60; done; exit 1
+          for i in 1 2 3 4 5; do pixi install && exit 0; echo "retry $i"; sleep 60; done; exit 1
+      - name: "suite: install packages"
+        id: suiteinstall
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        working-directory: shared/tests/suite
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run nu suite.nu install 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/suite-install.log"
       - name: pixi list
         id: pixilist
         continue-on-error: true
         working-directory: shared/tests/suite
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi list -e run 2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
+          pixi list -e run-cuda 2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
       - name: Visible backends
         id: t1
         continue-on-error: true
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
-        run: pixi run -e run acpp-info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
+        run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t2
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run omp omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
+        run: pixi run nu suite.nu run omp omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
       - name: "rt_tests: omp on OMP (CPU)"
         id: t3
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
+        run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
+        run: pixi run nu suite.nu run generic omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
       - name: "sycl_tests: generic on OMP+CUDA (T4)"
         id: t5
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic "omp;cuda" sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
+        run: pixi run nu suite.nu run generic "omp;cuda" sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
       - name: "pstl_tests: generic on OMP (CPU)"
         id: t6
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic omp pstl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log"
+        run: pixi run nu suite.nu run generic omp pstl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t6.log"
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         id: t7
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic omp pcuda_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t7.log"
+        run: pixi run nu suite.nu run generic omp pcuda_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t7.log"
       # Intel's CPU OpenCL runtime (conda-forge intel-opencl-rt) is the OpenCL
       # device here, on x86-64 only.
       - name: "sycl_tests: generic on OpenCL (Intel CPU)"
@@ -368,7 +371,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic ocl sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t8.log"
+        run: pixi run nu suite.nu run generic ocl sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t8.log"
       - name: "consumer: pin, build (pixi-build-cmake) and run a SYCL single_task"
         id: consumer
         if: ${{ !cancelled() }}
@@ -393,8 +396,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -549,19 +551,58 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
-      - name: Visible backends
-        id: t1
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        working-directory: shared/tests/suite
-        run: pixi run acpp-info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "build: omp"
         id: t2
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build omp "omp" 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
+        # Hang diagnostic: after 10 min, any clang -cc1 still compiling reduction.cpp is
+        # sampled (macOS) and sent SIGSEGV so clang prints its pretty stack trace.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" &
+          build_pid=$!
+          (
+            sleep 600
+            for pid in $(pgrep -f -- '-cc1.*reduction\.cpp'); do
+              echo "omp-hang watchdog: pid $pid still compiling reduction.cpp after 600 s"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+              fi
+              kill -SEGV "$pid" || true
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$build_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
+      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
+        id: t5
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
+      - name: "suite: install packages"
+        id: suiteinstall
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        working-directory: shared/tests/suite
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run nu suite.nu install 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/suite-install.log"
+      - name: Visible backends
+        id: t1
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t3
         continue-on-error: true
@@ -576,13 +617,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
-      - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
-        id: t5
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build generic "generic" --pstl --pcuda 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t6
         continue-on-error: true
@@ -610,7 +644,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         working-directory: shared/tests/suite
-        run: pixi run sanitizer-smoke 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t9.log"
+        run: pixi run -e build sanitizer-smoke 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t9.log"
       - name: "consumer: pin, build (pixi-build-cmake) and run a SYCL single_task"
         id: consumer
         if: ${{ !cancelled() }}
@@ -635,8 +669,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -808,10 +841,11 @@ jobs:
       - name: Pin the suite to the published osx-arm64 packages
         run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu osx-arm64 ${{ needs.build-osx-arm64.outputs.version }} ${{ inputs.build_number }}
       # pin-published.nu writes the plain platform; osx needs the macOS 26
-      # virtual-package floor, as before.
+      # virtual-package floor, as before; the two test packages are solved
+      # (and built) against the same floor.
       - name: Pin the macOS floor
         working-directory: shared/tests/suite
-        run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml
+        run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml pkg-omp/pixi.toml pkg-generic/pixi.toml
       # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
@@ -825,19 +859,59 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
-      - name: Visible backends
-        id: t1
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        working-directory: shared/tests/suite
-        run: pixi run acpp-info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "build: omp"
         id: t2
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 20
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build omp "omp" 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
+        # Hang diagnostic: after 10 min, any clang -cc1 still compiling reduction.cpp is
+        # sampled (macOS) and sent SIGSEGV so clang prints its pretty stack trace.
+        run: |
+          set -o pipefail
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" &
+          build_pid=$!
+          (
+            sleep 600
+            for pid in $(pgrep -f -- '-cc1.*reduction\.cpp'); do
+              echo "omp-hang watchdog: pid $pid still compiling reduction.cpp after 600 s"
+              if [ "$(uname)" = "Darwin" ]; then
+                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+                cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
+              fi
+              kill -SEGV "$pid" || true
+            done
+          ) &
+          watchdog_pid=$!
+          status=0
+          wait "$build_pid" || status=$?
+          pkill -P "$watchdog_pid" 2>/dev/null || true
+          kill "$watchdog_pid" 2>/dev/null || true
+          exit "$status"
+      # No PSTL on macOS: stdpar needs libstdc++ >= 11 and libc++ is unsupported (doc/stdpar.md); upstream's macos CI skips it too.
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
+        id: t5
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu package generic generic 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
+      - name: "suite: install packages"
+        id: suiteinstall
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        working-directory: shared/tests/suite
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run nu suite.nu install 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/suite-install.log"
+      - name: Visible backends
+        id: t1
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t3
         continue-on-error: true
@@ -852,14 +926,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
-      # No PSTL on macOS: stdpar needs libstdc++ >= 11 and libc++ is unsupported (doc/stdpar.md); upstream's macos CI skips it too.
-      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
-        id: t5
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build generic "generic" --pcuda 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t5.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t6
         continue-on-error: true
@@ -907,8 +973,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1185,7 +1250,7 @@ jobs:
             "$env:USERPROFILE\.pixi\bin",
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
-          pixi run nu suite.nu build omp "omp"
+          pixi run nu suite.nu package omp omp
       - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         id: t2
         continue-on-error: true
@@ -1201,7 +1266,7 @@ jobs:
             "$env:USERPROFILE\.pixi\bin",
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
-          pixi run nu suite.nu build generic "generic" --pcuda
+          pixi run nu suite.nu package generic generic
       - uses: actions/upload-artifact@v4
         id: t3
         continue-on-error: true
@@ -1210,9 +1275,7 @@ jobs:
           name: suite-win-64
           retention-days: 14
           if-no-files-found: error
-          path: |
-            shared/tests/suite/build/**/*.exe
-            shared/tests/suite/build/**/*.dll
+          path: shared/tests/suite/pkgs/**
       - name: "consumer: pin, build (pixi-build-cmake) and run a SYCL single_task"
         id: consumer
         if: ${{ !cancelled() }}
@@ -1234,8 +1297,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1288,7 +1350,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: suite-win-64
-          path: shared/tests/suite/build
+          path: shared/tests/suite/pkgs
       - name: Pin the suite to the published win-64 packages
         run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu win-64 ${{ needs.build-win-64.outputs.version }} ${{ inputs.build_number }}
       # Retries: the channel index can lag the upload.
@@ -1296,48 +1358,55 @@ jobs:
         working-directory: shared/tests/suite
         timeout-minutes: 60
         run: |
-          foreach ($i in 1..5) { pixi install -e run; if ($LASTEXITCODE -eq 0) { exit 0 }; Write-Host "retry $i"; Start-Sleep 60 }; exit 1
+          foreach ($i in 1..5) { pixi install; if ($LASTEXITCODE -eq 0) { exit 0 }; Write-Host "retry $i"; Start-Sleep 60 }; exit 1
+      - name: "suite: install packages"
+        id: suiteinstall
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu install
       - name: pixi list
         id: pixilist
         continue-on-error: true
         working-directory: shared/tests/suite
         run: |
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs" | Out-Null
-          pixi list -e run | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\logs\pixi-list.txt"
+          pixi list -e run-cuda | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\logs\pixi-list.txt"
       - name: Visible backends
         id: t1
         continue-on-error: true
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
-        run: pixi run -e run acpp-info
+        run: pixi run nu suite.nu info
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t2
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run omp omp sycl_tests
+        run: pixi run nu suite.nu run omp omp sycl_tests
       - name: "rt_tests: omp on OMP (CPU)"
         id: t3
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run omp omp rt_tests
+        run: pixi run nu suite.nu run omp omp rt_tests
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic omp sycl_tests
+        run: pixi run nu suite.nu run generic omp sycl_tests
       - name: "sycl_tests: generic on OMP+CUDA (T4)"
         id: t5
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic "omp;cuda" sycl_tests
+        run: pixi run nu suite.nu run generic "omp;cuda" sycl_tests
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
         id: t6
         continue-on-error: true
@@ -1346,7 +1415,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic omp pcuda_tests
+        run: pixi run nu suite.nu run generic omp pcuda_tests
       # Intel's CPU OpenCL runtime (conda-forge intel-opencl-rt) is the OpenCL
       # device here, on x86-64 only.
       - name: "sycl_tests: generic on OpenCL (Intel CPU)"
@@ -1355,7 +1424,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run -e run nu suite.nu run generic ocl sycl_tests
+        run: pixi run nu suite.nu run generic ocl sycl_tests
       - name: Upload logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1365,8 +1434,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1524,7 +1592,6 @@ jobs:
     timeout-minutes: 90
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
-      SUITE_BOOST_PREFIX: ${{ github.workspace }}/shared/tests/suite/build/boost-prefix
     defaults:
       run:
         shell: pwsh
@@ -1562,6 +1629,27 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs" | Out-Null
           pixi list  | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\logs\pixi-list.txt"
+      - name: "build: omp"
+        id: t3
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu package omp omp
+      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
+        id: t6
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu package generic generic
+      - name: "suite: install packages"
+        id: suiteinstall
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        working-directory: shared/tests/suite
+        run: pixi run nu suite.nu install
       # No ICD exists on this runner; whether the OpenCL plugin loads at all
       # is informational only, read from this listing.
       - name: Visible backends
@@ -1569,23 +1657,7 @@ jobs:
         continue-on-error: true
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
-        run: pixi run acpp-info
-      # conda-forge ships no Boost for win-arm64 at all: build Boost.Test
-      # from source once, into SUITE_BOOST_PREFIX.
-      - name: Build Boost.Test from source
-        id: t2
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 30
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu boost
-      - name: "build: omp"
-        id: t3
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 30
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build omp "omp"
+        run: pixi run nu suite.nu info
       - name: "sycl_tests: omp on OMP (CPU)"
         id: t4
         continue-on-error: true
@@ -1600,13 +1672,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run omp omp rt_tests
-      - name: "build: generic (+pcuda = CUDA-style API on any backend)"
-        id: t6
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 30
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu build generic "generic" --pcuda
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t7
         continue-on-error: true
@@ -1644,8 +1709,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/build/**/CMakeFiles/CMakeConfigureLog.yaml
-            shared/tests/suite/build/**/.ninja_log
+            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}

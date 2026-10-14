@@ -31,6 +31,8 @@ def common-args [src: string, prefix: string, build: string] {
     # the child through the runtimes PASSTHROUGH prefixes (COMPILER_RT,
     # SANITIZER, DARWIN, OPENMP, LIBOMP: llvm/runtimes/CMakeLists.txt).
     "-DLLVM_ENABLE_RUNTIMES=compiler-rt;openmp"
+    # Flat lib/ for libomp and compiler-rt everywhere: AMD's tree hard-codes this OFF, upstream defaults it ON on Linux (libomp landed in lib/<triple>/ on linux-aarch64, run 38602918135).
+    "-DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF"
     "-DLLVM_BUILD_TOOLS=ON"
     "-DCLANG_BUILD_TOOLS=ON"
     "-DLLVM_INSTALL_TOOLCHAIN_ONLY=OFF"
@@ -64,7 +66,7 @@ def common-args [src: string, prefix: string, build: string] {
     # The fork clones its SPIR-V translator itself (NAGAGroup/SPIRV-LLVM-
     # Translator); pin the commit: naga/amd-llvm-23, Khronos main 7d4b128d (the
     # parent of AMD's 2026-07-08 merge) + the AdaptiveCpp address-space patch.
-    "-DLLVMSPIRV_COMMIT=3b9a98b10387aa29e8545a724bb3f43b4e4069ec"
+    "-DLLVMSPIRV_COMMIT=a5fa639ff3f550780c34615830f9949bed4cba06"
     "-DOPENMP_ENABLE_LIBOMPTARGET=OFF"
     # libomp must not write into the source tree (exports/), and must not
     # install the libgomp/libiomp5 alias symlinks: libgomp.so.1 would collide

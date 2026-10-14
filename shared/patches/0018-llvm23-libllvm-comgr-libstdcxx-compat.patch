@@ -1,0 +1,54 @@
+llvm: define four libstdc++ symbols that TheRock's libamd_comgr binds in libLLVM
+
+TheRock's libamd_comgr.so.3 was linked against an AMD libLLVM that statically carries newer
+libstdc++ pieces and exports them under LLVM_23.0; comgr binds _Sp_make_shared_tag::_S_eq,
+basic_stringstream/basic_ostringstream constructors and __throw_bad_array_new_length there.
+Our libLLVM does not export them, so librt-backend-hip.so fails to load (linux-64 HIP, run
+38602918135). NagaComgrCompat.cpp defines the same four in LLVMSupport (Linux libstdc++ only).
+
+diff --git a/llvm/lib/Support/CMakeLists.txt b/llvm/lib/Support/CMakeLists.txt
+index 1a3fa39..039910e 100644
+--- a/llvm/lib/Support/CMakeLists.txt
++++ b/llvm/lib/Support/CMakeLists.txt
+@@ -232,6 +232,7 @@ add_llvm_component_library(LLVMSupport
+   MSP430Attributes.cpp
+   MSP430AttributeParser.cpp
+   Mustache.cpp
++  NagaComgrCompat.cpp
+   NativeFormatting.cpp
+   OptimizedStructLayout.cpp
+   Optional.cpp
+diff --git a/b/llvm/lib/Support/NagaComgrCompat.cpp b/llvm/lib/Support/NagaComgrCompat.cpp
+new file mode 100644
+index 0000000..cf6dcd9
+--- /dev/null
++++ b/llvm/lib/Support/NagaComgrCompat.cpp
+@@ -0,0 +1,28 @@
++// TheRock's libamd_comgr.so.3 was linked against an AMD libLLVM built with
++// Red Hat's GCC 13 devtoolset, which statically links libstdc++ pieces newer
++// than the system libstdc++ into every DSO. libLLVM's version script then
++// exports them as LLVM_23.0, and comgr binds four of them there. Define and
++// export the same four from our libLLVM so comgr resolves them.
++#include <cstddef>
++
++#if defined(__linux__) && defined(__GLIBCXX__)
++#include <cstring>
++#include <memory>
++#include <new>
++#include <sstream>
++#include <typeinfo>
++
++namespace std {
++[[noreturn]] void __throw_bad_array_new_length() { throw bad_array_new_length(); }
++
++bool _Sp_make_shared_tag::_S_eq(const type_info &ti) noexcept {
++  if (&ti == &_S_ti())
++    return true;
++  const char *n = ti.name();
++  return n && std::strcmp(n, "St19_Sp_make_shared_tag") == 0;
++}
++} // namespace std
++
++template std::basic_stringstream<char>::basic_stringstream();
++template std::basic_ostringstream<char>::basic_ostringstream();
++#endif

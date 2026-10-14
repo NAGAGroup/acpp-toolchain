@@ -1,14 +1,19 @@
-# acpp-suite: AdaptiveCpp's OWN test suite (tests/) as the test workspace,
-# built and run against the toolchain THROUGH A REAL SOLVE — so run_exports /
-# run_constraints and the channel's repodata get exercised too, not just the
-# files inside packages.
+# acpp-suite: AdaptiveCpp's OWN test suite (tests/) run against the
+# toolchain THROUGH A REAL SOLVE — so run_exports / run_constraints and the
+# channel's repodata get exercised too, not just the files inside packages.
+#
+# The suite is BUILT as two pixi source packages (pkg-omp/, pkg-generic/;
+# `nu suite.nu package`), which compile tests/ against the published
+# toolchain, and RUN in per-backend environments (run-omp, run-ocl, run-cuda)
+# into which `nu suite.nu install` adds the built .conda files (the `suite`
+# feature starts empty and is filled by `pixi add --feature suite <file>`).
 #
 # In CI the suite solves against the PUBLISHED channel: pin-published.nu
-# rewrites this manifest to one platform, drops the local-channel entry and
-# pins every naga-acpp* dependency to the exact version + build number.
-# Locally it still works against the indexed local channel, a relative path:
-# ../../../local-channel is <repo>/local-channel, produced by
-# `pixi run -e dev build`.
+# rewrites this manifest (and the two package manifests) to one platform,
+# drops the local-channel entry and pins every naga-acpp* dependency to the
+# exact version + build number. Locally it still works against the indexed
+# local channel, a relative path: ../../../local-channel is
+# <repo>/local-channel, produced by `pixi run -e dev build`.
 [workspace]
 name = "acpp-suite"
 channels = ["../../../local-channel", "https://prefix.dev/jackm97/naga-labs-staging"]
@@ -16,52 +21,75 @@ channels = ["../../../local-channel", "https://prefix.dev/jackm97/naga-labs-stag
 platforms = ["linux-64", "linux-aarch64", "win-64", "win-arm64", "osx-arm64"]
 
 # ── environments ──────────────────────────────────────────────────────────
-# `default` (run+build) is the normal case: one box compiles the tests AND
-# runs them. `run` alone exists for the win-64 GPU box, which has NO Visual
-# Studio at all — its binaries come pre-built from the VS2026 builder job,
-# and this box only needs the runtime + naga-acpp to execute them.
+# default  just nushell: runs suite.nu (package / install / run / info).
+# build    nushell + the compile toolchain, for `suite.nu boost` and
+#          sanitizer-smoke (the suite itself is built by `pixi publish`).
+# run-*    where the tests EXECUTE: one environment per backend set, so a
+#          test box only installs the runtimes it can use. The built test
+#          packages are added to the `suite` feature at CI time.
 [environments]
-default = ["run", "build"]
-run = ["run"]
+default = ["tools"]
+build = ["tools", "build"]
+run-omp = ["tools", "suite", "run-omp"]
+run-ocl = ["tools", "suite", "run-omp", "run-ocl"]
+run-cuda = ["tools", "suite", "run-omp", "run-cuda"]
 
-# ── run: what EXECUTING the tests needs ─────────────────────────────────
-[feature.run.dependencies]
+[feature.tools.dependencies]
+nushell = "*"
+
+# Filled at CI time by `pixi add --feature suite <abs path to .conda>`.
+[feature.suite.dependencies]
+
+# ── run-omp: what EXECUTING the tests on the CPU (OpenMP) needs ──────────
+[feature.run-omp.dependencies]
 naga-acpp = "*"
 nushell = "*"
 
-[feature.run.target.linux-64.dependencies]
-naga-acpp-runtime-cuda = "*"
-naga-acpp-runtime-ocl = "*"
-naga-acpp-runtime-level-zero = "*"
-naga-acpp-runtime-rocm = "*"
-naga-acpp-compiler-rt = "*"
-# Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
-intel-opencl-rt = "*"
-libboost = "*"
-tbb = "*"
-
-[feature.run.target.linux-aarch64.dependencies]
-naga-acpp-runtime-cuda = "*"
-naga-acpp-runtime-ocl = "*"
+[feature.run-omp.target.linux-64.dependencies]
 naga-acpp-compiler-rt = "*"
 libboost = "*"
 tbb = "*"
 
-[feature.run.target.win-64.dependencies]
-naga-acpp-runtime-cuda = "*"
-naga-acpp-runtime-ocl = "*"
-naga-acpp-runtime-level-zero = "*"
-naga-acpp-runtime-rocm = "*"
+[feature.run-omp.target.linux-aarch64.dependencies]
 naga-acpp-compiler-rt = "*"
+libboost = "*"
+tbb = "*"
+
+[feature.run-omp.target.win-64.dependencies]
+naga-acpp-compiler-rt = "*"
+libboost = "*"
+
+# win-arm64: no libboost (conda-forge has no Boost there; the test packages
+# bring the Boost.Test DLL they were built with).
+
+[feature.run-omp.target.osx-arm64.dependencies]
+libboost = "*"
+
+# ── run-ocl: OpenCL devices ──────────────────────────────────────────────
+[feature.run-ocl.target.linux-64.dependencies]
+naga-acpp-runtime-ocl = "*"
 # Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
 intel-opencl-rt = "*"
-libboost = "*"
 
-[feature.run.target.win-arm64.dependencies]
+[feature.run-ocl.target.linux-aarch64.dependencies]
 naga-acpp-runtime-ocl = "*"
 
-[feature.run.target.osx-arm64.dependencies]
-libboost = "*"
+[feature.run-ocl.target.win-64.dependencies]
+naga-acpp-runtime-ocl = "*"
+intel-opencl-rt = "*"
+
+[feature.run-ocl.target.win-arm64.dependencies]
+naga-acpp-runtime-ocl = "*"
+
+# ── run-cuda: CUDA devices ───────────────────────────────────────────────
+[feature.run-cuda.target.linux-64.dependencies]
+naga-acpp-runtime-cuda = "*"
+
+[feature.run-cuda.target.linux-aarch64.dependencies]
+naga-acpp-runtime-cuda = "*"
+
+[feature.run-cuda.target.win-64.dependencies]
+naga-acpp-runtime-cuda = "*"
 
 # ── build: what COMPILING the tests needs ───────────────────────────────
 [feature.build.dependencies]
@@ -76,16 +104,19 @@ ninja = "*"
 # passes -DLLVM_DIR when it happens to be on the prefix, at no cost.
 [feature.build.target.linux-64.dependencies]
 naga-acpp-clangxx_linux-64 = "*"
+naga-acpp-compiler-rt = "*"
 libboost-devel = "*"
 tbb-devel = "*"
 
 [feature.build.target.linux-aarch64.dependencies]
 naga-acpp-clangxx_linux-aarch64 = "*"
+naga-acpp-compiler-rt = "*"
 libboost-devel = "*"
 tbb-devel = "*"
 
 [feature.build.target.win-64.dependencies]
 naga-acpp-clangxx_win-64 = "*"
+naga-acpp-compiler-rt = "*"
 libboost-devel = "*"
 
 [feature.build.target.win-arm64.dependencies]

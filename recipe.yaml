@@ -22,7 +22,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="edf839996a32d5810d0642783ddabd4d6c00954e") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="058d037dd5eafce500639acdb1342e569eebb033") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -79,6 +79,7 @@ outputs:
       # 38570967283); 0016 adds LLVM_ABI to AMD's heterogeneous-debug
       # additions for the Windows LLVM DLL (run 38570967283); 0017 restores
       # the CurrVNode rename in compiler-rt InstrProfiling.c (run 38577744298).
+      # 0018 defines four libstdc++ symbols comgr binds in libLLVM (linux-64 HIP, run 38602918135).
       # 0013/0015/0016/0017 address AMD-only code or AMD reverts and are not
       # needed upstream (checked with git apply --check / --reverse --check).
       # 0009/0011 (Xcode 26) are already in both trees.
@@ -94,6 +95,7 @@ outputs:
               - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
               - shared/patches/0016-llvm23-amd-missing-llvm-abi.patch
               - shared/patches/0017-compiler-rt-profile-wshadow.patch
+              - shared/patches/0018-llvm23-libllvm-comgr-libstdcxx-compat.patch
         else:
           - url: https://github.com/llvm/llvm-project/archive/3e7a2ec74cd8f8e0e32037d0192a1378789e9af7.tar.gz
             sha256: 2f39f8e805e229b2a10475430a1daad5014079340bfd598bc55c0a31b9650a5b

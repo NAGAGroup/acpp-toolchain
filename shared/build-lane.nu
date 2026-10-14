@@ -46,7 +46,7 @@ def main [] {
   let outdir = ($env.ACPP_OUTPUT_DIR? | default "output")
 
   # ── 1. The mutex, FIRST ───────────────────────────────────────────────────
-  # The staging host takes `naga-acpp-llvm ==<major>`, so the mutex must be
+  # The staging host takes `naga-acpp-llvm ==<lane>` (e.g. 23.0git), so the mutex must be
   # resolvable before the toolchain builds. Built here so everything
   # bootstraps from a clean clone. It goes to its own indexed directory, NOT
   # the output dir, so a stale past artifact can never satisfy a fresh solve.

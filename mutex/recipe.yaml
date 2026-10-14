@@ -1,19 +1,26 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
 #
-# naga-acpp-llvm — the LLVM-major mutex for the naga-acpp toolchain.
+# naga-acpp-llvm — the LLVM-lane mutex for the naga-acpp toolchain.
 #
-# The same naga-acpp version can be built against more than one LLVM major
+# The same naga-acpp version can be built against more than one LLVM lane
 # (e.g. trying a new LLVM without bumping AdaptiveCpp). Every toolchain package
-# depends on the mutex major it was built against, so an environment holds
-# exactly one LLVM major's worth of naga-acpp. Versions are bare majors
-# (`21`), so `naga-acpp-llvm ==21` is the consumer pin. The naga- prefix keeps
-# it from colliding with the old `acpp-llvm` on the public naga-labs channel.
+# depends on the mutex lane it was built against, so an environment holds
+# exactly one lane's worth of naga-acpp. The version is the LLVM ABI lane, NOT
+# just the major: `21` for the released LLVM 21, `23.0git` for the AMD LLVM 23
+# snapshot whose libLLVM soname is libLLVM.so.23.0git (a future 23.x release
+# would not be ABI-compatible with it). The consumer pin is therefore EXACT
+# (`naga-acpp-llvm ==23.0git`).
+# TRAP: conda sorts `23.0git` BELOW `23` and `23.0`, so `==23` and
+# `>=23,<24.0a0` never match it, and a range starting at 23.0git would also
+# accept a later 23.1. Every pin of this package must be an exact `==`.
+# The naga- prefix keeps it from colliding with the old `acpp-llvm` on the
+# public naga-labs channel.
 #
 # NOT naga-acpp-llvm-dev, which ships LLVM/Clang development files.
 
 package:
   name: naga-acpp-llvm
-  version: ${{ llvm_major }}
+  version: ${{ llvm_lane }}
 
 # license_file resolves against the recipe and work dirs only, so the license
 # text is fetched into the work dir. Nothing reaches the prefix.
@@ -25,18 +32,20 @@ build:
   # Contentless and platform-free: one artifact serves every platform.
   noarch: generic
   variant:
-    # llvm_major is consumed in `version:`, not a requirement, so it must be
-    # declared for rattler-build to build one output per listed major.
+    # llvm_lane is consumed in `version:`, not a requirement, so it must be
+    # declared for rattler-build to build one output per listed lane.
     use_keys:
-      - llvm_major
+      - llvm_lane
 
 requirements:
   run_exports:
     # WEAK (python_abi idiom): fires for packages that take the mutex as a
-    # HOST dependency. On a bare-major version the defaults yield
-    # `naga-acpp-llvm >=21,<22.0a0`.
+    # HOST dependency. Written explicitly as an exact version, NOT as
+    # pin_subpackage(..., exact=True): that would also pin this noarch
+    # package's build string and tie every consumer to one mutex build.
+    # Yields `naga-acpp-llvm ==21` / `naga-acpp-llvm ==23.0git`.
     weak:
-      - ${{ pin_subpackage('naga-acpp-llvm') }}
+      - naga-acpp-llvm ==${{ llvm_lane }}
 
 tests:
   - package_contents:
@@ -49,4 +58,4 @@ about:
   homepage: https://github.com/NAGAGroup/AdaptiveCpp
   license: BSD-2-Clause
   license_file: AdaptiveCpp-LICENSE
-  summary: Mutex selecting the LLVM major of the naga-acpp toolchain
+  summary: Mutex selecting the LLVM lane (ABI) of the naga-acpp toolchain

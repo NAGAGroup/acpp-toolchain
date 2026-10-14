@@ -37,16 +37,19 @@ def main [--channel: string = $CHANNEL, --dry-run] {
   let mutex = ($tagged | where {|t| $t.idx.name == $MUTEX_NAME })
   let rest = ($tagged | where {|t| $t.idx.name != $MUTEX_NAME })
 
-  # ── GATE: the mutex version must be a BARE MAJOR ─────────────────────────
-  # `naga-acpp-llvm ==20` is the pin we teach consumers to write. The day this
-  # package ships "20.1.8", that pin matches nothing and every downstream
-  # environment that used it breaks — silently, at solve time, in someone
-  # else's repo. No solve in our own CI would catch it, so it is asserted here
-  # against the artifact about to be uploaded.
+  # ── GATE: the mutex version must be a LANE name ──────────────────────────
+  # A lane is a bare major ("21") or an ABI snapshot lane ("23.0git", the
+  # libLLVM.so.23.0git soname). `naga-acpp-llvm ==23.0git` is the pin we teach
+  # consumers to write, and it must be EXACT: conda sorts 23.0git BELOW 23, so
+  # ranges never match it. The day this package ships e.g. "23.1.0", that pin
+  # matches nothing and every downstream environment that used it breaks —
+  # silently, at solve time, in someone else's repo. No solve in our own CI
+  # would catch it, so it is asserted here against the artifact about to be
+  # uploaded.
   for m in $mutex {
     let v = $m.idx.version
-    if not ($v =~ '^[0-9]+$') {
-      error make {msg: $"publish gate: ($MUTEX_NAME) version must be a bare major, got '($v)' in ($m.path | path basename)"}
+    if not ($v =~ '^([0-9]+|[0-9]+\.[0-9]+git)$') {
+      error make {msg: $"publish gate: ($MUTEX_NAME) version must be a lane name (bare major or <major>.<minor>git), got '($v)' in ($m.path | path basename)"}
     }
   }
   if ($mutex | is-empty) {

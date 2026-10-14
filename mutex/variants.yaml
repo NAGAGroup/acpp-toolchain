@@ -1,7 +1,12 @@
 # Variant config for the naga-acpp-llvm mutex (mutex/recipe.yaml).
 #
-# Every LLVM major the channel carries naga-acpp builds for must stay listed:
+# Every LLVM lane the channel carries naga-acpp builds for must stay listed:
 # the mutex is what a consumer pins, and published toolchain packages depend on
-# their major's mutex existing. Adding a major is a one-line edit here.
-llvm_major:
+# their lane's mutex existing. Adding a lane is a one-line edit here.
+# Lanes are ABI names, not bare majors: "21" (released LLVM 21; keeps the
+# published 21 mutex reproducible) and "23.0git" (AMD LLVM 23 snapshot,
+# libLLVM.so.23.0git). QUOTED on purpose, and pins must be exact (`==`): see
+# the trap noted in recipe.yaml.
+llvm_lane:
   - "21"
+  - "23.0git"

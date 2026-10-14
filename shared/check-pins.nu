@@ -56,7 +56,7 @@ def check-recipe [path: string] {
   $bad
 }
 
-# The mutex host spec must name THIS lane's own major.
+# The mutex host spec must name THIS lane exactly (e.g. `==23.0git`).
 #
 # A bare `naga-acpp-llvm` resolves to the HIGHEST published major, which would pin
 # the release lane to the nightly lane's range — it builds green, publishes
@@ -94,10 +94,11 @@ def check-mutex-spec [recipe: string, platform: string] {
   if ($bare | is-not-empty) {
     return [$"($recipe) [($platform)]: BARE naga-acpp-llvm host spec — resolves to the highest published major, not this lane's"]
   }
-  # Must be pinned to an exact bare major, e.g. "naga-acpp-llvm ==21".
-  let ok = ($specs | all {|s| $s =~ '^naga-acpp-llvm ==[0-9]+$' })
+  # Must be an EXACT lane pin: "naga-acpp-llvm ==21" or "naga-acpp-llvm
+  # ==23.0git". Never a range: conda sorts 23.0git below 23, so ranges miss it.
+  let ok = ($specs | all {|s| $s =~ '^naga-acpp-llvm ==([0-9]+|[0-9]+\.[0-9]+git)$' })
   if not $ok {
-    return [$"($recipe) [($platform)]: mutex host spec is not an exact major pin — got ($specs | str join ', ')"]
+    return [$"($recipe) [($platform)]: mutex host spec is not an exact lane pin — got ($specs | str join ', ')"]
   }
   print $"check-pins: ($recipe) [($platform)] mutex host spec = ($specs | uniq | str join ', ')"
   []

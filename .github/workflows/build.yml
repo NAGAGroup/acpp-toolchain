@@ -652,7 +652,7 @@ jobs:
 
   # ── win-64 ────────────────────────────────────────────────────────────────
   # Backends as the build script has them today (OMP, CUDA, L0, OpenCL); HIP
-  # is PARKED for build 2 (see HIP-PARKED markers). Plumbing carried over from the archived nightly: fast storage,
+  # comes next. Plumbing carried over from the archived nightly: fast storage,
   # pwsh, PATH stripped under cmd.exe's 8191-char limit.
   build-win-64:
     needs: prepare

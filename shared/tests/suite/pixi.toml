@@ -33,8 +33,7 @@ nushell = "*"
 naga-acpp-runtime-cuda = "*"
 naga-acpp-runtime-ocl = "*"
 naga-acpp-runtime-level-zero = "*"
-# HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
-# naga-acpp-runtime-rocm = "*"
+naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
 # Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
 intel-opencl-rt = "*"
@@ -52,8 +51,7 @@ tbb = "*"
 naga-acpp-runtime-cuda = "*"
 naga-acpp-runtime-ocl = "*"
 naga-acpp-runtime-level-zero = "*"
-# HIP-PARKED (build 2): TheRock's libamd_comgr links its own libLLVM.so.23, which cannot coexist with our libLLVM.so.21 in one process
-# naga-acpp-runtime-rocm = "*"
+naga-acpp-runtime-rocm = "*"
 naga-acpp-compiler-rt = "*"
 # Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
 intel-opencl-rt = "*"

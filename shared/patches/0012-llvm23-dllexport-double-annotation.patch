@@ -1,0 +1,123 @@
+llvm23: drop member-level LLVM_ABI / LLVM_ABI_FOR_TEST inside classes that already carry it
+
+clang-cl rejects a dllexport attribute on a member of a dllexport class
+("attribute 'dllexport' cannot be applied to member of 'dllexport' class"):
+VPlan.h hit it 96x on win-64 and 24x on win-arm64 (8 distinct lines, the
+VPWidenLoadEVLRecipe / VPWidenStoreEVLRecipe members). A structural scan of
+llvm/ clang/ lld/ lldb/ clang-tools-extra/ (brace-nesting aware, direct members
+of *_ABI-annotated classes only; `LLVM_ABI friend` declarations excluded as
+they are not members) found the same pattern in VPlan.h (also the debug-only
+dump/printRecipe members), SandboxIR/Region.h (debug-only) and DTLTO.h. The
+class annotation already exports every member, so only the member-level
+annotation is removed.
+
+diff --git a/llvm/include/llvm/DTLTO/DTLTO.h b/llvm/include/llvm/DTLTO/DTLTO.h
+index 6b09b0e..e2e1833 100644
+--- a/llvm/include/llvm/DTLTO/DTLTO.h
++++ b/llvm/include/llvm/DTLTO/DTLTO.h
+@@ -109,7 +109,7 @@ private:
+   /// but before optimization begins. Existing files are overwritten because
+   /// they are likely leftovers from a previously terminated linker process and
+   /// can be safely replaced.
+-  LLVM_ABI Error serializeLTOInputs();
++  Error serializeLTOInputs();
+ 
+   // Remove temporary files created to enable distribution.
+   void cleanup() override;
+diff --git a/llvm/include/llvm/SandboxIR/Region.h b/llvm/include/llvm/SandboxIR/Region.h
+index a8c7d80..25f5d8d 100644
+--- a/llvm/include/llvm/SandboxIR/Region.h
++++ b/llvm/include/llvm/SandboxIR/Region.h
+@@ -189,10 +189,10 @@ public:
+ 
+ #ifndef NDEBUG
+   /// This is an expensive check, meant for testing.
+-  LLVM_ABI bool operator==(const Region &Other) const;
++  bool operator==(const Region &Other) const;
+   bool operator!=(const Region &other) const { return !(*this == other); }
+ 
+-  LLVM_ABI void dump(raw_ostream &OS) const;
++  void dump(raw_ostream &OS) const;
+   void dump() const;
+   friend raw_ostream &operator<<(raw_ostream &OS, const Region &Rgn) {
+     Rgn.dump(OS);
+diff --git a/llvm/lib/Transforms/Vectorize/VPlan.h b/llvm/lib/Transforms/Vectorize/VPlan.h
+index b2d179d..ae92c4e 100644
+--- a/llvm/lib/Transforms/Vectorize/VPlan.h
++++ b/llvm/lib/Transforms/Vectorize/VPlan.h
+@@ -559,7 +559,7 @@ public:
+ 
+ #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+   /// Dump the recipe to stderr (for debugging).
+-  LLVM_ABI_FOR_TEST void dump() const;
++  void dump() const;
+ 
+   /// Print the recipe, delegating to printRecipe().
+   void print(raw_ostream &O, const Twine &Indent,
+@@ -686,7 +686,7 @@ public:
+ 
+ #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+   /// Print this VPSingleDefRecipe to dbgs() (for debugging).
+-  LLVM_ABI_FOR_TEST LLVM_DUMP_METHOD void dump() const;
++  LLVM_DUMP_METHOD void dump() const;
+ #endif
+ };
+ 
+@@ -3867,10 +3867,10 @@ struct LLVM_ABI_FOR_TEST VPWidenLoadEVLRecipe final
+   VPValue *getEVL() const { return getOperand(1); }
+ 
+   /// Generate the wide load or gather.
+-  LLVM_ABI_FOR_TEST void execute(VPTransformState &State) override;
++  void execute(VPTransformState &State) override;
+ 
+   /// Return the cost of this VPWidenLoadEVLRecipe.
+-  LLVM_ABI_FOR_TEST InstructionCost
++  InstructionCost
+   computeCost(ElementCount VF, VPCostContext &Ctx) const override;
+ 
+   /// Returns true if the recipe only uses the first lane of operand \p Op.
+@@ -3883,12 +3883,12 @@ struct LLVM_ABI_FOR_TEST VPWidenLoadEVLRecipe final
+   }
+ 
+ protected:
+-  LLVM_ABI_FOR_TEST VPRecipeBase *getAsRecipe() override;
+-  LLVM_ABI_FOR_TEST const VPRecipeBase *getAsRecipe() const override;
++  VPRecipeBase *getAsRecipe() override;
++  const VPRecipeBase *getAsRecipe() const override;
+ 
+ #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+   /// Print the recipe.
+-  LLVM_ABI_FOR_TEST void printRecipe(raw_ostream &O, const Twine &Indent,
++  void printRecipe(raw_ostream &O, const Twine &Indent,
+                                      VPSlotTracker &SlotTracker) const override;
+ #endif
+ };
+@@ -3972,10 +3972,10 @@ struct LLVM_ABI_FOR_TEST VPWidenStoreEVLRecipe final
+   VPValue *getEVL() const { return getOperand(2); }
+ 
+   /// Generate the wide store or scatter.
+-  LLVM_ABI_FOR_TEST void execute(VPTransformState &State) override;
++  void execute(VPTransformState &State) override;
+ 
+   /// Return the cost of this VPWidenStoreEVLRecipe.
+-  LLVM_ABI_FOR_TEST InstructionCost
++  InstructionCost
+   computeCost(ElementCount VF, VPCostContext &Ctx) const override;
+ 
+   /// Returns true if the recipe only uses the first lane of operand \p Op.
+@@ -3993,12 +3993,12 @@ struct LLVM_ABI_FOR_TEST VPWidenStoreEVLRecipe final
+   }
+ 
+ protected:
+-  LLVM_ABI_FOR_TEST VPRecipeBase *getAsRecipe() override;
+-  LLVM_ABI_FOR_TEST const VPRecipeBase *getAsRecipe() const override;
++  VPRecipeBase *getAsRecipe() override;
++  const VPRecipeBase *getAsRecipe() const override;
+ 
+ #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+   /// Print the recipe.
+-  LLVM_ABI_FOR_TEST void printRecipe(raw_ostream &O, const Twine &Indent,
++  void printRecipe(raw_ostream &O, const Twine &Indent,
+                                      VPSlotTracker &SlotTracker) const override;
+ #endif
+ };

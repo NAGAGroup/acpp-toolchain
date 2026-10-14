@@ -1,0 +1,28 @@
+llvm23: #undef the helper macros OMPKinds.def leaks (AMD 0bace190 defect)
+
+OMPKinds.def defines MemoryAttr(ME), NoCaptureAttr and Indices as local helpers
+for the OMP_RTL attribute/callback tables but never undefines them at the end of
+the file, as it does for every other helper macro. They leak into whatever
+includes the .def next (seen in run 38564796830).
+
+diff --git a/llvm/include/llvm/Frontend/OpenMP/OMPKinds.def b/llvm/include/llvm/Frontend/OpenMP/OMPKinds.def
+index 8c03493..82e87a2 100644
+--- a/llvm/include/llvm/Frontend/OpenMP/OMPKinds.def
++++ b/llvm/include/llvm/Frontend/OpenMP/OMPKinds.def
+@@ -1382,6 +1382,8 @@ __OMP_RTL_ATTRS(__kmpc_is_spmd_exec_mode, AttributeSet(), SExt, ParamAttrs())
+ #undef AllocSizeAttr
+ #undef AllocKindAttr
+ #undef AllocFamilyAttr
++#undef MemoryAttr
++#undef NoCaptureAttr
+ 
+ ///}
+ 
+@@ -1510,6 +1512,7 @@ __OMP_RTL_CB_INFO(__kmpc_for_static_loop_8u, 1, Indices(-1, -1), false)
+ 
+ #undef __OMP_RTL_CB_INFO
+ #undef OMP_RTL_CB_INFO
++#undef Indices
+ 
+ ///}
+ 

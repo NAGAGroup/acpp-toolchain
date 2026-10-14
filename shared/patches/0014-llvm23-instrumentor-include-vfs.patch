@@ -1,0 +1,19 @@
+llvm23: Instrumentor.h must include VirtualFileSystem.h (AMD 0bace190 defect)
+
+InstrumentorPass's LLVM_ABI constructor takes IntrusiveRefCntPtr<vfs::FileSystem>
+by value with a default argument, but only a forward declaration of
+vfs::FileSystem is visible. Under clang-cl's dllexport the retain/release
+instantiation needs the complete type (run 38564796830, win-64 and win-arm64).
+
+diff --git a/llvm/include/llvm/Transforms/IPO/Instrumentor.h b/llvm/include/llvm/Transforms/IPO/Instrumentor.h
+index fceb9e5..d0acae8 100644
+--- a/llvm/include/llvm/Transforms/IPO/Instrumentor.h
++++ b/llvm/include/llvm/Transforms/IPO/Instrumentor.h
+@@ -31,6 +31,7 @@
+ #include "llvm/Support/Allocator.h"
+ #include "llvm/Support/ErrorHandling.h"
+ #include "llvm/Support/StringSaver.h"
++#include "llvm/Support/VirtualFileSystem.h"
+ #include "llvm/Transforms/IPO/InstrumentorUtils.h"
+ #include "llvm/Transforms/Utils/Instrumentation.h"
+ 

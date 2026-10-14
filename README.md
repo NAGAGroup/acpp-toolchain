@@ -211,6 +211,22 @@ pixi run publish-local     # all packages → ./local-channel
 `shared/build.nu` (nushell, cross-platform) owns pinned source acquisition and
 the persistent per-lane CMake build cache; recipes are thin per-package carves.
 
+### Free gates (run before every dispatch)
+
+```sh
+pixi run -e dev check-staging-hash   # staging_inputs hash is current
+pixi run -e dev check-pins           # exact lane-mutex pins, no pin_compatible in staging outputs
+pixi run -e dev render               # render-check the recipe (repeat with -m for each platform's variants)
+pixi run -e smoke configure-smoke    # linux-64: CONFIGURE (never build) the AMD LLVM tree + the fork
+```
+
+`configure-smoke` runs `stage-args` from `shared/build-stage-lib.nu`, the same
+function the staging build uses, against the sources pinned in `recipe.yaml`
+(sources are cached under `/tmp/acpp-configure-smoke`; `--src <dir>` reuses a
+prepared tree). It prints every CMake error and every message containing
+"deprecat". It cannot see the runtimes children (compiler-rt, openmp): those are
+configured mid-build by the just-built clang.
+
 ## License
 
 Toolchain packages: Apache-2.0 WITH LLVM-exception (LLVM, AdaptiveCpp).

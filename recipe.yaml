@@ -24,7 +24,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="d5d79e917afece1917da8823478acf86e11e7b95") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="38ac18330a09edfe738cd33ac9fe8ea8d163d919") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -76,7 +76,9 @@ outputs:
       # upstream's DONT_DEFINE_EPRINTF guard in compiler-rt eprintf.c (osx-arm64,
       # run 38570967283); 0016 adds LLVM_ABI to AMD's heterogeneous-debug
       # additions (DIExprBuilder etc.), which nothing exports from the Windows
-      # LLVM DLL otherwise (win-arm64, run 38570967283).
+      # LLVM DLL otherwise (win-arm64, run 38570967283); 0017 renames the
+      # CurrentVNode local in compiler-rt's InstrProfiling.c that shadows a global
+      # under the kext builtins' -Werror=shadow (osx-arm64, run 38577744298).
       - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
         sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
         target_directory: llvm-project
@@ -86,6 +88,7 @@ outputs:
           - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
           - shared/patches/0015-compiler-rt-eprintf-dont-define.patch
           - shared/patches/0016-llvm23-amd-missing-llvm-abi.patch
+          - shared/patches/0017-compiler-rt-profile-wshadow.patch
       - git: https://github.com/NAGAGroup/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp

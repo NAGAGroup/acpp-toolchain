@@ -1,0 +1,31 @@
+compiler-rt: rename the local CurrentVNode in InstrProfiling.c (AMD 0bace190 defect)
+
+This is the shadow-cleanup half of upstream llvm/llvm-project
+2e9df860468425645dcd1b241c5dbf76c072e314, "[compiler-rt][builtins] Add compiler flags to
+catch potential errors that can lead to security vulnerabilities", for this file only:
+__llvm_profile_reset_counters() declares a local `ValueProfNode *CurrentVNode` that shadows
+the global CurrentVNode (InstrProfilingInternal.h:197), an error under the Darwin kext
+builtins' -Werror=shadow (run 38577744298, osx-arm64, clang_rt.cc_kext_arm64_osx). Upstream
+renames the local to CurrVNode. The commit's InstrProfilingWriter.c rename is already in
+AMD's tree, its CMake flag hunks are already present, and its eprintf.c hunk is patch 0015.
+
+diff --git a/compiler-rt/lib/profile/InstrProfiling.c b/compiler-rt/lib/profile/InstrProfiling.c
+index f45ddf4..d59ec78 100644
+--- a/compiler-rt/lib/profile/InstrProfiling.c
++++ b/compiler-rt/lib/profile/InstrProfiling.c
+@@ -77,11 +77,11 @@ COMPILER_RT_VISIBILITY void __llvm_profile_reset_counters(void) {
+       CurrentVSiteCount += DI->NumValueSites[VKI];
+ 
+     for (i = 0; i < CurrentVSiteCount; ++i) {
+-      ValueProfNode *CurrentVNode = ValueCounters[i];
++      ValueProfNode *CurrVNode = ValueCounters[i];
+ 
+-      while (CurrentVNode) {
+-        CurrentVNode->Count = 0;
+-        CurrentVNode = CurrentVNode->Next;
++      while (CurrVNode) {
++        CurrVNode->Count = 0;
++        CurrVNode = CurrVNode->Next;
+       }
+     }
+   }

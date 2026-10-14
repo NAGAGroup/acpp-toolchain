@@ -156,6 +156,16 @@ def "main run" [
       with-env {PATH: ($prepend | append $env.PATH)} {
         ^$"./($exe_name)" ...$rest
       }
+    } else if $nu.os-info.name == "linux" {
+      # Binaries may have been built in another environment (the linux-64
+      # suite is built on the builder box and run on the GPU box): their
+      # RUNPATH names the BUILDER's env. Put this env's lib dir on the search
+      # path so the conda libraries (acpp-rt, boost, tbb, libstdc++) resolve.
+      let conda_lib = ($env.CONDA_PREFIX? | default "" | path join "lib")
+      let old_ld = ($env.LD_LIBRARY_PATH? | default "")
+      with-env {LD_LIBRARY_PATH: (if $old_ld == "" { $conda_lib } else { $"($conda_lib):($old_ld)" })} {
+        ^$"./($exe_name)" ...$rest
+      }
     } else {
       ^$"./($exe_name)" ...$rest
     }

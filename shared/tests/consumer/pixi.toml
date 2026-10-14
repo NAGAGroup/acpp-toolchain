@@ -1,0 +1,51 @@
+# acpp-consumer: the smallest real CONSUMER of the naga-acpp toolchain — a
+# pixi-build-cmake package with one SYCL single_task source, compiled by the
+# naga-acpp-clang/clangxx activation packages exactly the way a downstream
+# project (CoSpan, SlabKit) does it. `pixi install` BUILDS the package (a real
+# solve through the published channel: compiler stems, run_exports, the exact
+# naga-acpp-llvm lane pin) and `pixi run consumer-run` RUNS the result.
+#
+# In CI pin-published.nu rewrites this manifest: one platform, and every
+# @ACPP_VERSION@ becomes the version just published. Locally (or for the
+# structure-only `pixi lock` gate) put any published version there.
+[workspace]
+name = "acpp-consumer"
+channels = ["https://prefix.dev/jackm97/naga-labs-staging"]
+# ONE line: CI rewrites it
+platforms = ["linux-64"]
+preview = ["pixi-build"]
+
+# Compiler stems resolve to <stem>_<platform> activation packages; their
+# run-exports bring the toolchain. The backend supplies cmake/ninja.
+[workspace.build-variants]
+c_compiler = ["naga-acpp-clang"]
+cxx_compiler = ["naga-acpp-clangxx"]
+c_compiler_version = ["@ACPP_VERSION@"]
+cxx_compiler_version = ["@ACPP_VERSION@"]
+
+[dependencies]
+acpp-consumer = { path = "." }
+
+[tasks]
+# OMP is the backend every test runner has; the consumer is about the
+# toolchain solving, compiling and linking, not about GPUs.
+[tasks.consumer-run]
+cmd = "acpp-consumer-hello"
+env = { ACPP_VISIBILITY_MASK = "omp" }
+
+[package]
+name = "acpp-consumer"
+version = "0.1.0"
+
+[package.build.backend]
+name = "pixi-build-cmake"
+version = "*"
+channels = ["https://prefix.dev/pixi-build-backends"]
+
+[package.host-dependencies]
+# find_package(AdaptiveCpp) needs the toolchain's cmake config in the host env.
+naga-acpp = "==@ACPP_VERSION@"
+# The lane mutex, EXACT: the lane is an ABI name (23.0git sorts below 23, so
+# no range matches it). It also arrives through the toolchain's run_exports;
+# stating it here makes the solve fail loudly if the lane ever moves.
+naga-acpp-llvm = "==23.0git"

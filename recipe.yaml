@@ -2,8 +2,8 @@
 #
 # naga-acpp — the NAGA fork of AdaptiveCpp (NAGAGroup/AdaptiveCpp, naga/develop),
 # built as a complete LLVM toolchain: AdaptiveCpp linked into our own LLVM
-# build (toolchain mode), managed deployment strategy. THE recipe for this
-# repo, edited by hand; there are no other lanes.
+# build (toolchain mode). THE recipe for this repo, edited by hand; there are
+# no other lanes.
 # Version is date-injected (ACPP_NAGA_DATE) and the source is pinned to an
 # explicit fork SHA (ACPP_NAGA_SHA), so a publish names the commit it shipped.
 # The exclusions against the old acpp-* and acpp-*-nightly families stay: those
@@ -22,7 +22,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="6a9c3a19420ff13b0316c083773f134b6d7fba25") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="e97197c88bca4afad3479087211666aa1c4a0e3d") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting

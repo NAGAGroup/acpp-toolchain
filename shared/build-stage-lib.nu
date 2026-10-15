@@ -41,13 +41,10 @@ def common-args [src: string, prefix: string, build: string] {
     "-DLLVM_EXTERNAL_PROJECTS=AdaptiveCpp"
     $"-DLLVM_EXTERNAL_ADAPTIVECPP_SOURCE_DIR=($src)/AdaptiveCpp"
     "-DLLVM_ADAPTIVECPP_LINK_INTO_TOOLS=ON"
-    # conda is the package manager: vendor runtimes come from their own
-    # packages, and the fork writes no deploy manifest.
-    # Managed vendors resolve relative to the install prefix, so their
-    # app-config values become $ACPP_RT_LIB_DIR-relative (fork harness
-    # verify-managed-overrides). Without this they bake the BUILD prefix
-    # (published build 1: D:/rb-output/.../h_env on win-64).
-    # Discovery still finds each vendor where the host env put it.
+    # conda supplies the vendor runtimes from their own packages. A relative
+    # vendor root makes each vendor's app-config value $ACPP_RT_LIB_DIR-relative
+    # instead of baking in the build prefix; discovery still finds each vendor
+    # where the host env put it.
     "-DACPP_CUDA_ROOT=."
     "-DACPP_OCL_ROOT=."
     "-DACPP_ZE_ROOT=."

@@ -1,0 +1,26 @@
+SLP vectorizer: limit the second-pass operand-chain vectorization to the register VF
+
+Backport of three upstream llvm-project commits (dc6825047c42, 33578bd6698a and f77ec648706b; llvm-project #222755, #223016
+and #223053). vectorizeNonVectorizableInsts() runs tryToVectorizeList() over every candidate set; with MaxVFOnly false and a
+large candidate set (32 or more) the scan is quadratic. The added argument limits that second pass to the register VF.
+Our trees still name the parameter LimitToRegisterVF, so the argument comment uses that name. The upstream test
+(AArch64/operand-chains-max-reg-vf.ll) is not carried.
+
+diff --git a/llvm/lib/Transforms/Vectorize/SLPVectorizer.cpp b/llvm/lib/Transforms/Vectorize/SLPVectorizer.cpp
+index 28e665c..b23e6e9 100644
+--- a/llvm/lib/Transforms/Vectorize/SLPVectorizer.cpp
++++ b/llvm/lib/Transforms/Vectorize/SLPVectorizer.cpp
+@@ -33365,7 +33365,12 @@ bool SLPVectorizerPass::vectorizeNonVectorizableInsts(
+   Changed |= tryToVectorizeSequence<Value>(
+       Operands, OperandSorter, AreCompatibleOperands,
+       [this, &R](ArrayRef<Value *> Candidates, bool MaxVFOnly) {
+-        return tryToVectorizeList(Candidates, R, MaxVFOnly);
++        constexpr unsigned Limit = 32;
++        // Limit to StandaloneSeeds if !MaxVFOnly to avoid quadratic scan for
++        // large set of candidates.
++        return tryToVectorizeList(Candidates, R, MaxVFOnly,
++                                  /*LimitToRegisterVF=*/!MaxVFOnly &&
++                                      Candidates.size() >= Limit);
+       },
+       /*MaxVFOnly=*/true, R);
+   return Changed;

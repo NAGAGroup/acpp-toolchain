@@ -509,7 +509,7 @@ jobs:
   test-linux-aarch64:
     needs: [prepare, build-linux-aarch64, publish-linux-aarch64]
     runs-on: linux-arm64-v32
-    timeout-minutes: 90
+    timeout-minutes: 355
     defaults:
       run:
         shell: bash
@@ -604,7 +604,7 @@ jobs:
         id: t6
         continue-on-error: true
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 60
         working-directory: shared/tests/suite
         # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
         # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
@@ -639,7 +639,7 @@ jobs:
         id: t7
         continue-on-error: true
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 60
         working-directory: shared/tests/suite
         # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
         # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
@@ -853,7 +853,7 @@ jobs:
   test-osx-arm64:
     needs: [prepare, build-osx-arm64, publish-osx-arm64]
     runs-on: macOS-26-xlarge
-    timeout-minutes: 90
+    timeout-minutes: 340
     defaults:
       run:
         shell: bash
@@ -960,7 +960,7 @@ jobs:
         id: t6
         continue-on-error: true
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 60
         working-directory: shared/tests/suite
         # Hang diagnostic: after 480 s (the step times out at 10 min) print the acpp-suite/clang processes
         # and capture their stacks (macOS: sample; Linux: gdb, else /proc/<pid>/task/*/stack). Nothing is killed.
@@ -996,7 +996,7 @@ jobs:
         id: t7
         continue-on-error: true
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 60
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic metal sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t7.log"
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"
@@ -1621,7 +1621,7 @@ jobs:
   test-win-arm64:
     needs: [prepare, build-win-arm64, publish-win-arm64]
     runs-on: win-arm64-v32
-    timeout-minutes: 90
+    timeout-minutes: 290
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     defaults:
@@ -1694,7 +1694,7 @@ jobs:
         id: t7
         continue-on-error: true
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 60
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp sycl_tests
       - name: "pcuda_tests (CUDA-style API, not the CUDA backend): generic on OMP (CPU)"

@@ -898,6 +898,15 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
+      - name: "diag: acpp-info under lldb"
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        working-directory: shared/tests/suite
+        env:
+          ACPP_DEBUG_LEVEL: 3
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run -e run-omp lldb --batch -o run -k "thread backtrace all" -k quit -- acpp-info -l 2>&1 | tee "$GITHUB_WORKSPACE/logs/diag-lldb.log"
       # No PSTL on macOS: stdpar needs libstdc++ >= 11 and libc++ is unsupported (doc/stdpar.md); upstream's macos CI skips it too.
       - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         id: t5
@@ -1377,13 +1386,13 @@ jobs:
           sparse-checkout: tests
       - name: Update NVIDIA datacenter driver
         run: |
-          nvidia-smi
+          if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi } else { Write-Host "nvidia-smi not on PATH" }
           $ver = "553.62"
           $url = "https://us.download.nvidia.com/tesla/$ver/$ver-data-center-tesla-desktop-winserver-2022-dch-international.exe"
           Write-Host "Fetching $url"
           curl.exe -sL -o driver.exe $url
           Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait
-          nvidia-smi
+          if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi } else { Write-Host "nvidia-smi not on PATH" }
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           run-install: false

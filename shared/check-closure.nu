@@ -55,9 +55,13 @@ def solve-one [platform: string, channels: list<string>, name: string, version: 
   let chan_lines = ($channels | each {|c| $'"($c)"' } | str join ", ")
   # osx: declare the deployment target to the solver (pixi's default __osx is
   # 13.0; our packages require the variant's c_stdlib_version).
+  # linux-64: packages carry an __archspec x86_64_v3 run requirement (from
+  # x86_64-microarch-level ==3), so the solve must declare it.
   let plat_entry = (if $platform == "osx-arm64" {
     let macos = (open shared/variants/osx-arm64.yaml | get c_stdlib_version | first | into string)
     $'{ platform = "osx-arm64", macos = "($macos)" }'
+  } else if $platform == "linux-64" {
+    '{ platform = "linux-64", archspec = "x86_64_v3" }'
   } else { $'"($platform)"' })
   $'[workspace]
 name = "closure"

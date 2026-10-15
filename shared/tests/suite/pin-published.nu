@@ -4,9 +4,14 @@
 # toolchain the way ../consumer/pin-published.nu does it: one platform, and
 # every @ACPP_VERSION@ set to the version just published.
 def main [platform: string, version: string, build_number: string] {
+  # linux-64 packages need the __archspec x86_64_v3 virtual package declared.
+  let plat = (if $platform == "linux-64" {
+    '{ platform = "linux-64", archspec = "x86_64_v3" }'
+  } else { '"' + $platform + '"' })
+  let plat_line = ('platforms = [' + $plat + ']')
   let f = ($env.FILE_PWD | path join "pixi.toml")
   let out = (open --raw $f
-    | str replace --regex '(?m)^platforms = .*$' $'platforms = ["($platform)"]'
+    | str replace --regex '(?m)^platforms = .*$' $plat_line
     | str replace '"../../../local-channel", ' ''
     | str replace --all --regex '(?m)^(naga-acpp[A-Za-z0-9_-]*) = "\*"' $'${1} = { version = "==($version)", build = "*_($build_number)" }')
   $out | save --force $f
@@ -15,7 +20,7 @@ def main [platform: string, version: string, build_number: string] {
   for pkg in [pkg-generic] {
     let pf = ($env.FILE_PWD | path join $pkg "pixi.toml")
     let pout = (open --raw $pf
-      | str replace --regex '(?m)^platforms = .*$' $'platforms = ["($platform)"]'
+      | str replace --regex '(?m)^platforms = .*$' $plat_line
       | str replace --all '@ACPP_VERSION@' $version)
     $pout | save --force $pf
     print $"($pkg)/pixi.toml: platform ($platform), version ($version)"

@@ -1,6 +1,6 @@
 # Packaging wrapper around AdaptiveCpp's tests/ (copied into ./tests by
-# `suite.nu package`). Identical in pkg-omp/ and pkg-generic/; the pixi.toml
-# selects the configuration through ACPP_SUITE_TARGETS / WITH_*_TESTS.
+# `suite.nu package`). The pixi.toml selects the configuration through
+# ACPP_SUITE_TARGETS / WITH_*_TESTS.
 cmake_minimum_required(VERSION 3.24)
 project(acpp_suite LANGUAGES CXX C)
 

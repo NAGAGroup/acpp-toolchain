@@ -207,24 +207,6 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
-      - name: "diag: SLP compile time on reduction.cpp"
-        id: slpdiag
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 25
-        working-directory: shared/tests/suite
-        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
-        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
-      - name: "build: omp"
-        id: t1
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
       - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         id: t2
         continue-on-error: true
@@ -266,7 +248,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -338,20 +320,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu hip-load-check 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/hip-load.log"
-      - name: "sycl_tests: omp on OMP (CPU)"
-        id: t2
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log"
-      - name: "rt_tests: omp on OMP (CPU)"
+      - name: "rt_tests: generic on OMP (CPU)"
         id: t3
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
+        run: pixi run nu suite.nu run generic omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
@@ -413,7 +388,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -568,57 +543,6 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
-      - name: "diag: SLP compile time on reduction.cpp"
-        id: slpdiag
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 25
-        working-directory: shared/tests/suite
-        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
-        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
-      - name: "build: omp"
-        id: t2
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        # Hang diagnostic: after 10 min, list processes mentioning reduction, then for each clang
-        # driver still compiling reduction.cpp (cc1 runs in-process) take a stack (macOS: sample;
-        # Linux: gdb, else /proc/<pid>/stack + wchan) and send SIGSEGV so clang prints its pass stack.
-        run: |
-          set -o pipefail
-          mkdir -p "$GITHUB_WORKSPACE/logs"
-          ( pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" ) &
-          build_pid=$!
-          (
-            sleep 600
-            echo "omp-hang watchdog: 600 s elapsed; processes mentioning reduction:"
-            ps -eo pid,etime,args | grep -i reduction | grep -v grep || true
-            # the clang driver is the process to inspect: cc1 runs in-process
-            for pid in $(ps -eo pid,args | grep -i clang | grep 'reduction\.cpp' | grep -v grep | awk '{print $1}'); do
-              echo "omp-hang watchdog: pid $pid (clang driver) still compiling reduction.cpp after 600 s"
-              if [ "$(uname)" = "Darwin" ]; then
-                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
-                cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
-              elif command -v gdb > /dev/null 2>&1; then
-                gdb -p "$pid" -batch -ex 'thread apply all bt 30' || true
-              else
-                cat "/proc/$pid/stack" || true
-                cat "/proc/$pid/wchan" || true
-                echo
-              fi
-              kill -SEGV "$pid" || true
-            done
-          ) &
-          watchdog_pid=$!
-          status=0
-          wait "$build_pid" || status=$?
-          pkill -P "$watchdog_pid" 2>/dev/null || true
-          kill "$watchdog_pid" 2>/dev/null || true
-          exit "$status"
       - name: "build: generic (+pstl, +pcuda = CUDA-style API on any backend)"
         id: t5
         continue-on-error: true
@@ -669,20 +593,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
-      - name: "sycl_tests: omp on OMP (CPU)"
-        id: t3
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
-      - name: "rt_tests: omp on OMP (CPU)"
+      - name: "rt_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
+        run: pixi run nu suite.nu run generic omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t6
         continue-on-error: true
@@ -791,7 +708,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -967,7 +884,7 @@ jobs:
       # (and built) against the same floor.
       - name: Pin the macOS floor
         working-directory: shared/tests/suite
-        run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml pkg-omp/pixi.toml pkg-generic/pixi.toml
+        run: sed -i '' 's/^platforms = .*/platforms = [{ platform = "osx-arm64", macos = "26.0" }]/' pixi.toml pkg-generic/pixi.toml
       # Retries: the channel index can lag the upload.
       - name: Install suite environment
         working-directory: shared/tests/suite
@@ -981,57 +898,6 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
-      - name: "diag: SLP compile time on reduction.cpp"
-        id: slpdiag
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 25
-        working-directory: shared/tests/suite
-        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
-        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/logs"
-          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
-      - name: "build: omp"
-        id: t2
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 20
-        working-directory: shared/tests/suite
-        # Hang diagnostic: after 10 min, list processes mentioning reduction, then for each clang
-        # driver still compiling reduction.cpp (cc1 runs in-process) take a stack (macOS: sample;
-        # Linux: gdb, else /proc/<pid>/stack + wchan) and send SIGSEGV so clang prints its pass stack.
-        run: |
-          set -o pipefail
-          mkdir -p "$GITHUB_WORKSPACE/logs"
-          ( pixi run nu suite.nu package omp omp 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t2.log" ) &
-          build_pid=$!
-          (
-            sleep 600
-            echo "omp-hang watchdog: 600 s elapsed; processes mentioning reduction:"
-            ps -eo pid,etime,args | grep -i reduction | grep -v grep || true
-            # the clang driver is the process to inspect: cc1 runs in-process
-            for pid in $(ps -eo pid,args | grep -i clang | grep 'reduction\.cpp' | grep -v grep | awk '{print $1}'); do
-              echo "omp-hang watchdog: pid $pid (clang driver) still compiling reduction.cpp after 600 s"
-              if [ "$(uname)" = "Darwin" ]; then
-                sample "$pid" 10 -file "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
-                cat "$GITHUB_WORKSPACE/logs/omp-hang-sample-$pid.txt" || true
-              elif command -v gdb > /dev/null 2>&1; then
-                gdb -p "$pid" -batch -ex 'thread apply all bt 30' || true
-              else
-                cat "/proc/$pid/stack" || true
-                cat "/proc/$pid/wchan" || true
-                echo
-              fi
-              kill -SEGV "$pid" || true
-            done
-          ) &
-          watchdog_pid=$!
-          status=0
-          wait "$build_pid" || status=$?
-          pkill -P "$watchdog_pid" 2>/dev/null || true
-          kill "$watchdog_pid" 2>/dev/null || true
-          exit "$status"
       # No PSTL on macOS: stdpar needs libstdc++ >= 11 and libc++ is unsupported (doc/stdpar.md); upstream's macos CI skips it too.
       - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         id: t5
@@ -1083,20 +949,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu info 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t1.log"
-      - name: "sycl_tests: omp on OMP (CPU)"
-        id: t3
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp sycl_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t3.log"
-      - name: "rt_tests: omp on OMP (CPU)"
+      - name: "rt_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
+        run: pixi run nu suite.nu run generic omp rt_tests 2>&1 | tee -a "$GITHUB_WORKSPACE/logs/t4.log"
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t6
         continue-on-error: true
@@ -1172,7 +1031,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1434,22 +1293,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs" | Out-Null
           pixi list  | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\logs\pixi-list.txt"
-      - name: "build: omp"
-        id: t1
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        working-directory: shared/tests/suite
-        timeout-minutes: 30
-        run: |
-          $env:PATH = @(
-            "$env:SystemRoot\system32",
-            "$env:SystemRoot",
-            "$env:SystemRoot\System32\Wbem",
-            "$env:SystemRoot\System32\WindowsPowerShell\v1.0",
-            "$env:USERPROFILE\.pixi\bin",
-            "$env:ProgramFiles\Git\cmd"
-          ) -join ";"
-          pixi run nu suite.nu package omp omp
       - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         id: t2
         continue-on-error: true
@@ -1496,7 +1339,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1584,20 +1427,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu hip-load-check
-      - name: "sycl_tests: omp on OMP (CPU)"
-        id: t2
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp sycl_tests
-      - name: "rt_tests: omp on OMP (CPU)"
+      - name: "rt_tests: generic on OMP (CPU)"
         id: t3
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp rt_tests
+        run: pixi run nu suite.nu run generic omp rt_tests
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t4
         continue-on-error: true
@@ -1621,15 +1457,6 @@ jobs:
         timeout-minutes: 10
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu run generic omp pcuda_tests
-      # Intel's CPU OpenCL runtime (conda-forge intel-opencl-rt) is the OpenCL
-      # device here, on x86-64 only.
-      - name: "sycl_tests: generic on OpenCL (Intel CPU)"
-        id: t7
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run generic ocl sycl_tests
       - name: Upload logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -1639,7 +1466,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1834,13 +1661,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE\logs" | Out-Null
           pixi list  | Tee-Object -FilePath "$env:GITHUB_WORKSPACE\logs\pixi-list.txt"
-      - name: "build: omp"
-        id: t3
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 30
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu package omp omp
       - name: "build: generic (+pcuda = CUDA-style API on any backend)"
         id: t6
         continue-on-error: true
@@ -1863,20 +1683,13 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: shared/tests/suite
         run: pixi run nu suite.nu info
-      - name: "sycl_tests: omp on OMP (CPU)"
-        id: t4
-        continue-on-error: true
-        if: ${{ !cancelled() }}
-        timeout-minutes: 10
-        working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp sycl_tests
-      - name: "rt_tests: omp on OMP (CPU)"
+      - name: "rt_tests: generic on OMP (CPU)"
         id: t5
         continue-on-error: true
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         working-directory: shared/tests/suite
-        run: pixi run nu suite.nu run omp omp rt_tests
+        run: pixi run nu suite.nu run generic omp rt_tests
       - name: "sycl_tests: generic on OMP (CPU)"
         id: t7
         continue-on-error: true
@@ -1914,7 +1727,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-*/.pixi/bld/**/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}

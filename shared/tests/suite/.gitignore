@@ -1,4 +1,4 @@
 build/
 .pixi/
-pkg-*/tests/
+pkg-generic/tests/
 pkgs/

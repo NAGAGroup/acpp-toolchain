@@ -2,7 +2,7 @@
 # suite.nu — package, install and run AdaptiveCpp's OWN test suite (tests/)
 # against the INSTALLED naga-acpp channel.
 #
-# The suite is BUILT as pixi source packages (pkg-omp/, pkg-generic/): `package`
+# The suite is BUILT as one pixi source package (pkg-generic/, the generic SSCP flow): `package`
 # copies the fork's tests/ in and runs `pixi publish --target-dir`, which
 # compiles it against the toolchain (compiler activation packages, run_exports,
 # the exact naga-acpp-llvm lane pin) and leaves a .conda under pkgs/<name>/.
@@ -11,7 +11,7 @@
 # installed test binary in the environment that matches the backend mask.
 #
 # Subcommands:
-#   nu suite.nu package <name> <targets>        (omp omp | generic generic; needs ACPP_SRC)
+#   nu suite.nu package generic generic         (needs ACPP_SRC)
 #   nu suite.nu install
 #   nu suite.nu run <name> <mask> <exe> [...rest]
 #   nu suite.nu info
@@ -44,12 +44,12 @@ def current-platform [] {
   }
 }
 
-# The run environments that exist on this platform (see pixi.toml: run-ocl
-# and run-cuda only carry runtimes where the toolchain ships them).
+# The run environments that exist on this platform (see pixi.toml: run-ocl is
+# linux-64 only, run-cuda and run-rocm only carry runtimes where CI tests them).
 def run-envs [] {
   let p = (current-platform)
   mut envs = ["run-omp"]
-  if $p in ["linux-64" "linux-aarch64" "win-64" "win-arm64"] { $envs = ($envs | append "run-ocl") }
+  if $p == "linux-64" { $envs = ($envs | append "run-ocl") }
   if $p in ["linux-64" "linux-aarch64" "win-64"] { $envs = ($envs | append "run-cuda") }
   if $p in ["linux-64" "win-64"] { $envs = ($envs | append "run-rocm") }
   $envs
@@ -57,11 +57,11 @@ def run-envs [] {
 
 # ── package ──────────────────────────────────────────────────────────────
 def "main package" [
-  name: string      # pkg-<name>: omp or generic
-  targets: string   # the ACPP_TARGETS of that package (fixed in its pixi.toml): omp or generic
+  name: string      # pkg-<name>: only generic exists
+  targets: string   # the ACPP_TARGETS of that package (fixed in its pixi.toml): generic
 ] {
-  if $targets != $name {
-    error make {msg: $"suite.nu package: targets '($targets)' does not match package '($name)' — pkg-($name)/pixi.toml fixes ACPP_TARGETS=($name)"}
+  if $name != "generic" or $targets != "generic" {
+    error make {msg: $"suite.nu package: only the generic package exists \(got name '($name)', targets '($targets)'\) — the omp AOT flow is not tested"}
   }
   let acpp_src = ($env.ACPP_SRC? | default "")
   if $acpp_src == "" {
@@ -96,17 +96,20 @@ def "main package" [
 # ── install ──────────────────────────────────────────────────────────────
 def "main install" [] {
   let manifest = (suite-manifest)
-  let pattern = ($env.FILE_PWD | path join "pkgs" "**" "*.conda" | str replace --all '\' '/')
+  # One package: the generic test package.
+  let pattern = ($env.FILE_PWD | path join "pkgs" "generic" "**" "*.conda" | str replace --all '\' '/')
   let pkgs = (glob $pattern)
   if ($pkgs | is-empty) {
-    error make {msg: $"suite.nu install: no .conda under ($env.FILE_PWD)/pkgs — run `nu suite.nu package ...` first"}
+    error make {msg: $"suite.nu install: no .conda under ($env.FILE_PWD)/pkgs/generic — run `nu suite.nu package generic generic` first"}
   }
-  for p in $pkgs {
-    print $"pixi add --feature suite ($p)"
-    ^pixi add --manifest-path $manifest --feature suite --no-install $p
-    if $env.LAST_EXIT_CODE != 0 {
-      error make {msg: $"suite.nu install: pixi add --feature suite ($p) failed with exit code ($env.LAST_EXIT_CODE)"}
-    }
+  if ($pkgs | length) != 1 {
+    error make {msg: $"suite.nu install: expected exactly one .conda under pkgs/generic, found ($pkgs | length): ($pkgs | str join ', ')"}
+  }
+  let p = ($pkgs | first)
+  print $"pixi add --feature suite ($p)"
+  ^pixi add --manifest-path $manifest --feature suite --no-install $p
+  if $env.LAST_EXIT_CODE != 0 {
+    error make {msg: $"suite.nu install: pixi add --feature suite ($p) failed with exit code ($env.LAST_EXIT_CODE)"}
   }
   for e in (run-envs) {
     print $"pixi install -e ($e)"
@@ -119,7 +122,7 @@ def "main install" [] {
 
 # ── run ──────────────────────────────────────────────────────────────────
 def "main run" [
-  name: string       # omp or generic: which test package
+  name: string       # generic: which test package
   mask: string        # ACPP_VISIBILITY_MASK, e.g. "omp", "cuda", "ocl", "omp;cuda"
   exe: string          # test executable: sycl_tests, rt_tests, pstl_tests, pcuda_tests
   ...rest: string      # extra args forwarded to the executable
@@ -234,5 +237,5 @@ def "main boost" [] {
 
 
 def main [] {
-  print "usage: nu suite.nu {package <name> <targets> | install | run <name> <mask> <exe> [...rest] | info | hip-load-check | boost}"
+  print "usage: nu suite.nu {package generic generic | install | run <name> <mask> <exe> [...rest] | info | hip-load-check | boost}"
 }

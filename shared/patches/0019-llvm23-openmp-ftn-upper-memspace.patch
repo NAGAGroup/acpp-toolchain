@@ -10,6 +10,11 @@ the dllexport list (and omp.h's omp_ext_get_active_threads_mask) uses the upper-
 OMP_EXT_GET_ACTIVE_THREADS_MASK, so the win-64 libomp link failed on exactly that one symbol. That line is therefore
 changed (not added) to OMP_EXT_GET_ACTIVE_THREADS_MASK, matching the UAPPEND entry added below.
 
+The dllexports file (the Windows export list, a .def generated from it) gives AMD's omp_ext_get_warp_id ...
+omp_ext_is_spmd_mode the ordinals 810-815, which upstream's omp_get_devices_memspace ... omp_get_devices_allocator
+already own (lines 539-544), so win-64 failed with "duplicate export ordinal: OMP_GET_DEVICES_ALLOCATOR". The six
+AMD entries are renumbered to 824-829, which are unused (the highest upstream ordinal in that block is 823).
+
 diff --git a/openmp/runtime/src/kmp_ftn_os.h b/openmp/runtime/src/kmp_ftn_os.h
 index 7bcadda..2dfeb37 100644
 --- a/openmp/runtime/src/kmp_ftn_os.h
@@ -34,3 +39,26 @@ index 7bcadda..2dfeb37 100644
  #define FTN_INIT_ALLOCATOR OMP_INIT_ALLOCATOR_
  #define FTN_DESTROY_ALLOCATOR OMP_DESTROY_ALLOCATOR_
  #define FTN_SET_DEFAULT_ALLOCATOR OMP_SET_DEFAULT_ALLOCATOR_
+diff --git a/openmp/runtime/src/dllexports b/openmp/runtime/src/dllexports
+index 1c6ef32..134e4ed 100644
+--- a/openmp/runtime/src/dllexports
++++ b/openmp/runtime/src/dllexports
+@@ -589,12 +589,12 @@
+     omp_get_interop_str                     809
+     omp_in_explicit_task                    769
+ 
+-    omp_ext_get_warp_id                     810
+-    omp_ext_get_lane_id                     811
+-    omp_ext_get_active_threads_mask         812
+-    omp_ext_get_master_thread_id            813
+-    omp_ext_get_smid                        814
+-    omp_ext_is_spmd_mode                    815
++    omp_ext_get_warp_id                     824
++    omp_ext_get_lane_id                     825
++    omp_ext_get_active_threads_mask         826
++    omp_ext_get_master_thread_id            827
++    omp_ext_get_smid                        828
++    omp_ext_is_spmd_mode                    829
+ 
+     omp_null_allocator                     DATA
+     omp_default_mem_alloc                  DATA

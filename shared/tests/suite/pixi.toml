@@ -2,14 +2,14 @@
 # toolchain THROUGH A REAL SOLVE — so run_exports / run_constraints and the
 # channel's repodata get exercised too, not just the files inside packages.
 #
-# The suite is BUILT as two pixi source packages (pkg-omp/, pkg-generic/;
-# `nu suite.nu package`), which compile tests/ against the published
+# The suite is BUILT as one pixi source package (pkg-generic/, the generic SSCP
+# flow; `nu suite.nu package`), which compiles tests/ against the published
 # toolchain, and RUN in per-backend environments (run-omp, run-ocl, run-cuda)
 # into which `nu suite.nu install` adds the built .conda files (the `suite`
 # feature starts empty and is filled by `pixi add --feature suite <file>`).
 #
 # In CI the suite solves against the PUBLISHED channel: pin-published.nu
-# rewrites this manifest (and the two package manifests) to one platform,
+# rewrites this manifest (and the package manifest) to one platform,
 # drops the local-channel entry and pins every naga-acpp* dependency to the
 # exact version + build number. Locally it still works against the indexed
 # local channel, a relative path: ../../../local-channel is
@@ -66,21 +66,11 @@ libboost = "*"
 [feature.run-omp.target.osx-arm64.dependencies]
 libboost = "*"
 
-# ── run-ocl: OpenCL devices ──────────────────────────────────────────────
+# ── run-ocl: OpenCL devices (linux-64 only: the only lane CI tests OpenCL on) ──
 [feature.run-ocl.target.linux-64.dependencies]
 naga-acpp-runtime-ocl = "*"
 # Intel CPU OpenCL runtime: the OpenCL test driver on x86-64 (proprietary Intel EULA; test env only)
 intel-opencl-rt = "*"
-
-[feature.run-ocl.target.linux-aarch64.dependencies]
-naga-acpp-runtime-ocl = "*"
-
-[feature.run-ocl.target.win-64.dependencies]
-naga-acpp-runtime-ocl = "*"
-intel-opencl-rt = "*"
-
-[feature.run-ocl.target.win-arm64.dependencies]
-naga-acpp-runtime-ocl = "*"
 
 # ── run-cuda: CUDA devices ───────────────────────────────────────────────
 [feature.run-cuda.target.linux-64.dependencies]

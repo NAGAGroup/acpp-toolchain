@@ -207,6 +207,17 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
+      - name: "diag: SLP compile time on reduction.cpp"
+        id: slpdiag
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 25
+        working-directory: shared/tests/suite
+        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
+        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
       - name: "build: omp"
         id: t1
         continue-on-error: true
@@ -557,6 +568,17 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
+      - name: "diag: SLP compile time on reduction.cpp"
+        id: slpdiag
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 25
+        working-directory: shared/tests/suite
+        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
+        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
       - name: "build: omp"
         id: t2
         continue-on-error: true
@@ -959,6 +981,17 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/logs"
           pixi list  2>&1 | tee "$GITHUB_WORKSPACE/logs/pixi-list.txt"
+      - name: "diag: SLP compile time on reduction.cpp"
+        id: slpdiag
+        continue-on-error: true
+        if: ${{ !cancelled() }}
+        timeout-minutes: 25
+        working-directory: shared/tests/suite
+        # Diagnostic only: compiles reduction.cpp once per SLP-vectorizer variant (300 s cap each) in the
+        # suite `build` env (acpp comes with naga-acpp-clangxx_<platform>) and prints one timing table.
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/logs"
+          pixi run -e build nu slp-diag.nu 2>&1 | tee "$GITHUB_WORKSPACE/logs/slp-diag.log"
       - name: "build: omp"
         id: t2
         continue-on-error: true

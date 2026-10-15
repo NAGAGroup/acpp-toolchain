@@ -5,13 +5,19 @@ and FTN_GET_ACTIVE_THREAD_MASK for all but KMP_FTN_UAPPEND. The users in kmp_*.c
 so builds that select KMP_FTN_UPPER / KMP_FTN_UAPPEND (win-64) fail. Upstream llvm-project 3e7a2ec7 has none of
 these three entries at all; they are AMD additions.
 
+In the KMP_FTN_UPPER block FTN_GET_ACTIVE_THREAD_MASK already exists but is spelled OMP_GETACTIVETHREADMASK, while
+the dllexport list (and omp.h's omp_ext_get_active_threads_mask) uses the upper-case form
+OMP_EXT_GET_ACTIVE_THREADS_MASK, so the win-64 libomp link failed on exactly that one symbol. That line is therefore
+changed (not added) to OMP_EXT_GET_ACTIVE_THREADS_MASK, matching the UAPPEND entry added below.
+
 diff --git a/openmp/runtime/src/kmp_ftn_os.h b/openmp/runtime/src/kmp_ftn_os.h
-index 7bcadda..4b3618e 100644
+index 7bcadda..2dfeb37 100644
 --- a/openmp/runtime/src/kmp_ftn_os.h
 +++ b/openmp/runtime/src/kmp_ftn_os.h
 @@ -447,6 +447,8 @@
  #define FTN_GET_MASTER_THREAD_ID OMP_EXT_GET_MASTER_THREAD_ID
- #define FTN_GET_ACTIVE_THREAD_MASK OMP_GETACTIVETHREADMASK
+-#define FTN_GET_ACTIVE_THREAD_MASK OMP_GETACTIVETHREADMASK
++#define FTN_GET_ACTIVE_THREAD_MASK OMP_EXT_GET_ACTIVE_THREADS_MASK
  #define FTN_CONTROL_TOOL OMP_CONTROL_TOOL
 +#define FTN_GET_MEMSPACE OMP_GET_MEMORY_SPACE
 +#define FTN_DESTROY_MEMSPACE OMP_DESTROY_MEMORY_SPACE

@@ -43,7 +43,6 @@ def common-args [src: string, prefix: string, build: string] {
     "-DLLVM_ADAPTIVECPP_LINK_INTO_TOOLS=ON"
     # conda is the package manager: vendor runtimes come from their own
     # packages, and the fork writes no deploy manifest.
-    "-DACPP_DEPLOYMENT_STRATEGY=managed"
     # Managed vendors resolve relative to the install prefix, so their
     # app-config values become $ACPP_RT_LIB_DIR-relative (fork harness
     # verify-managed-overrides). Without this they bake the BUILD prefix

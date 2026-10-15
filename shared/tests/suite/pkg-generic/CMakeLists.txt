@@ -14,12 +14,13 @@ if(APPLE AND NOT DEFINED OpenMP_ROOT)
   set(OpenMP_ROOT "${CMAKE_INSTALL_PREFIX}")
 endif()
 
-# conda-forge ships no Boost for win-arm64: build Boost.Test from the release
-# CMake tarball (same release as `suite.nu boost`) so the tests'
+# conda-forge ships no Boost for win-arm64: fetch the Boost release CMake
+# tarball (same release as `suite.nu boost`) so the tests'
 # find_package(Boost COMPONENTS unit_test_framework) resolves to it.
-set(ACPP_SUITE_BUILD_BOOST OFF)
+# The tests use the HEADER-ONLY Boost.Test (boost/test/included/unit_test.hpp), so
+# nothing may link Boost::unit_test_framework (that duplicates every Boost.Test
+# symbol); the tests only need the header directories, set below.
 if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64|arm64")
-  set(ACPP_SUITE_BUILD_BOOST ON)
   include(FetchContent)
   set(ACPP_SUITE_BOOST_VERSION "1.92.0")
   set(BOOST_INCLUDE_LIBRARIES test)
@@ -31,6 +32,21 @@ if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64|arm64")
     URL "https://github.com/boostorg/boost/releases/download/boost-${ACPP_SUITE_BOOST_VERSION}/boost-${ACPP_SUITE_BOOST_VERSION}-cmake.tar.xz"
     OVERRIDE_FIND_PACKAGE)
   FetchContent_MakeAvailable(Boost)
+
+  # The overridden find_package() sets no Boost_INCLUDE_DIRS. The tests put
+  # ${Boost_INCLUDE_DIRS} on their include path, so hand them every Boost header
+  # directory of the fetched source (a normal variable, inherited by
+  # add_subdirectory below). boost_SOURCE_DIR is FetchContent's source-dir
+  # variable for the declaration named Boost.
+  file(GLOB ACPP_SUITE_BOOST_INC_DIRS LIST_DIRECTORIES true
+    "${boost_SOURCE_DIR}/libs/*/include"
+    "${boost_SOURCE_DIR}/libs/numeric/*/include")
+  set(Boost_INCLUDE_DIRS "")
+  foreach(dir IN LISTS ACPP_SUITE_BOOST_INC_DIRS)
+    if(IS_DIRECTORY "${dir}")
+      list(APPEND Boost_INCLUDE_DIRS "${dir}")
+    endif()
+  endforeach()
 endif()
 
 add_subdirectory(tests acpp-tests EXCLUDE_FROM_ALL)
@@ -46,14 +62,6 @@ endif()
 foreach(exe IN LISTS ACPP_SUITE_EXES)
   set_target_properties(${exe} PROPERTIES OUTPUT_NAME "acpp-suite-${ACPP_SUITE_TARGETS}-${exe}")
 endforeach()
-
-# The tests find Boost.Test through the overridden find_package, which gives them the include path
-# only; link the fetched Boost.Test library explicitly (win-arm64 builds Boost from source).
-if(ACPP_SUITE_BUILD_BOOST)
-  foreach(exe IN LISTS ACPP_SUITE_EXES)
-    target_link_libraries(${exe} PRIVATE Boost::unit_test_framework)
-  endforeach()
-endif()
 
 add_custom_target(acpp_suite ALL DEPENDS ${ACPP_SUITE_EXES})
 

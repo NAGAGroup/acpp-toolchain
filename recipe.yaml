@@ -167,6 +167,13 @@ outputs:
         # in the variant config.
         - cmake >=3.24
         - ninja
+        # x86-64 microarchitecture level 3 (conda-forge's documented pattern):
+        # its activation injects the -march flags into CFLAGS/CXXFLAGS, which
+        # outer-flag-args and write-build-cfg.nu forward, and its run_exports
+        # add the __archspec lower bound. Only the staging build compiles
+        # code; every other output inherits it. linux-64 only.
+        - if: target_platform == "linux-64"
+          then: x86_64-microarch-level ==3
         # no ccache on conda-forge win-arm64; build-stage.nu only uses it when present
         - if: target_platform != "win-arm64"
           then: ccache

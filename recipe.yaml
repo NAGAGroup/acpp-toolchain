@@ -297,6 +297,14 @@ outputs:
         - if: linux
           then:
             - numactl
+        # SVML + its runtime (libsvml, libintlc) for the x86 Linux host JIT: the
+        # fork's find_library(svml) / find_library(intlc) must find them at
+        # configure time to make svml the default vector math library.
+        # linux-64 only: it is the one platform where the fork defaults to
+        # svml (aarch64 uses libmvec; macOS and Windows use none).
+        - if: target_platform == "linux-64"
+          then:
+            - intel-cmplr-lib-rt
         # AdaptiveCpp's Windows build links Boost (upstream builds it from
         # source with the clang-win toolset; conda-forge ships it prebuilt).
         # NB the clang compiler itself is a BUILD dep (see build: above).
@@ -461,6 +469,11 @@ outputs:
           then:
             - numactl
             - libstdcxx >=13
+        # libsvml / libintlc: the host JIT defaults to svml on linux-64 and
+        # the app config's SVML fallback points at lib/ (-DACPP_SVML_ROOT=lib).
+        - if: target_platform == "linux-64"
+          then:
+            - intel-cmplr-lib-rt
       run_exports:
         # Exact: the version is a date, so it carries no range semantics, and
         # AdaptiveCpp has no stable runtime ABI across commits.

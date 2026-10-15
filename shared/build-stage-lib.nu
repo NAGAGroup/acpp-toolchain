@@ -54,6 +54,9 @@ def common-args [src: string, prefix: string, build: string] {
     # ACPP_HIP_ROOT=. is set only where the ROCm backend is built (linux-64
     # and win-64): see linux-x86-backend-args and windows-args.
     (if (is-windows) { "-DACPP_LIBOMP_ROOT=bin" } else { "-DACPP_LIBOMP_ROOT=lib" })
+    # linux x86_64 only: the host JIT defaults to svml there (intel-cmplr-lib-rt
+    # in lib/), so its app-config fallback is runtime-relative like libomp's.
+    ...(if (not (is-windows)) and (not (is-darwin)) and (not (is-arm)) { ["-DACPP_SVML_ROOT=lib"] } else { [] })
     "-DWITH_CUDA_BACKEND=ON"
     "-DWITH_CPU_BACKEND=ON"
     "-DWITH_ROCM_BACKEND=OFF"

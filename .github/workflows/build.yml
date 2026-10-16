@@ -248,8 +248,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -389,8 +390,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -710,8 +712,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1034,8 +1037,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1343,8 +1347,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1471,8 +1476,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1733,8 +1739,9 @@ jobs:
           if-no-files-found: ignore
           path: |
             logs/
-            shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
-            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/work/build/CMakeFiles/*.log
+            shared/tests/suite/pkg-generic/.pixi/bld/*/*/*.log
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}

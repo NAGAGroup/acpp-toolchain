@@ -22,7 +22,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="933ba248a9c75dec17d18b447ca6e1712b231215") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="b85c09181f35739e9be95212d1d50f087048a3df") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -171,8 +171,8 @@ outputs:
         # its activation injects the -march flags into CFLAGS/CXXFLAGS, which
         # outer-flag-args and write-build-cfg.nu forward, and its run_exports
         # add the __archspec lower bound. Only the staging build compiles
-        # code; every other output inherits it. linux-64 only.
-        - if: target_platform == "linux-64"
+        # code; every other output inherits it. linux-64 and win-64.
+        - if: target_platform == "linux-64" or target_platform == "win-64"
           then: x86_64-microarch-level ==3
         # no ccache on conda-forge win-arm64; build-stage.nu only uses it when present
         - if: target_platform != "win-arm64"
@@ -1740,6 +1740,8 @@ outputs:
         - shellcheck
       run:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        # the helper's activation sets the -march (or /arch) flags for user code
+        - x86_64-microarch-level ==3
         - sysroot_linux-64 >=2.28
         # POINT REPAIR: the activation script sets AR, RANLIB, NM, STRIP, LD
         # and friends to ${CHOST}-<tool>, which are binutils programs, not
@@ -2028,6 +2030,8 @@ outputs:
         - nushell
       run:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        # the helper's activation sets the -march (or /arch) flags for user code
+        - x86_64-microarch-level ==3
         - vs2026_${{ target_platform }}
         - vswhere
         # The activation's link line names clang_rt.builtins-<arch>.lib, which
@@ -2144,6 +2148,8 @@ outputs:
         - nushell
       run:
         - ${{ pin_subpackage('naga-acpp', exact=True) }}
+        # the helper's activation sets the -march (or /arch) flags for user code
+        - x86_64-microarch-level ==3
         - vs2026_${{ target_platform }}
         - vswhere
         # The activation's link line names clang_rt.builtins-<arch>.lib, which

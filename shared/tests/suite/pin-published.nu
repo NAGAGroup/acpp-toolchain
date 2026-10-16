@@ -4,9 +4,9 @@
 # toolchain the way ../consumer/pin-published.nu does it: one platform, and
 # every @ACPP_VERSION@ set to the version just published.
 def main [platform: string, version: string, build_number: string] {
-  # linux-64 packages need the __archspec x86_64_v3 virtual package declared.
-  let plat = (if $platform == "linux-64" {
-    '{ platform = "linux-64", archspec = "x86_64_v3" }'
+  # x86-64 platforms (linux-64, win-64): packages need the __archspec x86_64_v3 virtual package declared.
+  let plat = (if $platform in ["linux-64", "win-64"] {
+    '{ platform = "' + $platform + '", archspec = "x86_64_v3" }'
   } else { '"' + $platform + '"' })
   let plat_line = ('platforms = [' + $plat + ']')
   let f = ($env.FILE_PWD | path join "pixi.toml")

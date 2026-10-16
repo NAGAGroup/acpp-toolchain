@@ -249,6 +249,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -389,6 +390,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -709,6 +711,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1032,6 +1035,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1340,6 +1344,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1467,6 +1472,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}
@@ -1728,6 +1734,7 @@ jobs:
           path: |
             logs/
             shared/tests/suite/pkg-generic/.pixi/bld/**/*.log
+            !shared/tests/suite/pkg-generic/.pixi/bld/**/_deps/**
             shared/tests/consumer/.pixi/**/*.log
       - name: Fail the job if any step failed
         if: ${{ always() }}

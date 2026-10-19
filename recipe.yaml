@@ -101,8 +101,9 @@ outputs:
               - shared/patches/0019-llvm23-openmp-ftn-upper-memspace.patch
               - shared/patches/0020-SLP-limit-second-pass-to-register-VF.patch
         else:
+          # GitHub regenerated the archive for this commit (seen 2026-10-19). The new hash is from two identical direct downloads (276815722 bytes, gzip and tar listing intact).
           - url: https://github.com/llvm/llvm-project/archive/3e7a2ec74cd8f8e0e32037d0192a1378789e9af7.tar.gz
-            sha256: 2f39f8e805e229b2a10475430a1daad5014079340bfd598bc55c0a31b9650a5b
+            sha256: 5501d873701809a2c0a24d52a0a0b533597e4a599015bdfc6bf32095bbdb8e8e
             target_directory: llvm-project
             patches:
               - shared/patches/0012-llvm23-dllexport-double-annotation.patch

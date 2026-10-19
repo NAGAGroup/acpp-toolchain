@@ -1655,7 +1655,8 @@ outputs:
       # The python module is built against the Python LIMITED API
       # (LLDB_ENABLE_PYTHON_LIMITED_API=ON, abi3), so one build serves any
       # CPython >= the limited-API floor (3.8, LLDB_MINIMUM_PYTHON_VERSION in
-      # lldb-python.h) instead of one interpreter version.
+      # lldb-python.h); liblldb itself links libpython<minor>, hence the exact-minor
+      # run requirement below.
       files:
         include:
           - if: unix
@@ -1676,12 +1677,9 @@ outputs:
       run:
         - ${{ pin_subpackage('naga-acpp-runtime', exact=True) }}
 
-        # This package ships the lldb python module, so it needs an
-        # interpreter. The module uses only the Python limited API, so the
-        # requirement is the API floor, NOT python_abi: python's own
-        # run_export (python_abi 3.14.* *_cp314) is ignored below, otherwise
-        # the package would be tied to the exact interpreter it was built with.
-        - python >=3.8
+        # liblldb links libpython3.14 (the `python` variant in shared/variants/*.yaml), so the interpreter's minor version
+        # is pinned; `python >=3.8` let the solver pick 3.15, and lldb then failed to start (libpython3.14.so.1.0 missing).
+        - python 3.14.*
       run_constraints:
         # Same-major window: a different-major lldb cannot collide with ours.
         - lldb <${{ llvm_major }}.0a0|>=${{ llvm_major_next }}.0a0
@@ -1691,7 +1689,7 @@ outputs:
         # By source package; see the note on naga-acpp-runtime. This output is
         # the one that legitimately links libedit, ncurses, xz, libxml2 and
         # libtree-sitter (lldb), so their run_exports are KEPT. python is
-        # ignored (and replaced by `python >=3.8` above): abi3 module.
+        # ignored (and replaced by `python 3.14.*` above).
         from_package:
           - cuda-version
           - cuda-cudart-dev

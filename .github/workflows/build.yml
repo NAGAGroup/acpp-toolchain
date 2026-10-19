@@ -46,9 +46,10 @@ jobs:
       sha: ${{ steps.resolve.outputs.sha }}
       date: ${{ steps.resolve.outputs.date }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: actions/checkout@v7.0.1
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       # rattler-build's staging key ignores sources, patches and the build
@@ -88,17 +89,18 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Disk
         run: df -h / "$GITHUB_WORKSPACE"
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       # Falls back to the archived naga lane's ccache: same LLVM 21.1.8, so a
       # cold build still hits on LLVM objects.
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-linux-64-${{ github.run_id }}
@@ -106,7 +108,7 @@ jobs:
             ccache-linux-64-
             ccache-naga-
       - name: Restore rattler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/rattler/cache
           key: rattler-linux-64-${{ github.run_id }}
@@ -115,7 +117,7 @@ jobs:
       # OUTPUT dir. Keyed on the fork commit too: the staging key does not
       # include the source.
       - name: Restore staging cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: output/build_cache
           key: staging-linux-64-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
@@ -130,23 +132,23 @@ jobs:
           du -sh . || true
       - name: Save staging cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: output/build_cache
           key: staging-linux-64-${{ hashFiles('shared/variants/linux-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
       - name: Save ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-linux-64-${{ github.run_id }}
       - name: Save rattler cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/rattler/cache
           key: rattler-linux-64-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: local-channel-linux-64
           path: local-channel/
@@ -175,17 +177,18 @@ jobs:
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: nproc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       # pixi solves every platform in the manifest; this rewrites it to
       # linux-64, drops the local-channel entry and pins every naga-acpp*
@@ -230,7 +233,7 @@ jobs:
         working-directory: shared/tests/suite
         run: |
           find pkgs -type f -name '*.conda' -exec ls -l {} +
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         id: t5
         continue-on-error: true
         if: ${{ !cancelled() }}
@@ -241,7 +244,7 @@ jobs:
           path: shared/tests/suite/pkgs/**
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-suite-build-linux-64
           retention-days: 14
@@ -275,14 +278,15 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: nproc
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       - run: nvidia-smi
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: suite-linux-64
           path: shared/tests/suite/pkgs
@@ -383,7 +387,7 @@ jobs:
           pixi run consumer-run
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-test-linux-64
           retention-days: 14
@@ -412,13 +416,14 @@ jobs:
     permissions:
       id-token: write # OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: local-channel-linux-64
           path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: "Gate: no conda-forge name collisions"
@@ -446,15 +451,16 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Disk
         run: df -h / "$GITHUB_WORKSPACE"
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-linux-aarch64-${{ github.run_id }}
@@ -462,13 +468,13 @@ jobs:
             ccache-linux-aarch64-
             ccache-arm-release-
       - name: Restore rattler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/rattler/cache
           key: rattler-linux-aarch64-${{ github.run_id }}
           restore-keys: rattler-linux-aarch64-
       - name: Restore staging cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: output/build_cache
           key: staging-linux-aarch64-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
@@ -483,23 +489,23 @@ jobs:
           du -sh . || true
       - name: Save staging cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: output/build_cache
           key: staging-linux-aarch64-${{ hashFiles('shared/variants/linux-aarch64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
       - name: Save ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-linux-aarch64-${{ github.run_id }}
       - name: Save rattler cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/rattler/cache
           key: rattler-linux-aarch64-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: local-channel-linux-aarch64
           path: local-channel/
@@ -520,17 +526,18 @@ jobs:
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: nproc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       - name: Pin the suite to the published linux-aarch64 packages
         run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu linux-aarch64 ${{ needs.build-linux-aarch64.outputs.version }} ${{ inputs.build_number }}
@@ -705,7 +712,7 @@ jobs:
           pixi run consumer-run
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-test-linux-aarch64
           retention-days: 14
@@ -734,13 +741,14 @@ jobs:
     permissions:
       id-token: write # OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: local-channel-linux-aarch64
           path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: "Gate: no conda-forge name collisions"
@@ -794,13 +802,14 @@ jobs:
           rm -rf "$(brew --cache)" || true
           sudo mdutil -a -i off || true
           df -h /
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: actions/checkout@v7.0.1
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-osx-arm64-${{ github.run_id }}
@@ -808,13 +817,13 @@ jobs:
             ccache-osx-arm64-
             ccache-mac-release-
       - name: Restore rattler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ~/Library/Caches/rattler/cache
           key: rattler-osx-arm64-${{ github.run_id }}
           restore-keys: rattler-osx-arm64-
       - name: Restore staging cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: output/build_cache
           key: staging-osx-arm64-${{ hashFiles('shared/variants/osx-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
@@ -829,23 +838,23 @@ jobs:
           du -sh . || true
       - name: Save staging cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: output/build_cache
           key: staging-osx-arm64-${{ hashFiles('shared/variants/osx-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
       - name: Save ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-osx-arm64-${{ github.run_id }}
       - name: Save rattler cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ~/Library/Caches/rattler/cache
           key: rattler-osx-arm64-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: local-channel-osx-arm64
           path: local-channel/
@@ -866,18 +875,19 @@ jobs:
     env:
       ACPP_SRC: ${{ github.workspace }}/acpp-src
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       # macOS has no nproc; sysctl reports the same logical core count.
       - name: Runner core count
         run: sysctl -n hw.logicalcpu
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       # No CUDA/OpenCL/ROCm outputs on osx yet; the activation package
       # (naga-acpp-clangxx_osx-arm64) points clang at the macOS SDK itself
@@ -1030,7 +1040,7 @@ jobs:
           pixi run consumer-run
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-test-osx-arm64
           retention-days: 14
@@ -1059,13 +1069,14 @@ jobs:
     permissions:
       id-token: write # OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: local-channel-osx-arm64
           path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: "Gate: no conda-forge name collisions"
@@ -1094,8 +1105,8 @@ jobs:
       CCACHE_MAXSIZE: 20G
       CCACHE_NOHASHDIR: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
@@ -1185,12 +1196,13 @@ jobs:
             } catch { Write-Warning "ExclusionProcess $n failed: $_" }
           }
           Get-MpPreference | Select-Object ExclusionPath, ExclusionProcess
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-win-64-${{ github.run_id }}
@@ -1199,13 +1211,13 @@ jobs:
             ccache-win-nightly-
             ccache-win-
       - name: Restore rattler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
           key: rattler-win-64-${{ github.run_id }}
           restore-keys: rattler-win-64-
       - name: Restore staging cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
           key: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
@@ -1234,23 +1246,23 @@ jobs:
           }
       - name: Save staging cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
           key: staging-win-64-${{ hashFiles('shared/variants/win-64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
       - name: Save ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-win-64-${{ github.run_id }}
       - name: Save rattler cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
           key: rattler-win-64-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: local-channel-win-64
           path: local-channel/
@@ -1274,17 +1286,18 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       - name: Pin the suite to the published win-64 packages
         run: pixi exec --spec nushell nu shared/tests/suite/pin-published.nu win-64 ${{ needs.build-win-64.outputs.version }} ${{ inputs.build_number }}
@@ -1317,7 +1330,7 @@ jobs:
             "$env:ProgramFiles\Git\cmd"
           ) -join ";"
           pixi run nu suite.nu package generic generic
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         id: t3
         continue-on-error: true
         if: ${{ !cancelled() }}
@@ -1340,7 +1353,7 @@ jobs:
           pixi run consumer-run
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-suite-build-win-64
           retention-days: 14
@@ -1376,10 +1389,10 @@ jobs:
       run:
         shell: powershell # Windows PowerShell: this image has no pwsh, and bash is the WSL stub
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
@@ -1394,12 +1407,13 @@ jobs:
           curl.exe -sL -o driver.exe $url
           Start-Process -FilePath .\driver.exe -ArgumentList "-s","-noreboot" -Wait
           if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi } else { Write-Host "nvidia-smi not on PATH" }
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       # Build-once/run-on-GPU: this box has no VS at all, so the binaries
       # come from build-win-64's VS2026 builder as an artifact.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: suite-win-64
           path: shared/tests/suite/pkgs
@@ -1469,7 +1483,7 @@ jobs:
         run: pixi run nu suite.nu run generic omp pcuda_tests
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-test-win-64
           retention-days: 14
@@ -1498,13 +1512,14 @@ jobs:
     permissions:
       id-token: write # OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: local-channel-win-64
           path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: "Gate: no conda-forge name collisions"
@@ -1533,7 +1548,7 @@ jobs:
       ACPP_NAGA_SHA: ${{ needs.prepare.outputs.sha }}
       ACPP_NAGA_DATE: ${{ needs.prepare.outputs.date }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Select build storage
         run: |
           $root = $null
@@ -1572,18 +1587,19 @@ jobs:
             Add-MpPreference -ExclusionPath $env:ACPP_OUTPUT_DIR, $env:RATTLER_CACHE_DIR -ErrorAction Stop
             Write-Host "Defender exclusions added"
           } catch { Write-Warning "could not add Defender exclusions: $_" }
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: Restore rattler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
           key: rattler-win-arm64-${{ github.run_id }}
           restore-keys: rattler-win-arm64-
       - name: Restore staging cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6.1.0
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
           key: staging-win-arm64-${{ hashFiles('shared/variants/win-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
@@ -1609,17 +1625,17 @@ jobs:
           }
       - name: Save staging cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.ACPP_OUTPUT_DIR }}\build_cache
           key: staging-win-arm64-${{ hashFiles('shared/variants/win-arm64.yaml') }}-${{ needs.prepare.outputs.sha }}-${{ github.run_id }}
       - name: Save rattler cache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6.1.0
         with:
           path: ${{ env.RATTLER_CACHE_DIR }}
           key: rattler-win-arm64-${{ github.run_id }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: local-channel-win-arm64
           path: local-channel/
@@ -1640,17 +1656,18 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Runner core count
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           repository: NAGAGroup/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           run-install: false
       # Only naga-acpp-runtime-ocl exists here besides naga-acpp itself; the
       # per-platform [feature.run.target.win-arm64...] section in pixi.toml
@@ -1732,7 +1749,7 @@ jobs:
           pixi run consumer-run
       - name: Upload logs
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: logs-test-win-arm64
           retention-days: 14
@@ -1761,13 +1778,14 @@ jobs:
     permissions:
       id-token: write # OIDC trusted publishing
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: local-channel-win-arm64
           path: local-channel
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.81.0
           cache: true
           environments: dev
       - name: "Gate: no conda-forge name collisions"

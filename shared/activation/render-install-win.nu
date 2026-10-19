@@ -42,7 +42,8 @@ def final-cflags [target_platform: string] {
 }
 
 def final-cxxflags [target_platform: string] {
-  let base = "-fvisibility-inlines-hidden -std=c++17 -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe"
+  # -std=c++17 is not set here: the language standard comes from the build system, not the activation, and acpp rejects two -std flags.
+  let base = "-fvisibility-inlines-hidden -fmessage-length=0 -march=nocona -mtune=haswell -ftree-vectorize -fstack-protector-strong -O2 -ffunction-sections -pipe"
   if $target_platform == "win-arm64" { $base | str replace "-march=nocona -mtune=haswell " "" } else { $base }
 }
 

@@ -87,8 +87,8 @@ outputs:
       # 0009/0011 (Xcode 26) are already in both trees.
       - if: target_platform == "linux-64" or target_platform == "win-64"
         then:
+          # No sha256: GitHub generates commit archives on demand and their bytes are not stable (this one changed twice in 10-19..10-20). The URL pins the commit; a bad download fails to extract.
           - url: https://github.com/ROCm/llvm-project/archive/0bace1908348b840e6aa1b4b6e12151dae208158.tar.gz
-            sha256: c4dce86d18783db1dfc5c63851d2f96f18ede31279f753dd6da82d4d965553fe
             target_directory: llvm-project
             patches:
               - shared/patches/0012-llvm23-dllexport-double-annotation.patch
@@ -101,9 +101,8 @@ outputs:
               - shared/patches/0019-llvm23-openmp-ftn-upper-memspace.patch
               - shared/patches/0020-SLP-limit-second-pass-to-register-VF.patch
         else:
-          # GitHub regenerated the archive for this commit (seen 2026-10-19). The new hash is from two identical direct downloads (276815722 bytes, gzip and tar listing intact).
+          # No sha256: GitHub generates commit archives on demand and their bytes are not stable (this one changed twice in 10-19..10-20). The URL pins the commit; a bad download fails to extract.
           - url: https://github.com/llvm/llvm-project/archive/3e7a2ec74cd8f8e0e32037d0192a1378789e9af7.tar.gz
-            sha256: 5501d873701809a2c0a24d52a0a0b533597e4a599015bdfc6bf32095bbdb8e8e
             target_directory: llvm-project
             patches:
               - shared/patches/0012-llvm23-dllexport-double-annotation.patch

@@ -4,7 +4,7 @@ Hi all — the conda packaging effort from this thread is now complete and
 productionized. What changed since February:
 
 **New home + new shape.** The packages are now built from
-[NAGAGroup/acpp-toolchain](https://github.com/NAGAGroup/acpp-toolchain) and
+[NAGALabsOrg/acpp-toolchain](https://github.com/NAGALabsOrg/acpp-toolchain) and
 the family got a redesign — it is now a complete, standalone LLVM
 toolchain, not just a SYCL compiler:
 

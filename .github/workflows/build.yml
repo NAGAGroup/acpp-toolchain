@@ -1,4 +1,4 @@
-# build — the one workflow: builds NAGAGroup/AdaptiveCpp (our fork) as the
+# build — the one workflow: builds NAGALabsOrg/AdaptiveCpp (our fork) as the
 # naga-acpp-* conda toolchain and, when asked, publishes to naga-labs-staging.
 #
 # Manual only, with an explicit fork commit: we publish when we have landed
@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       fork_sha:
-        description: "Fork commit or branch to build (NAGAGroup/AdaptiveCpp)"
+        description: "Fork commit or branch to build (NAGALabsOrg/AdaptiveCpp)"
         default: "naga/develop"
         required: true
       platforms:
@@ -64,13 +64,13 @@ jobs:
         run: |
           # Accept a branch name or a short SHA and record the full one, so the
           # published set always names an immutable commit.
-          SHA=$(git ls-remote https://github.com/NAGAGroup/AdaptiveCpp "${{ inputs.fork_sha }}" | head -1 | cut -f1)
+          SHA=$(git ls-remote https://github.com/NAGALabsOrg/AdaptiveCpp "${{ inputs.fork_sha }}" | head -1 | cut -f1)
           if [ -z "$SHA" ]; then SHA="${{ inputs.fork_sha }}"; fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           DATE="${{ inputs.version_date }}"
           if [ -z "$DATE" ]; then DATE=$(date -u +%Y.%m.%d); fi
           echo "date=$DATE" >> "$GITHUB_OUTPUT"
-          echo "::notice title=naga-acpp build::NAGAGroup/AdaptiveCpp@$SHA for: ${{ inputs.platforms }}"
+          echo "::notice title=naga-acpp build::NAGALabsOrg/AdaptiveCpp@$SHA for: ${{ inputs.platforms }}"
 
   # ── linux-64 ──────────────────────────────────────────────────────────────
   build-linux-64:
@@ -182,7 +182,7 @@ jobs:
         run: nproc
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -531,7 +531,7 @@ jobs:
         run: nproc
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -881,7 +881,7 @@ jobs:
         run: sysctl -n hw.logicalcpu
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -1108,7 +1108,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -1291,7 +1291,7 @@ jobs:
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -1394,7 +1394,7 @@ jobs:
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests
@@ -1661,7 +1661,7 @@ jobs:
         run: (Get-CimInstance Win32_Processor | Measure-Object NumberOfLogicalProcessors -Sum).Sum
       - uses: actions/checkout@v7.0.1
         with:
-          repository: NAGAGroup/AdaptiveCpp
+          repository: NAGALabsOrg/AdaptiveCpp
           ref: ${{ needs.prepare.outputs.sha }}
           path: acpp-src
           sparse-checkout: tests

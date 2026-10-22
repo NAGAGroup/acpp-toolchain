@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
 #
-# naga-acpp — the NAGA fork of AdaptiveCpp (NAGAGroup/AdaptiveCpp, naga/develop),
+# naga-acpp — the NAGA fork of AdaptiveCpp (NAGALabsOrg/AdaptiveCpp, naga/develop),
 # built as a complete LLVM toolchain: AdaptiveCpp linked into our own LLVM
 # build (toolchain mode). THE recipe for this repo, edited by hand; there are
 # no other lanes.
@@ -22,7 +22,7 @@ context:
   llvm_lane: "23.0git"
   acpp_version: ${{ env.get("ACPP_NAGA_DATE", default="0.dev0") }}
   # CI passes ACPP_NAGA_SHA; the default is the fork commit this recipe was last validated against.
-  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="0d2a1ef46d87f1a50d9caa64f5163937fb05aa26") }}
+  acpp_commit: ${{ env.get("ACPP_NAGA_SHA", default="6b99e906fcee83751c333bf523fb8584c8a6532d") }}
   # Date-versioned, and like the release lane the LLVM major moves OUT of the
   # version and into the build string. The date stays because the two lanes are
   # separate package families with different contracts, and 2026.x sorting
@@ -108,7 +108,7 @@ outputs:
               - shared/patches/0012-llvm23-dllexport-double-annotation.patch
               - shared/patches/0014-llvm23-instrumentor-include-vfs.patch
               - shared/patches/0020-SLP-limit-second-pass-to-register-VF.patch
-      - git: https://github.com/NAGAGroup/AdaptiveCpp.git
+      - git: https://github.com/NAGALabsOrg/AdaptiveCpp.git
         rev: ${{ acpp_commit }}
         target_directory: AdaptiveCpp
         # No patches: fixes to AdaptiveCpp land in the fork itself.
@@ -2880,4 +2880,4 @@ about:
     - shared/licenses/llvm-LICENSE.TXT
     - shared/licenses/AdaptiveCpp-LICENSE
   summary: AdaptiveCpp SYCL toolchain nightly (develop @ LLVM ${{ llvm_major }}, generic SSCP)
-  repository: https://github.com/NAGAGroup/acpp-toolchain
+  repository: https://github.com/NAGALabsOrg/acpp-toolchain

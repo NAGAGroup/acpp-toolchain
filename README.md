@@ -189,7 +189,7 @@ toolchain from source instead of the channel:
 
 ```toml
 [package.build-dependencies]
-acpp = { git = "https://github.com/NAGAGroup/acpp-toolchain", subdirectory = "release/acpp" }
+acpp = { git = "https://github.com/NAGALabsOrg/acpp-toolchain", subdirectory = "release/acpp" }
 ```
 
 Fair warning: the first resolve compiles LLVM on your machine (hours). The

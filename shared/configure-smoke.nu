@@ -2,7 +2,7 @@
 # LLVM + AdaptiveCpp tree, with the cmake arguments produced by
 # shared/build-stage-lib.nu's `stage-args` (sourced below, not copied), against
 #   * the AMD llvm-project archive pinned in recipe.yaml,
-#   * the NAGAGroup/AdaptiveCpp fork at the recipe's acpp_commit,
+#   * the NAGALabsOrg/AdaptiveCpp fork at the recipe's acpp_commit,
 #   * the OpenCL headers pinned in recipe.yaml and TheRock's linux tarball
 #     (hip_ROOT discovery).
 # It catches option, path and version-gate errors in seconds instead of after
@@ -71,7 +71,7 @@ def main [--src: string = "/tmp/acpp-configure-smoke", --keep-build] {
   fetch-source $rocm ($src | path join rocm-dist) $src
   let acpp = ($src | path join AdaptiveCpp)
   if not ($acpp | path exists) {
-    ^git clone --no-checkout https://github.com/NAGAGroup/AdaptiveCpp.git $acpp
+    ^git clone --no-checkout https://github.com/NAGALabsOrg/AdaptiveCpp.git $acpp
   }
   ^git -C $acpp checkout --quiet $acpp_rev
   let head = (^git -C $acpp rev-parse HEAD | str trim)

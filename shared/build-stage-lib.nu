@@ -62,7 +62,7 @@ def common-args [src: string, prefix: string, build: string] {
     # this build is LLVM 23 (AMD snapshot).
     "-DACPP_EXPERIMENTAL_LLVM=ON"
     $"-DCUDAToolkit_ROOT=($prefix)"
-    # The fork clones its SPIR-V translator itself (NAGAGroup/SPIRV-LLVM-
+    # The fork clones its SPIR-V translator itself (NAGALabsOrg/SPIRV-LLVM-
     # Translator); pin the commit: naga/amd-llvm-23, Khronos main 7d4b128d (the
     # parent of AMD's 2026-07-08 merge) + the AdaptiveCpp address-space patch.
     "-DLLVMSPIRV_COMMIT=a5fa639ff3f550780c34615830f9949bed4cba06"
